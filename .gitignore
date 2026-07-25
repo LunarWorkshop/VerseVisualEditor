@@ -1,0 +1,40 @@
+# Unreal Engine generated directories
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+
+# Packaged plugin output
+/Dist/
+/Packages/
+
+# Visual Studio
+/.vs/
+/*.sln
+/*.suo
+/*.opensdf
+/*.sdf
+/*.VC.db
+/*.VC.opendb
+
+# Visual Studio Code
+/.vscode/
+/*.code-workspace
+
+# JetBrains Rider
+/.idea/
+
+# Local logs and crash artifacts
+/*.log
+/crashinfo--*/
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and backup files
+*~
+*.bak
+*.tmp
+*.user
