@@ -156,6 +156,8 @@ editing without introducing edit state prematurely.
 - Add a Verse folder tree on the left.
 - Add a tabbed editing area on the right.
 - Open a file in a tab when selected in the tree.
+- Expand and scroll the file tree to the active file when tabs are restored,
+  activated outside the tree, or reconciled after a tree refresh.
 - Restore open tabs, the active tab, temporary-tab state, and per-tab vertical
   scroll offsets when the editor window is reopened.
 - Display version-control state independently from document state.

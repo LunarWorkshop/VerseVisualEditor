@@ -32,6 +32,11 @@ private:
 		TSharedPtr<FVerseFileTreeItem> Item,
 		ESelectInfo::Type SelectInfo);
 	void HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item);
+	bool FindTreeItemByPath(
+		TConstArrayView<TSharedPtr<FVerseFileTreeItem>> Items,
+		const FString& FilePath,
+		TSharedPtr<FVerseFileTreeItem>& OutItem);
+	void RevealActiveDocumentInTree();
 	TSharedPtr<SWidget> MakeTreeContextMenu();
 	TSharedPtr<SWidget> MakeRevealContextMenu(FString Path);
 	void RevealInFileExplorer(FString Path);

@@ -156,6 +156,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 	LoadSession();
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
+	RevealActiveDocumentInTree();
 	RegisterDirectoryWatcher();
 }
 
@@ -176,6 +177,7 @@ void SVerseVisualEditor::RefreshFileTree()
 		{
 			FileTree->SetItemExpansion(Root, true);
 		}
+		RevealActiveDocumentInTree();
 	}
 }
 
@@ -217,7 +219,7 @@ void SVerseVisualEditor::HandleTreeSelectionChanged(
 	TSharedPtr<FVerseFileTreeItem> Item,
 	ESelectInfo::Type SelectInfo)
 {
-	if (Item.IsValid() && !Item->bIsDirectory)
+	if (SelectInfo != ESelectInfo::Direct && Item.IsValid() && !Item->bIsDirectory)
 	{
 		OpenDocument(Item->FullPath, true);
 	}
@@ -229,6 +231,46 @@ void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeIt
 	{
 		OpenDocument(Item->FullPath, false);
 	}
+}
+
+bool SVerseVisualEditor::FindTreeItemByPath(
+	TConstArrayView<TSharedPtr<FVerseFileTreeItem>> Items,
+	const FString& FilePath,
+	TSharedPtr<FVerseFileTreeItem>& OutItem)
+{
+	for (const TSharedPtr<FVerseFileTreeItem>& Item : Items)
+	{
+		if (Item->FullPath.Equals(FilePath, ESearchCase::IgnoreCase))
+		{
+			OutItem = Item;
+			return true;
+		}
+
+		if (Item->bIsDirectory && FindTreeItemByPath(Item->Children, FilePath, OutItem))
+		{
+			FileTree->SetItemExpansion(Item, true);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void SVerseVisualEditor::RevealActiveDocumentInTree()
+{
+	if (!FileTree.IsValid() || !ActiveDocument.IsValid())
+	{
+		return;
+	}
+
+	TSharedPtr<FVerseFileTreeItem> TreeItem;
+	if (!FindTreeItemByPath(RootItems, ActiveDocument->FilePath, TreeItem))
+	{
+		return;
+	}
+
+	FileTree->SetSelection(TreeItem, ESelectInfo::Direct);
+	FileTree->RequestScrollIntoView(TreeItem);
 }
 
 TSharedPtr<SWidget> SVerseVisualEditor::MakeTreeContextMenu()
@@ -378,6 +420,7 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 	ActiveDocument = MoveTemp(OpenDocument);
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
+	RevealActiveDocumentInTree();
 	return FReply::Handled();
 }
 
@@ -397,6 +440,7 @@ FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocu
 	}
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
+	RevealActiveDocumentInTree();
 	return FReply::Handled();
 }
 
