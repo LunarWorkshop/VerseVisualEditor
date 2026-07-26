@@ -1,24 +1,23 @@
 # Verse Visual Editor
 
-Verse Visual Editor brings a block-based Verse authoring experience into Unreal
-Editor. It's designed to be as approachable as Blueprint while simultaneously
-exposing the entire language.
+Verse Visual Editor presents Verse code as a visual workspace inspired by both
+Blueprint and block-based programming tools like Scratch.
 
 > Verse Visual Editor is in early development and is not yet ready for
 > production use.
 
 ## About
 
-Verse Visual Editor presents Verse code as a visual workspace inspired by
-Blueprint and block-based programming tools. Verse definitions and expressions
-appear as readable, discoverable blocks with familiar colors, connections, and
-editing controls.
+You're used to coding in Blueprints and you want to keep doing it. This editor
+is designed to preserve that workflow as much as possible.
 
-The editor is intended to prevent invalid edits where possible, surface useful
-compiler feedback close to the affected code, and help users discover the
-values and operations available in the current context. Existing files remain
-ordinary Verse text, and the editor aims to preserve their original formatting
-except where the user makes a change.
+But you also want to load any verse file, not just one made in a graph editor,
+make a change in a graph editor without affecting other lines of code, and
+merge your changes with those of other people.
+
+You can have your cake and eat it too with Verse Visual Editor. It offers a
+Blueprint-like coding interface while using only Verse files as the source of
+truth.
 
 ## Getting Started
 

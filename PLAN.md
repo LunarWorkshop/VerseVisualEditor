@@ -19,6 +19,7 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Project and plugin scaffolding: complete.
 - Lossless document foundation: complete; builds successfully and all
   `VerseVisualEditor.Foundation` automation tests pass.
+- Semantic UTF-8 ownership: pending.
 - Window implementation: pending in the current workspace.
 - Subsequent visual editing steps: pending.
 
@@ -30,14 +31,23 @@ The Verse compiler's syntax and semantic data will be used to understand code,
 but compiler structures will not be trusted to reproduce the original file.
 Each open document will retain:
 
-- The complete original source.
-- Encoding and line-ending information.
+- The complete immutable original source as BOM-free `FUtf8String` data.
+- The original BOM, encoding, and line-ending information.
 - Token, trivia, and source ranges.
 - The source range represented by every visual block.
 
-Editing, saving, and undo/redo will be designed when the first visual
-modification workflow is implemented, with Unreal Editor integration available
-to define their actual requirements.
+Before editing is introduced, source models will use `FVerseByteRange`, which
+contains a byte offset and length. Once editing exists, current blocks,
+selections, diagnostics, and text operations will use `FVerseTextRange`, which
+combines a document revision with an `FVerseByteRange`.
+
+Edited source will be represented by ordered spans into the immutable original
+text and an append-only UTF-8 added-text buffer. Visual operations will produce
+localized text replacements. Visual blocks will be rebuilt from authoritative
+edited source and will never be used to serialize the complete file.
+
+Complete current text will be materialized and cached only when a consumer such
+as parsing, display, copying, compilation, or saving requires it.
 
 A lightweight, error-tolerant source layer will identify supported constructs
 and preserve unsupported regions. It will not attempt to replace the complete
@@ -45,19 +55,20 @@ Verse parser or compiler.
 
 ### Invalid and unsupported code
 
-Parsing or compilation errors must never cause source text to be discarded.
-Recognized constructs will become typed blocks. Invalid, incomplete,
-unsupported, or unrecognized regions will become raw blocks that retain their
-exact source text.
+Parsing or compilation errors must never cause source text to be discarded or
+an edit to be automatically undone. Recognized constructs will become typed
+blocks. Invalid, incomplete, unsupported, or unrecognized regions will become
+raw blocks that retain their exact source text.
 
 Compiler diagnostics may be attached to raw or typed blocks without preventing
-the document from being displayed.
+the document from being displayed or saved.
 
 ### Block design
 
 The implementation will separate:
 
-- Lossless document and source models.
+- Immutable document and source models.
+- Editable source spans and document-session state.
 - Block models representing Verse constructs.
 - Slate widgets responsible for presentation.
 - Shared capabilities such as selection, renaming, movement, deletion, and
@@ -65,6 +76,19 @@ The implementation will separate:
 
 Block types will share small base interfaces. Reusable behavior will be
 composed from capabilities rather than placed into one deep inheritance tree.
+
+### Editing and history
+
+Editing infrastructure will be introduced only when the first visual
+modification is implemented. `FVerseDocument` will remain the immutable source
+owner, `FVerseEditBuffer` will represent current source spans, and
+`FVerseDocumentSession` will coordinate current revisions, parse snapshots,
+saving, dirty state, and history.
+
+Document revisions will increase monotonically after edits, undo, redo, reload,
+or replacement. A separate content-state identifier will identify reusable span
+snapshots for saving and history. Undo and redo will use linear before/after
+span snapshots and will be introduced only after the first editable workflow.
 
 ### Compilation
 
@@ -79,6 +103,7 @@ Compilation requests will:
 - Discard results for obsolete document revisions.
 - Return results to the editor thread before updating Slate state.
 - Populate semantic types, references, and diagnostic locations.
+- Never mutate or discard source because compilation failed.
 
 ### Testing
 
@@ -86,23 +111,41 @@ Lossless source-retention tests are the highest priority. A typical test will:
 
 1. Load a fixture as bytes.
 2. Build the document model.
-3. Compare the retained bytes with the input.
+3. Compare reconstructed bytes with the input.
 4. Verify source views and metadata against the input.
 
 Fixtures will cover comments, whitespace, blank lines, indentation, braces,
 colon syntax, different line endings, incomplete input, invalid input, and
 unsupported syntax. Additional encodings will be added in a later phase.
 
+Each implementation substep must build and pass its focused automation tests
+before the next begins. Infrastructure will be introduced only in the first
+step with a direct consumer.
+
 ## Implementation Steps
 
-Each step should be completed and verified before proceeding to the next.
-
-### 0. Foundation
+### 0. Foundation (complete)
 
 - Create the lossless document model and source-range representation.
 - Preserve original source and raw regions.
 - Create the fixture-based automation test framework.
 - Prove byte-for-byte source retention before implementing visual editing.
+
+### 0.1 Semantic UTF-8 ownership
+
+- Replace persistent `TArray<uint8>` source storage with BOM-free
+  `FUtf8String` storage.
+- Replace `FVerseSourceRange` with reusable `FVerseByteRange` range arithmetic.
+- Track the original UTF-8 BOM independently and reproduce it exactly when
+  reconstructing the file.
+- Retain original line-ending and line-start metadata.
+- Preserve the current raw-region behavior until parse snapshots replace it in
+  Step 2.1.
+- Update foundation tests for exact reconstruction, UTF-8 views, multibyte
+  text, embedded NULs, BOMs, invalid UTF-8, and byte ranges.
+
+This step delivers the UTF-8 representation required by later parsing and
+editing without introducing edit state prematurely.
 
 ### 1. Window
 
@@ -110,30 +153,59 @@ Each step should be completed and verified before proceeding to the next.
 - Add a Verse folder tree on the left.
 - Add a tabbed editing area on the right.
 - Open a file in a tab when selected in the tree.
-- Show edited files using italic yellow names.
-- Track unsaved state and version-control state independently.
+- Display version-control state independently from document state.
 - Monitor files for external changes.
-- Reload externally changed files immediately when no local edits exist.
-- Show a reload-or-keep-local-changes prompt when local edits exist.
+- Reload externally changed files immediately while documents are read-only.
+
+Edited-file styling, unsaved-state tracking, and dirty-file external-change
+prompts are deferred to Step 5.2, when local edits and saving first exist.
 
 ### 2. Global scope view
 
+#### 2.1 Revision-neutral parse snapshot
+
+- Introduce an error-tolerant recognizer interface and
+  `FVerseParseSnapshot`.
+- Move typed and raw source regions out of immutable `FVerseDocument` and into
+  the parse snapshot.
+- Store `FVerseByteRange` on every region.
+- Supply a fallback recognizer that represents the complete source as one exact
+  raw region.
+- Ensure failure, incomplete input, and unsupported input always produce a
+  usable raw snapshot.
+
+This step gives every Verse file a uniform, lossless visual-model input without
+introducing editing concepts.
+
+#### 2.2 Top-level recognition
+
 - Recognize top-level modules, classes, structs, interfaces, enums, functions,
   variables, constants, and type aliases.
-- Represent each recognized definition with a visual block.
+- Emit typed regions for recognized definitions and raw regions for unsupported
+  gaps and unimplemented contents.
+- Preserve complete, ordered source coverage without overlaps or dropped bytes.
+- Add lossless fixtures for supported forms, unsupported syntax, incomplete
+  input, and invalid input.
+
+This step delivers a structural representation independently of Slate.
+
+#### 2.3 Global-scope block presentation
+
+- Convert the Step 2.2 parse snapshot into visual blocks.
 - Stack blocks vertically in source order.
+- Display each definition's name and type.
+- Represent unimplemented contents as raw `unknown` blocks.
 - Add collapse controls and dotted composition guides.
-- Display the definition name and type.
-- Represent the unimplemented contents of each definition as a raw `unknown`
-  block that preserves its exact source.
 - Add graph scrolling, panning, and bounded zooming.
-- Add round-trip fixtures for all recognized top-level forms.
+
+This step delivers the first read-only visual representation of Verse source.
 
 ### 3. Line numbers
 
-- Associate every block with its original source range.
-- Display the corresponding source line numbers in a left margin.
-- Keep line information accurate as localized edits change the document.
+- Associate every block with its parse-snapshot `FVerseByteRange`.
+- Display the corresponding original source line numbers in a left margin.
+- Defer updating line information after localized edits to Step 5.1, where
+  current document revisions first exist.
 
 ### 4. Selection, copying, and properties
 
@@ -141,35 +213,146 @@ Each step should be completed and verified before proceeding to the next.
 - Add Shift-click selection toggling.
 - Select a block and its descendants on double-click.
 - Remove descendants automatically when their parent leaves the selection.
-- Copy the original source represented by selected blocks.
+- Copy immutable source represented by selected blocks' `FVerseByteRange`
+  values.
 - Add equivalent context-menu commands.
 - Add the properties panel and property filter.
 - Show only common properties with matching names and types for multiple
   selection.
 
+Do not add edit transactions or selection-history snapshots until Step 5.
+
 ### 5. Global-scope modifications
+
+#### 5.1 Editable source and revision pipeline
+
+- Keep `FVerseDocument` as the immutable original-source owner.
+- Add `FVerseEditBuffer` containing spans into the immutable original source,
+  an append-only `FUtf8String` added-text buffer, and a current ordered span
+  list.
+- Implement one localized replacement operation that splits and coalesces
+  spans without materializing the complete document.
+- Add monotonically increasing `FVerseDocumentRevision` values.
+- Add `FVerseTextRange`, containing a revision and an `FVerseByteRange`.
+- Add `FVerseDocumentSession` to coordinate the immutable document, edit
+  buffer, current parse snapshot, and current revision.
+- Reject stale ranges, invalid bounds, and edits that split UTF-8 code points.
+- Cache materialized source by revision and invalidate it on every source-state
+  transition.
+- After a replacement, increment the revision and rebuild the error-tolerant
+  parse and block representations from current source.
+- Preserve invalid edits as raw regions rather than rolling them back.
+- Update line numbers and copying to use current revisioned ranges.
+- Test localized replacement, span splitting and coalescing, append-only added
+  storage, cache reuse and invalidation, revision validation, reparsing, and
+  preservation of all unaffected bytes.
+
+This step delivers one tested localized source change through source, parsing,
+blocks, line numbers, and copying.
+
+#### 5.2 Rename and save vertical slice
+
+- Implement renaming as the first visual modification.
+- Convert a rename into one localized replacement of the identifier's current
+  `FVerseTextRange`.
+- Validate identifiers for feedback without preventing invalid text from
+  remaining or being saved.
+- Add `FVerseContentStateId` to identify span states independently of document
+  revisions.
+- Track dirty state against the last successfully saved content state.
+- Save by materializing current UTF-8 once, restoring the original BOM, writing
+  a same-directory temporary file, and replacing the target after a successful
+  write.
+- Preserve existing LF, CRLF, CR, and mixed line-ending bytes without
+  normalizing the complete file.
+- Mark the current content state saved only after replacement succeeds.
+- Keep failed or cancelled saves dirty and retain the previous saved
+  checkpoint.
+- Restore edited-file tab styling, independent dirty and version-control state,
+  and reload-or-keep-local-changes prompts for externally changed dirty files.
+- Test renaming, invalid identifiers, atomic save failure, BOM and line-ending
+  preservation, dirty transitions, and external-change behavior.
+
+This step delivers the first complete edit-and-save workflow.
+
+#### 5.3 Undo and redo
+
+- Add linear command history using lightweight before and after span snapshots
+  that share the original and added UTF-8 buffers.
+- Store revisioned selected ranges plus caret and anchor offsets with each
+  command.
+- On undo or redo, restore the corresponding spans, allocate a new monotonically
+  increasing document revision, invalidate materialized source, reparse, rebuild
+  blocks, and restore selection state.
+- Discard the redo tail when a new edit follows undo.
+- Keep history after saving.
+- Use `FVerseContentStateId` so undoing away from the saved state becomes dirty
+  and redoing back to it becomes clean.
+- Test source, block, revision, selection, and saved-state restoration.
+
+This step makes the existing rename workflow safely reversible.
+
+#### 5.4 Atomic multi-edit transactions
+
+- Generalize the single replacement operation into
+  `FVerseEditTransaction`.
+- Give each transaction a description, one or more localized edits, and before
+  and after selection state.
+- Require every edit to target the same current revision.
+- Validate the complete transaction before changing source state.
+- Reject overlapping edits and invalid UTF-8 boundaries without partial
+  application.
+- Apply edits in descending byte order or with an equivalent one-pass span
+  rewrite.
+- Record the complete transaction as one undo step.
+- Test multiple edits, stale revisions, overlaps, failed atomic validation, and
+  one-command/one-undo behavior.
+
+This step supplies compound editing only when later visual operations need it.
+
+#### 5.5 Insertion and deletion
 
 - Add insertion controls between global definitions.
 - Offer every supported global definition type.
 - Create definitions with an automatically focused name field.
-- Validate identifiers without preventing the file from being saved.
-- Support renaming by double-click, context menu, F2, and properties.
-- Add deletion.
+- Generate the smallest required Verse fragment using the local line-ending and
+  indentation context.
+- Express insertion as a zero-length revisioned range.
+- Delete a definition's exact current range plus only the separator trivia
+  assigned by the command's documented policy.
+- Preserve every unaffected byte and reparse after each transaction.
+- Treat each insertion or deletion as one undo step.
+- Add lossless insertion and deletion fixtures.
+
+This step delivers creation and removal without introducing source
+regeneration.
+
+#### 5.6 Reordering
+
 - Allow valid contiguous selections to be reordered by dragging.
-- Preserve all unaffected source text during every modification.
+- Move the selected current-source range through one atomic delete-and-insert
+  transaction without regenerating its contents.
+- Preserve the selection's formatting and internal raw regions exactly.
+- Reject destinations inside the moved range or outside the valid scope.
+- Restore selection to the moved definitions after reparsing.
+- Treat the complete move as one undo step.
+- Test byte preservation and invalid destination rejection.
 
-#### 5.1 Undo/Redo
-
-- Support undo and redo (will need a new plan)
+This step delivers lossless definition movement using the transaction support
+introduced immediately beforehand.
 
 ### 6. Compile errors
 
 - Add continuous, compile-on-save, and manual compilation modes.
-- Debounce continuous compilation.
-- Map structured diagnostics to source ranges and blocks.
+- Compile materialized source for a specified document revision.
+- Run asynchronously and debounce continuous compilation.
+- Map structured diagnostics to revisioned `FVerseTextRange` values and current
+  blocks.
 - Highlight affected blocks in red.
 - Display messages in the margin.
 - Ignore compilation results for superseded document revisions.
+- Never mutate, undo, or discard source because compilation failed.
+- Test stale-result rejection and diagnostic mapping.
 
 ### 7. Enum contents
 
@@ -282,6 +465,22 @@ Each step should be completed and verified before proceeding to the next.
 - Display main and nested execution paths distinctly.
 - Preserve and expose supported formatting variations.
 - Add whitespace properties for choosing among supported block styles.
+
+All editing features in Steps 7 through 19 must reuse localized revisioned
+replacements, atomic transactions, span-snapshot undo and redo, saved
+content-state tracking, and error-tolerant reparsing. They must not introduce a
+second serialization, editing, or history path.
+
+## Deferred Optimizations
+
+The initial editing implementation will prioritize correctness and complete
+lossless tests. The following are deferred until profiling or product
+requirements justify them:
+
+- Balanced piece trees or ropes.
+- Added-text buffer compaction.
+- Undo-history memory limits and pruning.
+- Branching undo history.
 
 ## Future Extensions
 
