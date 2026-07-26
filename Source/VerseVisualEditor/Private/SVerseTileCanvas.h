@@ -9,10 +9,10 @@ class SScrollBar;
 class SScrollBox;
 
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
-class SVerseBlockGraph final : public SCompoundWidget
+class SVerseTileCanvas final : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseBlockGraph) {}
+	SLATE_BEGIN_ARGS(SVerseTileCanvas) {}
 	SLATE_END_ARGS()
 
 	void Construct(
@@ -28,10 +28,10 @@ public:
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 
 private:
-	TSharedRef<SWidget> BuildBlockList();
-	TSharedRef<SWidget> BuildBlock(const struct FVerseVisualBlock& Block);
-	TSharedRef<SWidget> BuildTileBlock(const struct FVerseVisualBlock& Block);
-	TSharedRef<SWidget> BuildCompactBlock(const struct FVerseVisualBlock& Block);
+	TSharedRef<SWidget> BuildTileRow();
+	TSharedRef<SWidget> BuildTile(const struct FVerseVisualTile& Tile);
+	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile);
+	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile);
 	FText Decode(FVerseByteRange Range) const;
 
 	TOptional<FVerseParseSnapshot> Snapshot;

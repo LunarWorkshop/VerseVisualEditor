@@ -1,6 +1,6 @@
 #include "SVerseVisualEditor.h"
 
-#include "SVerseBlockGraph.h"
+#include "SVerseTileCanvas.h"
 
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
@@ -39,7 +39,7 @@ struct FOpenVerseDocument
 	FText LoadError;
 	bool bIsTemporary = false;
 	float ScrollOffset = 0.0f;
-	TSharedPtr<SVerseBlockGraph> BlockGraph;
+	TSharedPtr<SVerseTileCanvas> TileCanvas;
 };
 
 namespace
@@ -569,8 +569,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			.FillHeight(1.0f)
 			[
 				SAssignNew(
-					ActiveDocument->BlockGraph,
-					SVerseBlockGraph,
+					ActiveDocument->TileCanvas,
+					SVerseTileCanvas,
 					ActiveDocument->ParseSnapshot.GetValue(),
 					ActiveDocument->ScrollOffset)
 			]
@@ -579,10 +579,10 @@ void SVerseVisualEditor::RefreshActiveDocument()
 
 void SVerseVisualEditor::CaptureActiveScrollOffset()
 {
-	if (ActiveDocument.IsValid() && ActiveDocument->BlockGraph.IsValid())
+	if (ActiveDocument.IsValid() && ActiveDocument->TileCanvas.IsValid())
 	{
-		ActiveDocument->ScrollOffset = ActiveDocument->BlockGraph->GetVerticalScrollOffset();
-		ActiveDocument->BlockGraph.Reset();
+		ActiveDocument->ScrollOffset = ActiveDocument->TileCanvas->GetVerticalScrollOffset();
+		ActiveDocument->TileCanvas.Reset();
 	}
 }
 

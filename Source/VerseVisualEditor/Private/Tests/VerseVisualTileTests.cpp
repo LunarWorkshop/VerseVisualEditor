@@ -1,13 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseVisualBlock.h"
+#include "VerseVisualTile.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
-namespace VerseVisualBlockTests
+namespace VerseVisualTileTests
 {
 	TSharedPtr<FVerseDocument> LoadPluginFile(FAutomationTestBase& Test, const FString& RelativePath)
 	{
@@ -34,13 +34,13 @@ namespace VerseVisualBlockTests
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVerseGlobalScopeBlockPresentationTest,
-	"VerseVisualEditor.Foundation.VisualBlocks.GlobalScopePresentation",
+	FVerseGlobalScopeTilePresentationTest,
+	"VerseVisualEditor.Foundation.VisualTiles.GlobalScopePresentation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
+bool FVerseGlobalScopeTilePresentationTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FVerseDocument> Document = VerseVisualBlockTests::LoadFixture(
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
 		*this,
 		TEXT("top_level_supported.verse"));
 	if (!Document.IsValid())
@@ -49,8 +49,8 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 	}
 
 	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
-	const TArray<FVerseVisualBlock> Blocks = FVerseVisualBlockBuilder::Build(Snapshot);
-	if (!TestEqual(TEXT("Nine definitions and two meaningful raw regions are presented"), Blocks.Num(), 11))
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot);
+	if (!TestEqual(TEXT("Nine definitions and two meaningful raw regions are presented"), Tiles.Num(), 11))
 	{
 		return false;
 	}
@@ -62,51 +62,51 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 	bool bFoundUnsupportedUsing = false;
 	bool bFunctionBodyExcludesDefinition = false;
 	bool bEmptyClassHasEmptyBody = false;
-	for (int32 Index = 0; Index < Blocks.Num(); ++Index)
+	for (int32 Index = 0; Index < Tiles.Num(); ++Index)
 	{
-		const FVerseVisualBlock& Block = Blocks[Index];
-		TestTrue(*FString::Printf(TEXT("Block %d has a source range"), Index), Block.Range.IsSet());
-		TestTrue(*FString::Printf(TEXT("Block %d follows its predecessor"), Index), Block.Range.BeginByte >= PreviousEnd);
-		PreviousEnd = Block.Range.EndByte();
+		const FVerseVisualTile& Tile = Tiles[Index];
+		TestTrue(*FString::Printf(TEXT("Tile %d has a source range"), Index), Tile.Range.IsSet());
+		TestTrue(*FString::Printf(TEXT("Tile %d follows its predecessor"), Index), Tile.Range.BeginByte >= PreviousEnd);
+		PreviousEnd = Tile.Range.EndByte();
 
-		if (Block.Kind == EVerseVisualBlockKind::Definition)
+		if (Tile.Kind == EVerseVisualTileKind::Definition)
 		{
 			++DefinitionCount;
-			TestTrue(*FString::Printf(TEXT("Block %d has a definition kind"), Index), !Block.DefinitionKind.IsNone());
-			TestTrue(*FString::Printf(TEXT("Block %d has a name"), Index), Block.NameRange.IsSet());
-			if (Block.DefinitionKind == VerseSyntaxKind::Function)
+			TestTrue(*FString::Printf(TEXT("Tile %d has a definition kind"), Index), !Tile.DefinitionKind.IsNone());
+			TestTrue(*FString::Printf(TEXT("Tile %d has a name"), Index), Tile.NameRange.IsSet());
+			if (Tile.DefinitionKind == VerseSyntaxKind::Function)
 			{
-				const FUtf8StringView Body = Snapshot.GetSourceView(Block.BodyRange);
+				const FUtf8StringView Body = Snapshot.GetSourceView(Tile.BodyRange);
 				bFunctionBodyExcludesDefinition = Body.Find(UTF8TEXTVIEW("Input")) != INDEX_NONE
 					&& Body.Find(UTF8TEXTVIEW("ExampleFunction")) == INDEX_NONE;
 			}
-			else if (Block.DefinitionKind == VerseSyntaxKind::Class)
+			else if (Tile.DefinitionKind == VerseSyntaxKind::Class)
 			{
-				bEmptyClassHasEmptyBody = Block.BodyRange.IsSet()
-					&& Snapshot.GetSourceView(Block.BodyRange).IsEmpty();
+				bEmptyClassHasEmptyBody = Tile.BodyRange.IsSet()
+					&& Snapshot.GetSourceView(Tile.BodyRange).IsEmpty();
 			}
 		}
-		else if (Block.Kind == EVerseVisualBlockKind::Comment)
+		else if (Tile.Kind == EVerseVisualTileKind::Comment)
 		{
 			++CommentCount;
-			TestEqual(*FString::Printf(TEXT("Comment block %d has no definition kind"), Index), Block.DefinitionKind, NAME_None);
-			TestFalse(*FString::Printf(TEXT("Comment block %d has no name"), Index), Block.NameRange.IsSet());
+			TestEqual(*FString::Printf(TEXT("Comment tile %d has no definition kind"), Index), Tile.DefinitionKind, NAME_None);
+			TestFalse(*FString::Printf(TEXT("Comment tile %d has no name"), Index), Tile.NameRange.IsSet());
 			TestTrue(
-				*FString::Printf(TEXT("Comment block %d retains comment text"), Index),
-				Snapshot.GetSourceView(Block.Range).Find(UTF8TEXTVIEW("#")) != INDEX_NONE);
+				*FString::Printf(TEXT("Comment tile %d retains comment text"), Index),
+				Snapshot.GetSourceView(Tile.Range).Find(UTF8TEXTVIEW("#")) != INDEX_NONE);
 		}
 		else
 		{
 			++UnknownCount;
-			TestEqual(*FString::Printf(TEXT("Unknown block %d has no definition kind"), Index), Block.DefinitionKind, NAME_None);
-			TestFalse(*FString::Printf(TEXT("Unknown block %d has no name"), Index), Block.NameRange.IsSet());
-			TestFalse(*FString::Printf(TEXT("Unknown block %d has no type"), Index), Block.TypeRange.IsSet());
-			bFoundUnsupportedUsing |= Snapshot.GetSourceView(Block.Range).Find(UTF8TEXTVIEW("using")) != INDEX_NONE;
+			TestEqual(*FString::Printf(TEXT("Unknown tile %d has no definition kind"), Index), Tile.DefinitionKind, NAME_None);
+			TestFalse(*FString::Printf(TEXT("Unknown tile %d has no name"), Index), Tile.NameRange.IsSet());
+			TestFalse(*FString::Printf(TEXT("Unknown tile %d has no type"), Index), Tile.TypeRange.IsSet());
+			bFoundUnsupportedUsing |= Snapshot.GetSourceView(Tile.Range).Find(UTF8TEXTVIEW("using")) != INDEX_NONE;
 		}
 	}
 
 	TestEqual(TEXT("Every supported definition is presented"), DefinitionCount, 9);
-	TestEqual(TEXT("Known source comment has a dedicated block"), CommentCount, 1);
+	TestEqual(TEXT("Known source comment has a dedicated tile"), CommentCount, 1);
 	TestEqual(TEXT("Only unsupported syntax remains unknown"), UnknownCount, 1);
 	TestTrue(TEXT("Unsupported using expression retains its source range"), bFoundUnsupportedUsing);
 	TestTrue(TEXT("Function tile body excludes its surrounding definition"), bFunctionBodyExcludesDefinition);
@@ -115,13 +115,13 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVerseRawBlockPresentationTest,
-	"VerseVisualEditor.Foundation.VisualBlocks.RawFallback",
+	FVerseRawTilePresentationTest,
+	"VerseVisualEditor.Foundation.VisualTiles.RawFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FVerseRawBlockPresentationTest::RunTest(const FString& Parameters)
+bool FVerseRawTilePresentationTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FVerseDocument> Document = VerseVisualBlockTests::LoadFixture(
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
 		*this,
 		TEXT("top_level_error_tolerance.verse"));
 	if (!Document.IsValid())
@@ -130,23 +130,23 @@ bool FVerseRawBlockPresentationTest::RunTest(const FString& Parameters)
 	}
 
 	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
-	const TArray<FVerseVisualBlock> Blocks = FVerseVisualBlockBuilder::Build(Snapshot);
-	if (TestEqual(TEXT("Failed parsing still produces one visual block"), Blocks.Num(), 1))
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot);
+	if (TestEqual(TEXT("Failed parsing still produces one visual tile"), Tiles.Num(), 1))
 	{
-		TestTrue(TEXT("Failed parsing is presented as unknown"), Blocks[0].Kind == EVerseVisualBlockKind::Unknown);
-		TestEqual(TEXT("Unknown block retains the complete source range"), Blocks[0].Range, Document->GetWholeOriginalRange());
+		TestTrue(TEXT("Failed parsing is presented as unknown"), Tiles[0].Kind == EVerseVisualTileKind::Unknown);
+		TestEqual(TEXT("Unknown tile retains the complete source range"), Tiles[0].Range, Document->GetWholeOriginalRange());
 	}
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseGlobalScopeDevelopmentCorpusTest,
-	"VerseVisualEditor.Foundation.VisualBlocks.DevelopmentCorpus",
+	"VerseVisualEditor.Foundation.VisualTiles.DevelopmentCorpus",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FVerseDocument> Document = VerseVisualBlockTests::LoadPluginFile(
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadPluginFile(
 		*this,
 		TEXT("Content/TestCorpus/GlobalScopeCorpus.verse"));
 	if (!Document.IsValid())
@@ -155,21 +155,21 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	}
 
 	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
-	const TArray<FVerseVisualBlock> Blocks = FVerseVisualBlockBuilder::Build(Snapshot);
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot);
 	TMap<FName, int32> DefinitionCounts;
 	int32 CommentCount = 0;
 	int32 UnknownCount = 0;
-	TArray<const FVerseVisualBlock*> Comments;
-	for (const FVerseVisualBlock& Block : Blocks)
+	TArray<const FVerseVisualTile*> Comments;
+	for (const FVerseVisualTile& Tile : Tiles)
 	{
-		if (Block.Kind == EVerseVisualBlockKind::Definition)
+		if (Tile.Kind == EVerseVisualTileKind::Definition)
 		{
-			++DefinitionCounts.FindOrAdd(Block.DefinitionKind);
+			++DefinitionCounts.FindOrAdd(Tile.DefinitionKind);
 		}
-		else if (Block.Kind == EVerseVisualBlockKind::Comment)
+		else if (Tile.Kind == EVerseVisualTileKind::Comment)
 		{
 			++CommentCount;
-			Comments.Add(&Block);
+			Comments.Add(&Tile);
 		}
 		else
 		{
@@ -191,15 +191,15 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 		TestEqual(*FString::Printf(TEXT("Corpus contains two %s definitions"), *Kind.ToString()), DefinitionCounts.FindRef(Kind), 2);
 	}
 	TestEqual(TEXT("Corpus contains two dedicated comments"), CommentCount, 2);
-	TestEqual(TEXT("Valid corpus contains no unknown blocks"), UnknownCount, 0);
+	TestEqual(TEXT("Valid corpus contains no unknown tiles"), UnknownCount, 0);
 	if (TestEqual(TEXT("Comment stack has a line group and a block comment"), Comments.Num(), 2))
 	{
 		const FUtf8StringView LineGroup = Snapshot.GetSourceView(Comments[0]->BodyRange);
 		const FUtf8StringView BlockComment = Snapshot.GetSourceView(Comments[1]->BodyRange);
-		TestTrue(TEXT("Adjacent hashtag comments merge into one visual block"),
+		TestTrue(TEXT("Adjacent hashtag comments merge into one visual tile"),
 			LineGroup.Find(UTF8TEXTVIEW("first comment")) != INDEX_NONE
 			&& LineGroup.Find(UTF8TEXTVIEW("continuation")) != INDEX_NONE);
-		TestTrue(TEXT("Container comment remains its own visual block"),
+		TestTrue(TEXT("Container comment remains its own visual tile"),
 			Comments[1]->CommentKind == EVerseCommentKind::Block
 			&& BlockComment.Find(UTF8TEXTVIEW("<#")) != INDEX_NONE);
 	}

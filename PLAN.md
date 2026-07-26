@@ -7,7 +7,7 @@ authoring Verse. It will depend on the Verse plugins included with UE6-main,
 use public engine APIs, and avoid engine modifications so the plugin can
 eventually be distributed through Fab and GitHub.
 
-The editor will present ordinary Verse source as discoverable visual blocks.
+The editor will present ordinary Verse source as discoverable visual tiles.
 It must preserve the original source text, whitespace, comments, and formatting
 except where the user explicitly makes a change.
 
@@ -29,8 +29,8 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Top-level recognition: complete; the official Verse compiler VST supplies
   supported definitions, unsupported gaps produce complete ordered source
   coverage, and all `VerseVisualEditor` automation tests pass.
-- Global-scope block presentation: complete; parser-backed definitions,
-  comments, and unknown regions render as collapsible source-ordered blocks in
+- Global-scope tile presentation: complete; parser-backed definitions,
+  comments, and unknown regions render as collapsible source-ordered tiles in
   a scrollable, pannable, bounded-zoom graph.
 - Subsequent visual editing steps: pending.
 
@@ -45,16 +45,16 @@ Each open document will retain:
 - The complete immutable original source as BOM-free `FUtf8String` data.
 - The original BOM, encoding, and line-ending information.
 - Token, trivia, and source ranges.
-- The source range represented by every visual block.
+- The source range represented by every visual tile.
 
 Before editing is introduced, source models will use `FVerseByteRange`, which
-contains a byte offset and length. Once editing exists, current blocks,
+contains a byte offset and length. Once editing exists, current tiles,
 selections, diagnostics, and text operations will use `FVerseTextRange`, which
 combines a document revision with an `FVerseByteRange`.
 
 Edited source will be represented by ordered spans into the immutable original
 text and an append-only UTF-8 added-text buffer. Visual operations will produce
-localized text replacements. Visual blocks will be rebuilt from authoritative
+localized text replacements. Visual tiles will be rebuilt from authoritative
 edited source and will never be used to serialize the complete file.
 
 Complete current text will be materialized and cached only when a consumer such
@@ -68,24 +68,24 @@ Verse parser or compiler.
 
 Parsing or compilation errors must never cause source text to be discarded or
 an edit to be automatically undone. Recognized constructs will become typed
-blocks. Invalid, incomplete, unsupported, or unrecognized regions will become
-raw blocks that retain their exact source text.
+tiles. Invalid, incomplete, unsupported, or unrecognized regions will become
+raw tiles that retain their exact source text.
 
-Compiler diagnostics may be attached to raw or typed blocks without preventing
+Compiler diagnostics may be attached to raw or typed tiles without preventing
 the document from being displayed or saved.
 
-### Block design
+### Tile design
 
 The implementation will separate:
 
 - Immutable document and source models.
 - Editable source spans and document-session state.
-- Block models representing Verse constructs.
+- Tile models representing Verse constructs.
 - Slate widgets responsible for presentation.
 - Shared capabilities such as selection, renaming, movement, deletion, and
   child ownership.
 
-Block types will share small base interfaces. Reusable behavior will be
+Tile types will share small base interfaces. Reusable behavior will be
 composed from capabilities rather than placed into one deep inheritance tree.
 
 ### Editing and history
@@ -210,13 +210,13 @@ introducing editing concepts.
 
 This step delivers a structural representation independently of Slate.
 
-#### 2.3 Global-scope block presentation (complete)
+#### 2.3 Global-scope tile presentation (complete)
 
-- Convert the Step 2.2 parse snapshot into visual blocks.
-- Arrange global-scope blocks horizontally in source order, with structural
+- Convert the Step 2.2 parse snapshot into visual tiles.
+- Arrange global-scope tiles horizontally in source order, with structural
   definitions growing vertically inside tile-shaped containers.
 - Display each definition's name and type.
-- Represent unimplemented contents as raw `unknown` blocks.
+- Represent unimplemented contents as raw `unknown` tiles.
 - Add collapse controls; reserve dotted composition guides for nested function
   composition rather than global scope.
 - Add graph scrolling, panning, and bounded zooming.
@@ -229,18 +229,18 @@ This step delivers the first read-only visual representation of Verse source.
 
 ### 3. Line numbers
 
-- Associate every block with its parse-snapshot `FVerseByteRange`.
+- Associate every tile with its parse-snapshot `FVerseByteRange`.
 - Display the corresponding original source line numbers in a left margin.
 - Defer updating line information after localized edits to Step 5.1, where
   current document revisions first exist.
 
 ### 4. Selection, copying, and properties
 
-- Add single-block selection.
+- Add single-tile selection.
 - Add Shift-click selection toggling.
-- Select a block and its descendants on double-click.
+- Select a tile and its descendants on double-click.
 - Remove descendants automatically when their parent leaves the selection.
-- Copy immutable source represented by selected blocks' `FVerseByteRange`
+- Copy immutable source represented by selected tiles' `FVerseByteRange`
   values.
 - Add equivalent context-menu commands.
 - Add the properties panel and property filter.
@@ -267,7 +267,7 @@ Do not add edit transactions or selection-history snapshots until Step 5.
 - Cache materialized source by revision and invalidate it on every source-state
   transition.
 - After a replacement, increment the revision and rebuild the error-tolerant
-  parse and block representations from current source.
+  parse and tile representations from current source.
 - Preserve invalid edits as raw regions rather than rolling them back.
 - Update line numbers and copying to use current revisioned ranges.
 - Test localized replacement, span splitting and coalescing, append-only added
@@ -275,7 +275,7 @@ Do not add edit transactions or selection-history snapshots until Step 5.
   preservation of all unaffected bytes.
 
 This step delivers one tested localized source change through source, parsing,
-blocks, line numbers, and copying.
+tiles, line numbers, and copying.
 
 #### 5.2 Rename and save vertical slice
 
@@ -313,12 +313,12 @@ This step delivers the first complete edit-and-save workflow.
   command.
 - On undo or redo, restore the corresponding spans, allocate a new monotonically
   increasing document revision, invalidate materialized source, reparse, rebuild
-  blocks, and restore selection state.
+  tiles, and restore selection state.
 - Discard the redo tail when a new edit follows undo.
 - Keep history after saving.
 - Use `FVerseContentStateId` so undoing away from the saved state becomes dirty
   and redoing back to it becomes clean.
-- Test source, block, revision, selection, and saved-state restoration.
+- Test source, tile, revision, selection, and saved-state restoration.
 
 This step makes the existing rename workflow safely reversible.
 
@@ -377,8 +377,8 @@ introduced immediately beforehand.
 - Compile materialized source for a specified document revision.
 - Run asynchronously and debounce continuous compilation.
 - Map structured diagnostics to revisioned `FVerseTextRange` values and current
-  blocks.
-- Highlight affected blocks in red.
+  tiles.
+- Highlight affected tiles in red.
 - Display messages in the margin.
 - Ignore compilation results for superseded document revisions.
 - Never mutate, undo, or discard source because compilation failed.
@@ -421,7 +421,7 @@ introduced immediately beforehand.
 
 - Make enum bodies the first consumer of the VST-derived clause descriptor and
   retire the transitional delimiter trim for enum definitions.
-- Represent each enum label with an indented block.
+- Represent each enum label with an indented tile.
 - Add renaming and identifier validation.
 - Add drag handles for reordering.
 - Add removal buttons.
@@ -439,7 +439,7 @@ introduced immediately beforehand.
 - Distinguish used and unused parameters.
 - Show reference locations when hovering usage indicators.
 - Display and edit effects and access specifiers in properties.
-- Keep function bodies as raw `unknown` blocks initially.
+- Keep function bodies as raw `unknown` tiles initially.
 - Build that initial raw body from the descriptor's exact interior range; later
   expression steps must replace portions with VST-derived children while
   preserving the remaining raw gaps.
@@ -453,7 +453,7 @@ introduced immediately beforehand.
 - Provide an appropriate editor for simple typed literal values.
 - Provide selection controls for enums, types, and other discoverable values.
 - Add Blueprint-style type indicators and usage indicators.
-- Preserve complex initializer expressions as raw blocks initially.
+- Preserve complex initializer expressions as raw tiles initially.
 
 ### 10. Modules
 
@@ -501,7 +501,7 @@ introduced immediately beforehand.
 
 - Replace transitional interface body trimming with the shared VST clause
   descriptor before presenting members as child tiles.
-- Add interface blocks and interface-specific effects.
+- Add interface tiles and interface-specific effects.
 - Add inherited-interface lists.
 - Support interface fields.
 - Add getter and setter selection for fields with accessors.
@@ -512,12 +512,12 @@ introduced immediately beforehand.
 
 ### 14. Statements and identifiers
 
-- Represent each statement-level expression with a block.
+- Represent each statement-level expression with a tile.
 - Display statement order with Blueprint-style execution lines.
 - Represent extra blank lines visually without losing their source text.
 - Add typed expression sockets where assignment or reference is valid.
 - Add identifier expressions and scope-aware references.
-- Display the corresponding Verse line as a read-only block label.
+- Display the corresponding Verse line as a read-only tile label.
 
 ### 15. Expression search
 
@@ -552,10 +552,10 @@ introduced immediately beforehand.
 ### 19. Control expressions
 
 - Add branching and looping constructs such as `if`, `for`, and `while`.
-- Represent each body with its own automatically created block region.
+- Represent each body with its own automatically created tile region.
 - Display main and nested execution paths distinctly.
 - Preserve and expose supported formatting variations.
-- Add whitespace properties for choosing among supported block styles.
+- Add whitespace properties for choosing among supported body styles.
 
 All editing features in Steps 7 through 19 must reuse localized revisioned
 replacements, atomic transactions, span-snapshot undo and redo, saved

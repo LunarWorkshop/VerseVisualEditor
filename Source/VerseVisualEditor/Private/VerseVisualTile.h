@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "VerseParseSnapshot.h"
 
-enum class EVerseVisualBlockKind : uint8
+enum class EVerseVisualTileKind : uint8
 {
 	Definition,
 	Comment,
@@ -11,10 +11,10 @@ enum class EVerseVisualBlockKind : uint8
 };
 
 /** Read-only presentation data. All text remains referenced by snapshot byte ranges. */
-struct FVerseVisualBlock
+struct FVerseVisualTile
 {
 	FVerseByteRange Range;
-	EVerseVisualBlockKind Kind = EVerseVisualBlockKind::Unknown;
+	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	FName DefinitionKind;
 	FVerseByteRange NameRange;
 	FVerseByteRange TypeRange;
@@ -22,8 +22,8 @@ struct FVerseVisualBlock
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 
-class FVerseVisualBlockBuilder
+class FVerseVisualTileBuilder
 {
 public:
-	static TArray<FVerseVisualBlock> Build(const FVerseParseSnapshot& Snapshot);
+	static TArray<FVerseVisualTile> Build(const FVerseParseSnapshot& Snapshot);
 };

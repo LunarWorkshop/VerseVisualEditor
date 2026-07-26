@@ -1,4 +1,4 @@
-#include "VerseVisualBlock.h"
+#include "VerseVisualTile.h"
 
 namespace
 {
@@ -19,10 +19,10 @@ namespace
 
 	bool CanMergeLineComment(
 		const FVerseParseSnapshot& Snapshot,
-		const FVerseVisualBlock& Previous,
+		const FVerseVisualTile& Previous,
 		const FVerseSourceRegion& Current)
 	{
-		if (Previous.Kind != EVerseVisualBlockKind::Comment
+		if (Previous.Kind != EVerseVisualTileKind::Comment
 			|| Previous.CommentKind != EVerseCommentKind::Line
 			|| Current.CommentKind != EVerseCommentKind::Line
 			|| Current.Range.BeginByte < Previous.Range.EndByte())
@@ -53,9 +53,9 @@ namespace
 	}
 }
 
-TArray<FVerseVisualBlock> FVerseVisualBlockBuilder::Build(const FVerseParseSnapshot& Snapshot)
+TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(const FVerseParseSnapshot& Snapshot)
 {
-	TArray<FVerseVisualBlock> Blocks;
+	TArray<FVerseVisualTile> Tiles;
 	for (const FVerseSourceRegion& Region : Snapshot.GetSourceRegions())
 	{
 		if (Region.Kind == EVerseSourceRegionKind::Raw && IsWhitespace(Snapshot.GetSourceView(Region)))
@@ -63,32 +63,32 @@ TArray<FVerseVisualBlock> FVerseVisualBlockBuilder::Build(const FVerseParseSnaps
 			continue;
 		}
 		if (Region.Kind == EVerseSourceRegionKind::Comment
-			&& !Blocks.IsEmpty()
-			&& CanMergeLineComment(Snapshot, Blocks.Last(), Region))
+			&& !Tiles.IsEmpty()
+			&& CanMergeLineComment(Snapshot, Tiles.Last(), Region))
 		{
-			Blocks.Last().Range = FVerseByteRange::FromBounds(
-				Blocks.Last().Range.BeginByte,
+			Tiles.Last().Range = FVerseByteRange::FromBounds(
+				Tiles.Last().Range.BeginByte,
 				Region.Range.EndByte());
-			Blocks.Last().BodyRange = Blocks.Last().Range;
+			Tiles.Last().BodyRange = Tiles.Last().Range;
 			continue;
 		}
 
-		FVerseVisualBlock& Block = Blocks.AddDefaulted_GetRef();
-		Block.Range = Region.Range;
+		FVerseVisualTile& Tile = Tiles.AddDefaulted_GetRef();
+		Tile.Range = Region.Range;
 		if (Region.Kind == EVerseSourceRegionKind::Syntax)
 		{
-			Block.Kind = EVerseVisualBlockKind::Definition;
-			Block.DefinitionKind = Region.SyntaxKind;
-			Block.NameRange = Region.NameRange;
-			Block.TypeRange = Region.TypeRange;
-			Block.BodyRange = Region.BodyRange;
+			Tile.Kind = EVerseVisualTileKind::Definition;
+			Tile.DefinitionKind = Region.SyntaxKind;
+			Tile.NameRange = Region.NameRange;
+			Tile.TypeRange = Region.TypeRange;
+			Tile.BodyRange = Region.BodyRange;
 		}
 		else if (Region.Kind == EVerseSourceRegionKind::Comment)
 		{
-			Block.Kind = EVerseVisualBlockKind::Comment;
-			Block.BodyRange = Region.BodyRange;
-			Block.CommentKind = Region.CommentKind;
+			Tile.Kind = EVerseVisualTileKind::Comment;
+			Tile.BodyRange = Region.BodyRange;
+			Tile.CommentKind = Region.CommentKind;
 		}
 	}
-	return Blocks;
+	return Tiles;
 }

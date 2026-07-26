@@ -1,6 +1,6 @@
-# Global-scope visual block corpus: first comment.
+# Global-scope visual tile corpus: first comment.
 # A continuation of the first comment.
-<# Global-scope visual block corpus: second comment. #>
+<# Global-scope visual tile corpus: second comment. #>
 
 CorpusModuleOne := module {}
 CorpusModuleTwo := module:

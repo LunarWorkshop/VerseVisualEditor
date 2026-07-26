@@ -169,13 +169,13 @@ bool FVerseDocumentSourceRangeTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(
-		TEXT("Block range is a view into original UTF-8"),
+		TEXT("Tile range is a view into original UTF-8"),
 		Document->GetOriginalUtf8View({6, 4}) == UTF8TEXTVIEW("beta"));
 	TestEqual(
 		TEXT("Range constructed from bounds"),
 		FVerseByteRange::FromBounds(6, 10),
 		FVerseByteRange({6, 4}));
-	TestEqual(TEXT("Decoded block range"), Document->DecodeOriginalRange({6, 4}), FString(TEXT("beta")));
+	TestEqual(TEXT("Decoded tile range"), Document->DecodeOriginalRange({6, 4}), FString(TEXT("beta")));
 	TestEqual(TEXT("First line number"), Document->GetOriginalLineNumber(0), 1);
 	TestEqual(TEXT("Second line number"), Document->GetOriginalLineNumber(6), 2);
 	return true;

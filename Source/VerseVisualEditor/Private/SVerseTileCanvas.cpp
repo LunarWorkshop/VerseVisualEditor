@@ -1,9 +1,9 @@
-#include "SVerseBlockGraph.h"
+#include "SVerseTileCanvas.h"
 
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseVisualBlock.h"
+#include "VerseVisualTile.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
@@ -14,7 +14,7 @@
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
-#define LOCTEXT_NAMESPACE "SVerseBlockGraph"
+#define LOCTEXT_NAMESPACE "SVerseTileCanvas"
 
 namespace
 {
@@ -22,16 +22,16 @@ namespace
 	constexpr float MaximumZoom = 2.0f;
 	constexpr float ZoomStep = 0.1f;
 
-	bool BelongsInCompactStack(const FVerseVisualBlock& Block)
+	bool BelongsInCompactStack(const FVerseVisualTile& Tile)
 	{
-		return Block.Kind == EVerseVisualBlockKind::Comment
-			|| (Block.Kind == EVerseVisualBlockKind::Definition
-				&& (Block.DefinitionKind == VerseSyntaxKind::Constant
-					|| Block.DefinitionKind == VerseSyntaxKind::TypeAlias));
+		return Tile.Kind == EVerseVisualTileKind::Comment
+			|| (Tile.Kind == EVerseVisualTileKind::Definition
+				&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
+					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias));
 	}
 }
 
-void SVerseBlockGraph::Construct(
+void SVerseTileCanvas::Construct(
 	const FArguments& InArgs,
 	FVerseParseSnapshot InSnapshot,
 	float InitialVerticalScrollOffset)
@@ -69,7 +69,7 @@ void SVerseBlockGraph::Construct(
 						.HAlign(HAlign_Left)
 						.VAlign(VAlign_Top)
 						[
-							BuildBlockList()
+							BuildTileRow()
 						]
 					]
 				]
@@ -101,12 +101,12 @@ void SVerseBlockGraph::Construct(
 	VerticalScrollBox->SetScrollOffset(FMath::Max(0.0f, InitialVerticalScrollOffset));
 }
 
-float SVerseBlockGraph::GetVerticalScrollOffset() const
+float SVerseTileCanvas::GetVerticalScrollOffset() const
 {
 	return VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f;
 }
 
-FReply SVerseBlockGraph::OnMouseButtonDown(
+FReply SVerseTileCanvas::OnMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -120,7 +120,7 @@ FReply SVerseBlockGraph::OnMouseButtonDown(
 	return FReply::Handled().CaptureMouse(SharedThis(this));
 }
 
-FReply SVerseBlockGraph::OnMouseButtonUp(
+FReply SVerseTileCanvas::OnMouseButtonUp(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -133,7 +133,7 @@ FReply SVerseBlockGraph::OnMouseButtonUp(
 	return FReply::Handled().ReleaseMouseCapture();
 }
 
-FReply SVerseBlockGraph::OnMouseMove(
+FReply SVerseTileCanvas::OnMouseMove(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -150,7 +150,7 @@ FReply SVerseBlockGraph::OnMouseMove(
 	return FReply::Handled();
 }
 
-FReply SVerseBlockGraph::OnMouseWheel(
+FReply SVerseTileCanvas::OnMouseWheel(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -178,14 +178,14 @@ FReply SVerseBlockGraph::OnMouseWheel(
 	return FReply::Handled();
 }
 
-TSharedRef<SWidget> SVerseBlockGraph::BuildBlockList()
+TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 {
-	TSharedRef<SHorizontalBox> BlockList = SNew(SHorizontalBox);
-	const TArray<FVerseVisualBlock> Blocks = FVerseVisualBlockBuilder::Build(Snapshot.GetValue());
-	for (int32 BlockIndex = 0; BlockIndex < Blocks.Num();)
+	TSharedRef<SHorizontalBox> TileRow = SNew(SHorizontalBox);
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot.GetValue());
+	for (int32 TileIndex = 0; TileIndex < Tiles.Num();)
 	{
-		TSharedRef<SWidget> Presentation = BuildBlock(Blocks[BlockIndex]);
-		if (BelongsInCompactStack(Blocks[BlockIndex]))
+		TSharedRef<SWidget> Presentation = BuildTile(Tiles[TileIndex]);
+		if (BelongsInCompactStack(Tiles[TileIndex]))
 		{
 			TSharedRef<SVerticalBox> CompactStack = SNew(SVerticalBox);
 			do
@@ -194,19 +194,19 @@ TSharedRef<SWidget> SVerseBlockGraph::BuildBlockList()
 				.AutoHeight()
 				.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 				[
-					BuildBlock(Blocks[BlockIndex])
+					BuildTile(Tiles[TileIndex])
 				];
-				++BlockIndex;
+				++TileIndex;
 			}
-			while (BlockIndex < Blocks.Num() && BelongsInCompactStack(Blocks[BlockIndex]));
+			while (TileIndex < Tiles.Num() && BelongsInCompactStack(Tiles[TileIndex]));
 			Presentation = CompactStack;
 		}
 		else
 		{
-			++BlockIndex;
+			++TileIndex;
 		}
 
-		BlockList->AddSlot()
+		TileRow->AddSlot()
 		.AutoWidth()
 		.VAlign(VAlign_Top)
 		.Padding(8.0f, 5.0f)
@@ -215,9 +215,9 @@ TSharedRef<SWidget> SVerseBlockGraph::BuildBlockList()
 		];
 	}
 
-	if (Blocks.IsEmpty())
+	if (Tiles.IsEmpty())
 	{
-		BlockList->AddSlot()
+		TileRow->AddSlot()
 		.AutoWidth()
 		.VAlign(VAlign_Top)
 		.Padding(12.0f)
@@ -227,54 +227,54 @@ TSharedRef<SWidget> SVerseBlockGraph::BuildBlockList()
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		];
 	}
-	return BlockList;
+	return TileRow;
 }
 
-TSharedRef<SWidget> SVerseBlockGraph::BuildBlock(const FVerseVisualBlock& Block)
+TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile)
 {
-	const bool bCompactDefinition = Block.Kind == EVerseVisualBlockKind::Definition
-		&& (Block.DefinitionKind == VerseSyntaxKind::Constant
-			|| Block.DefinitionKind == VerseSyntaxKind::TypeAlias);
-	return bCompactDefinition ? BuildCompactBlock(Block) : BuildTileBlock(Block);
+	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
+		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
+			|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias);
+	return bCompactDefinition ? BuildCompactTile(Tile) : BuildStructuralTile(Tile);
 }
 
-TSharedRef<SWidget> SVerseBlockGraph::BuildTileBlock(const FVerseVisualBlock& Block)
+TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile)
 {
-	const bool bDefinition = Block.Kind == EVerseVisualBlockKind::Definition;
-	const bool bComment = Block.Kind == EVerseVisualBlockKind::Comment;
+	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
+	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
 	const FText KindText = bDefinition
-		? FText::FromName(Block.DefinitionKind)
+		? FText::FromName(Tile.DefinitionKind)
 		: bComment
-			? LOCTEXT("CommentBlockKind", "Comment")
-			: LOCTEXT("UnknownBlockKind", "unknown");
+			? LOCTEXT("CommentTileKind", "Comment")
+			: LOCTEXT("UnknownTileKind", "unknown");
 	const FText NameText = bDefinition
-		? Decode(Block.NameRange)
+		? Decode(Tile.NameRange)
 		: bComment
 			? FText::GetEmpty()
-			: LOCTEXT("UnknownBlockName", "raw source");
-	const FText TypeText = bDefinition && Block.TypeRange.IsSet() ? Decode(Block.TypeRange) : FText::GetEmpty();
-	const FLinearColor BlockColor = bDefinition
+			: LOCTEXT("UnknownTileName", "raw source");
+	const FText TypeText = bDefinition && Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
+	const FLinearColor TileColor = bDefinition
 		? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
 		: bComment
 			? FLinearColor(0.10f, 0.30f, 0.16f, 1.0f)
 			: FLinearColor(0.35f, 0.20f, 0.08f, 1.0f);
-	const FVerseByteRange ContentRange = Block.Kind == EVerseVisualBlockKind::Unknown
-		? Block.Range
-		: Block.BodyRange;
+	const FVerseByteRange ContentRange = Tile.Kind == EVerseVisualTileKind::Unknown
+		? Tile.Range
+		: Tile.BodyRange;
 
 	return SNew(SBox)
 		.MaxDesiredWidth(720.0f)
 		[
 		SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.BorderBackgroundColor(BlockColor)
+		.BorderBackgroundColor(TileColor)
 		.Padding(2.0f)
 		[
 			SNew(SExpandableArea)
 			.InitiallyCollapsed(false)
 			.AllowAnimatedTransition(false)
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.BorderBackgroundColor(BlockColor)
+			.BorderBackgroundColor(TileColor)
 			.BodyBorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
 			.HeaderPadding(FMargin(8.0f, 6.0f))
 			.HeaderContent()
@@ -322,11 +322,11 @@ TSharedRef<SWidget> SVerseBlockGraph::BuildTileBlock(const FVerseVisualBlock& Bl
 		];
 }
 
-TSharedRef<SWidget> SVerseBlockGraph::BuildCompactBlock(const FVerseVisualBlock& Block)
+TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& Tile)
 {
-	const FText KindText = FText::FromName(Block.DefinitionKind);
-	const FText NameText = Decode(Block.NameRange);
-	const FText TypeText = Block.TypeRange.IsSet() ? Decode(Block.TypeRange) : FText::GetEmpty();
+	const FText KindText = FText::FromName(Tile.DefinitionKind);
+	const FText NameText = Decode(Tile.NameRange);
+	const FText TypeText = Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
 
 	return SNew(SExpandableArea)
 		.InitiallyCollapsed(false)
@@ -372,13 +372,13 @@ TSharedRef<SWidget> SVerseBlockGraph::BuildCompactBlock(const FVerseVisualBlock&
 			.Padding(8.0f)
 			[
 				SNew(SMultiLineEditableText)
-				.Text(Decode(Block.Range))
+				.Text(Decode(Tile.Range))
 				.IsReadOnly(true)
 			]
 		];
 }
 
-FText SVerseBlockGraph::Decode(FVerseByteRange Range) const
+FText SVerseTileCanvas::Decode(FVerseByteRange Range) const
 {
 	return Range.IsSet()
 		? FText::FromString(Snapshot->GetDocument()->DecodeOriginalRange(Range))
