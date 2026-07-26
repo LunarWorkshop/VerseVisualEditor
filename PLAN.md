@@ -21,7 +21,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
   `VerseVisualEditor.Foundation` automation tests pass.
 - Semantic UTF-8 ownership: complete; the editor target builds successfully and
   all `VerseVisualEditor.Foundation` automation tests pass.
-- Window implementation: pending in the current workspace.
+- Window implementation: complete; the nomad window, project Verse source
+  tree, read-only document tabs, source-control status, and external-change
+  monitoring are implemented and covered by `VerseVisualEditor.Window` tests.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -148,7 +150,7 @@ step with a direct consumer.
 This step delivers the UTF-8 representation required by later parsing and
 editing without introducing edit state prematurely.
 
-### 1. Window
+### 1. Window (complete)
 
 - Create the main Verse Visual Editor window.
 - Add a Verse folder tree on the left.
@@ -160,6 +162,12 @@ editing without introducing edit state prematurely.
 
 Edited-file styling, unsaved-state tracking, and dirty-file external-change
 prompts are deferred to Step 5.2, when local edits and saving first exist.
+
+#### Further work
+- Right click a folder or file to go to that folder
+- Single click a file to open it in a "temporary" tab that closes again if another file opens via that temporary tab. Double click or right click to open for real
+- Save the tabs that are open and their scroll status (don't care about cursor since that won't be a hting later) and open them when the editor starts again
+- open the tree to the file that was just opened whenever the file is opened
 
 ### 2. Global scope view
 
@@ -491,3 +499,5 @@ These items are intentionally not planned in detail yet:
 - Show source lines modified relative to version control.
 - Allow complex expression connections to refactor code automatically by
   introducing identifiers and splitting statements when necessary.
+- Open Verse files in VVE via the "Verse Explorer"
+- Move/copy/paste/duplicate/delete files and folders via the tree

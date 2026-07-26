@@ -6,14 +6,19 @@ public class VerseVisualEditor : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		PrivateIncludePathModuleNames.Add("WorkspaceMenuStructure");
+
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"Core",
 			"CoreUObject",
+			"DirectoryWatcher",
 			"Engine",
+			"InputCore",
 			"Projects",
 			"Slate",
 			"SlateCore",
+			"SourceControl",
 			"UnrealEd",
 			"Verse"
 		});
