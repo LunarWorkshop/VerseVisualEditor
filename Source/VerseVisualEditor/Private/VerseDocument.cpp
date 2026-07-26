@@ -40,8 +40,7 @@ TSharedPtr<FVerseDocument> FVerseDocument::LoadFromFile(
 		return nullptr;
 	}
 
-	TSharedPtr<FVerseDocument> Document = CreateFromBytes(Bytes, OutError);
-	return Document;
+	return CreateFromBytes(Bytes, OutError);
 }
 
 bool FVerseDocument::Initialize(TConstArrayView<uint8> Bytes, FText& OutError)
@@ -54,14 +53,12 @@ bool FVerseDocument::Initialize(TConstArrayView<uint8> Bytes, FText& OutError)
 		return false;
 	}
 
-	OriginalContentOffset = Bytes.Num() >= 3
+	bHasUtf8Bom = Bytes.Num() >= 3
 		&& Bytes[0] == VerseDocument::Utf8Bom[0]
 		&& Bytes[1] == VerseDocument::Utf8Bom[1]
-		&& Bytes[2] == VerseDocument::Utf8Bom[2]
-		? 3
-		: 0;
+		&& Bytes[2] == VerseDocument::Utf8Bom[2];
 
-	const TConstArrayView<uint8> ContentBytes = Bytes.RightChop(OriginalContentOffset);
+	const TConstArrayView<uint8> ContentBytes = Bytes.RightChop(bHasUtf8Bom ? 3 : 0);
 	int32 InvalidByte = INDEX_NONE;
 	if (!ValidateUtf8(ContentBytes, InvalidByte))
 	{
@@ -71,7 +68,11 @@ bool FVerseDocument::Initialize(TConstArrayView<uint8> Bytes, FText& OutError)
 		return false;
 	}
 
-	OriginalBytes = TArray<uint8>(Bytes);
+	OriginalText = ContentBytes.IsEmpty()
+		? FUtf8String()
+		: FUtf8String(FUtf8StringView(
+			reinterpret_cast<const UTF8CHAR*>(ContentBytes.GetData()),
+			ContentBytes.Num()));
 	RebuildOriginalMetadata();
 	OutError = FText::GetEmpty();
 	return true;
@@ -79,64 +80,64 @@ bool FVerseDocument::Initialize(TConstArrayView<uint8> Bytes, FText& OutError)
 
 void FVerseDocument::RebuildOriginalMetadata()
 {
-	const TConstArrayView<uint8> ContentBytes =
-		MakeArrayView(OriginalBytes).RightChop(OriginalContentOffset);
-	LineEnding = DetectLineEnding(ContentBytes);
+	const FUtf8StringView OriginalView = GetOriginalUtf8View();
+	LineEnding = DetectLineEnding(OriginalView);
 
 	OriginalLineStarts.Reset();
 	OriginalLineStarts.Add(0);
-	for (int32 ByteIndex = 0; ByteIndex < ContentBytes.Num(); ++ByteIndex)
+	for (int32 ByteIndex = 0; ByteIndex < OriginalView.Len(); ++ByteIndex)
 	{
-		if (ContentBytes[ByteIndex] == '\r')
+		if (OriginalView[ByteIndex] == static_cast<UTF8CHAR>('\r'))
 		{
-			if (ByteIndex + 1 < ContentBytes.Num() && ContentBytes[ByteIndex + 1] == '\n')
+			if (ByteIndex + 1 < OriginalView.Len()
+				&& OriginalView[ByteIndex + 1] == static_cast<UTF8CHAR>('\n'))
 			{
 				++ByteIndex;
 			}
 			OriginalLineStarts.Add(ByteIndex + 1);
 		}
-		else if (ContentBytes[ByteIndex] == '\n')
+		else if (OriginalView[ByteIndex] == static_cast<UTF8CHAR>('\n'))
 		{
 			OriginalLineStarts.Add(ByteIndex + 1);
 		}
 	}
 
 	SourceRegions.Reset();
-	if (ContentBytes.Num() > 0)
+	if (!OriginalView.IsEmpty())
 	{
-		SourceRegions.Add({{0, ContentBytes.Num()}, EVerseSourceRegionKind::Raw, NAME_None});
+		SourceRegions.Add({{0, OriginalView.Len()}, EVerseSourceRegionKind::Raw, NAME_None});
 	}
 }
 
-FVerseSourceRange FVerseDocument::GetWholeOriginalRange() const
+FUtf8StringView FVerseDocument::GetOriginalUtf8View() const
 {
-	return {0, OriginalBytes.Num() - OriginalContentOffset};
+	return FUtf8StringView(*OriginalText, OriginalText.Len());
 }
 
-FUtf8StringView FVerseDocument::GetOriginalUtf8View(FVerseSourceRange Range) const
+FVerseByteRange FVerseDocument::GetWholeOriginalRange() const
 {
-	const FVerseSourceRange WholeRange = GetWholeOriginalRange();
+	return {0, OriginalText.Len()};
+}
+
+FUtf8StringView FVerseDocument::GetOriginalUtf8View(FVerseByteRange Range) const
+{
+	const FVerseByteRange WholeRange = GetWholeOriginalRange();
 	if (!Range.IsSet() || Range.BeginByte < 0 || Range.NumBytes < 0 || Range.EndByte() > WholeRange.NumBytes)
 	{
 		return {};
 	}
 
-	const UTF8CHAR* Data = reinterpret_cast<const UTF8CHAR*>(
-		OriginalBytes.GetData() + OriginalContentOffset + Range.BeginByte);
-	return FUtf8StringView(Data, Range.NumBytes);
+	return FUtf8StringView(*OriginalText + Range.BeginByte, Range.NumBytes);
 }
 
-FString FVerseDocument::DecodeOriginalRange(FVerseSourceRange Range) const
+FString FVerseDocument::DecodeOriginalRange(FVerseByteRange Range) const
 {
-	const FUtf8StringView View = GetOriginalUtf8View(Range);
-	return DecodeUtf8(MakeArrayView(
-		reinterpret_cast<const uint8*>(View.GetData()),
-		View.Len()));
+	return DecodeUtf8(GetOriginalUtf8View(Range));
 }
 
 bool FVerseDocument::SetSourceRegions(TArray<FVerseSourceRegion> NewRegions, FText& OutError)
 {
-	const FVerseSourceRange WholeRange = GetWholeOriginalRange();
+	const FVerseByteRange WholeRange = GetWholeOriginalRange();
 	NewRegions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
 	{
 		return Left.Range.BeginByte < Right.Range.BeginByte;
@@ -144,7 +145,7 @@ bool FVerseDocument::SetSourceRegions(TArray<FVerseSourceRegion> NewRegions, FTe
 
 	for (int32 RegionIndex = 0; RegionIndex < NewRegions.Num(); ++RegionIndex)
 	{
-		const FVerseSourceRange Range = NewRegions[RegionIndex].Range;
+		const FVerseByteRange Range = NewRegions[RegionIndex].Range;
 		if (!Range.IsSet() || Range.BeginByte < 0 || Range.NumBytes < 0 || Range.EndByte() > WholeRange.EndByte())
 		{
 			OutError = LOCTEXT("InvalidSourceRegion", "A source region is outside the original document.");
@@ -253,17 +254,17 @@ bool FVerseDocument::ValidateUtf8(TConstArrayView<uint8> Bytes, int32& OutInvali
 	return true;
 }
 
-EVerseLineEnding FVerseDocument::DetectLineEnding(TConstArrayView<uint8> ContentBytes)
+EVerseLineEnding FVerseDocument::DetectLineEnding(FUtf8StringView Text)
 {
 	bool bSawLf = false;
 	bool bSawCrLf = false;
 	bool bSawCr = false;
 
-	for (int32 Index = 0; Index < ContentBytes.Num(); ++Index)
+	for (int32 Index = 0; Index < Text.Len(); ++Index)
 	{
-		if (ContentBytes[Index] == '\r')
+		if (Text[Index] == static_cast<UTF8CHAR>('\r'))
 		{
-			if (Index + 1 < ContentBytes.Num() && ContentBytes[Index + 1] == '\n')
+			if (Index + 1 < Text.Len() && Text[Index + 1] == static_cast<UTF8CHAR>('\n'))
 			{
 				bSawCrLf = true;
 				++Index;
@@ -273,7 +274,7 @@ EVerseLineEnding FVerseDocument::DetectLineEnding(TConstArrayView<uint8> Content
 				bSawCr = true;
 			}
 		}
-		else if (ContentBytes[Index] == '\n')
+		else if (Text[Index] == static_cast<UTF8CHAR>('\n'))
 		{
 			bSawLf = true;
 		}
@@ -301,22 +302,20 @@ EVerseLineEnding FVerseDocument::DetectLineEnding(TConstArrayView<uint8> Content
 	return EVerseLineEnding::None;
 }
 
-FString FVerseDocument::DecodeUtf8(TConstArrayView<uint8> Bytes)
+FString FVerseDocument::DecodeUtf8(FUtf8StringView Text)
 {
-	if (Bytes.Num() == 0)
+	if (Text.IsEmpty())
 	{
 		return FString();
 	}
 
-	const FUTF8ToTCHAR Converted(
-		reinterpret_cast<const UTF8CHAR*>(Bytes.GetData()),
-		Bytes.Num());
+	const FUTF8ToTCHAR Converted(Text.GetData(), Text.Len());
 	return FString(Converted.Length(), Converted.Get());
 }
 
 bool FVerseDocument::RangesOverlap(
-	const FVerseSourceRange& Left,
-	const FVerseSourceRange& Right)
+	const FVerseByteRange& Left,
+	const FVerseByteRange& Right)
 {
 	return Left.BeginByte < Right.EndByte() && Right.BeginByte < Left.EndByte();
 }

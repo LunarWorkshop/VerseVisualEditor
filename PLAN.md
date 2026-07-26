@@ -19,7 +19,8 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Project and plugin scaffolding: complete.
 - Lossless document foundation: complete; builds successfully and all
   `VerseVisualEditor.Foundation` automation tests pass.
-- Semantic UTF-8 ownership: pending.
+- Semantic UTF-8 ownership: complete; the editor target builds successfully and
+  all `VerseVisualEditor.Foundation` automation tests pass.
 - Window implementation: pending in the current workspace.
 - Subsequent visual editing steps: pending.
 
@@ -131,7 +132,7 @@ step with a direct consumer.
 - Create the fixture-based automation test framework.
 - Prove byte-for-byte source retention before implementing visual editing.
 
-### 0.1 Semantic UTF-8 ownership
+### 0.1 Semantic UTF-8 ownership (complete)
 
 - Replace persistent `TArray<uint8>` source storage with BOM-free
   `FUtf8String` storage.

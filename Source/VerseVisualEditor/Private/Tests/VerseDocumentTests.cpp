@@ -27,6 +27,19 @@ namespace VerseDocumentTests
 		return Left.Num() == Right.Num()
 			&& (Left.Num() == 0 || FMemory::Memcmp(Left.GetData(), Right.GetData(), Left.Num()) == 0);
 	}
+
+	TArray<uint8> ReconstructOriginalFile(const FVerseDocument& Document)
+	{
+		TArray<uint8> Result;
+		if (Document.HasUtf8Bom())
+		{
+			Result.Append({0xEF, 0xBB, 0xBF});
+		}
+
+		const FUtf8StringView Text = Document.GetOriginalUtf8View();
+		Result.Append(reinterpret_cast<const uint8*>(Text.GetData()), Text.Len());
+		return Result;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -70,6 +83,16 @@ bool FVerseDocumentRoundTripTest::RunTest(const FString& Parameters)
 		VerseDocumentTests::Bytes(UTF8TEXTVIEW("Name := class{}")),
 		EVerseLineEnding::None,
 		false});
+	Fixtures.Add({
+		TEXT("Embedded NUL"),
+		TArray<uint8>({0x61, 0x00, 0x62}),
+		EVerseLineEnding::None,
+		false});
+	Fixtures.Add({
+		TEXT("Empty file"),
+		TArray<uint8>(),
+		EVerseLineEnding::None,
+		false});
 
 	for (const FFixture& Fixture : Fixtures)
 	{
@@ -83,7 +106,11 @@ bool FVerseDocumentRoundTripTest::RunTest(const FString& Parameters)
 
 		TestTrue(
 			*FString::Printf(TEXT("%s round trips byte-for-byte"), *Fixture.Name),
-			VerseDocumentTests::ArraysEqual(Fixture.Bytes, Document->GetOriginalBytes()));
+			VerseDocumentTests::ArraysEqual(Fixture.Bytes, VerseDocumentTests::ReconstructOriginalFile(*Document)));
+		TestEqual(
+			*FString::Printf(TEXT("%s UTF-8 backing length"), *Fixture.Name),
+			Document->GetOriginalUtf8().Len(),
+			Fixture.Bytes.Num() - (Fixture.bExpectedBom ? 3 : 0));
 		TestEqual(*FString::Printf(TEXT("%s line ending"), *Fixture.Name), Document->GetLineEnding(), Fixture.ExpectedLineEnding);
 		TestEqual(*FString::Printf(TEXT("%s BOM"), *Fixture.Name), Document->HasUtf8Bom(), Fixture.bExpectedBom);
 	}
@@ -122,7 +149,7 @@ bool FVerseDocumentFileFixtureTest::RunTest(const FString& Parameters)
 
 	TestTrue(
 		TEXT("Loaded fixture retains the exact input bytes"),
-		VerseDocumentTests::ArraysEqual(FixtureBytes, Document->GetOriginalBytes()));
+		VerseDocumentTests::ArraysEqual(FixtureBytes, VerseDocumentTests::ReconstructOriginalFile(*Document)));
 	return true;
 }
 
@@ -144,6 +171,10 @@ bool FVerseDocumentSourceRangeTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Block range is a view into original UTF-8"),
 		Document->GetOriginalUtf8View({6, 4}) == UTF8TEXTVIEW("beta"));
+	TestEqual(
+		TEXT("Range constructed from bounds"),
+		FVerseByteRange::FromBounds(6, 10),
+		FVerseByteRange({6, 4}));
 	TestEqual(TEXT("Decoded block range"), Document->DecodeOriginalRange({6, 4}), FString(TEXT("beta")));
 	TestEqual(TEXT("First line number"), Document->GetOriginalLineNumber(0), 1);
 	TestEqual(TEXT("Second line number"), Document->GetOriginalLineNumber(6), 2);
@@ -186,7 +217,7 @@ bool FVerseDocumentUtf8ValidationTest::RunTest(const FString& Parameters)
 
 	TestTrue(
 		TEXT("Valid non-ASCII UTF-8 retains its exact bytes"),
-		VerseDocumentTests::ArraysEqual(UnicodeBytes, UnicodeDocument->GetOriginalBytes()));
+		VerseDocumentTests::ArraysEqual(UnicodeBytes, VerseDocumentTests::ReconstructOriginalFile(*UnicodeDocument)));
 	return true;
 }
 
