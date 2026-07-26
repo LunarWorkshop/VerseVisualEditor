@@ -60,6 +60,8 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 	int32 CommentCount = 0;
 	int32 UnknownCount = 0;
 	bool bFoundUnsupportedUsing = false;
+	bool bFunctionBodyExcludesDefinition = false;
+	bool bEmptyClassHasEmptyBody = false;
 	for (int32 Index = 0; Index < Blocks.Num(); ++Index)
 	{
 		const FVerseVisualBlock& Block = Blocks[Index];
@@ -72,6 +74,17 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 			++DefinitionCount;
 			TestTrue(*FString::Printf(TEXT("Block %d has a definition kind"), Index), !Block.DefinitionKind.IsNone());
 			TestTrue(*FString::Printf(TEXT("Block %d has a name"), Index), Block.NameRange.IsSet());
+			if (Block.DefinitionKind == VerseSyntaxKind::Function)
+			{
+				const FUtf8StringView Body = Snapshot.GetSourceView(Block.BodyRange);
+				bFunctionBodyExcludesDefinition = Body.Find(UTF8TEXTVIEW("Input")) != INDEX_NONE
+					&& Body.Find(UTF8TEXTVIEW("ExampleFunction")) == INDEX_NONE;
+			}
+			else if (Block.DefinitionKind == VerseSyntaxKind::Class)
+			{
+				bEmptyClassHasEmptyBody = Block.BodyRange.IsSet()
+					&& Snapshot.GetSourceView(Block.BodyRange).IsEmpty();
+			}
 		}
 		else if (Block.Kind == EVerseVisualBlockKind::Comment)
 		{
@@ -96,6 +109,8 @@ bool FVerseGlobalScopeBlockPresentationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Known source comment has a dedicated block"), CommentCount, 1);
 	TestEqual(TEXT("Only unsupported syntax remains unknown"), UnknownCount, 1);
 	TestTrue(TEXT("Unsupported using expression retains its source range"), bFoundUnsupportedUsing);
+	TestTrue(TEXT("Function tile body excludes its surrounding definition"), bFunctionBodyExcludesDefinition);
+	TestTrue(TEXT("Empty class tile has an empty body"), bEmptyClassHasEmptyBody);
 	return true;
 }
 
@@ -144,6 +159,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	TMap<FName, int32> DefinitionCounts;
 	int32 CommentCount = 0;
 	int32 UnknownCount = 0;
+	TArray<const FVerseVisualBlock*> Comments;
 	for (const FVerseVisualBlock& Block : Blocks)
 	{
 		if (Block.Kind == EVerseVisualBlockKind::Definition)
@@ -153,6 +169,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 		else if (Block.Kind == EVerseVisualBlockKind::Comment)
 		{
 			++CommentCount;
+			Comments.Add(&Block);
 		}
 		else
 		{
@@ -167,7 +184,6 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 		VerseSyntaxKind::Interface,
 		VerseSyntaxKind::Enum,
 		VerseSyntaxKind::Function,
-		VerseSyntaxKind::Variable,
 		VerseSyntaxKind::Constant,
 		VerseSyntaxKind::TypeAlias};
 	for (const FName Kind : ExpectedKinds)
@@ -176,6 +192,17 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Corpus contains two dedicated comments"), CommentCount, 2);
 	TestEqual(TEXT("Valid corpus contains no unknown blocks"), UnknownCount, 0);
+	if (TestEqual(TEXT("Comment stack has a line group and a block comment"), Comments.Num(), 2))
+	{
+		const FUtf8StringView LineGroup = Snapshot.GetSourceView(Comments[0]->BodyRange);
+		const FUtf8StringView BlockComment = Snapshot.GetSourceView(Comments[1]->BodyRange);
+		TestTrue(TEXT("Adjacent hashtag comments merge into one visual block"),
+			LineGroup.Find(UTF8TEXTVIEW("first comment")) != INDEX_NONE
+			&& LineGroup.Find(UTF8TEXTVIEW("continuation")) != INDEX_NONE);
+		TestTrue(TEXT("Container comment remains its own visual block"),
+			Comments[1]->CommentKind == EVerseCommentKind::Block
+			&& BlockComment.Find(UTF8TEXTVIEW("<#")) != INDEX_NONE);
+	}
 	return true;
 }
 

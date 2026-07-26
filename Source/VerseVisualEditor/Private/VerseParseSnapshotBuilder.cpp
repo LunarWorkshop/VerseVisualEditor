@@ -54,6 +54,8 @@ namespace VerseParseSnapshotBuilder
 			return FVerseByteRange::FromBounds(Begin, End);
 		}
 
+		FUtf8StringView GetSource() const { return Source; }
+
 	private:
 		int32 ToOffset(uint32 Row, uint32 ByteColumn) const
 		{
@@ -78,6 +80,106 @@ namespace VerseParseSnapshotBuilder
 			Node = Node->GetChildren()[0].Get();
 		}
 		return Node;
+	}
+
+	EVerseCommentKind ToCommentKind(Verse::Vst::Comment::EType Type)
+	{
+		switch (Type)
+		{
+		case Verse::Vst::Comment::EType::line:
+			return EVerseCommentKind::Line;
+		case Verse::Vst::Comment::EType::block:
+			return EVerseCommentKind::Block;
+		case Verse::Vst::Comment::EType::ind:
+			return EVerseCommentKind::Indented;
+		case Verse::Vst::Comment::EType::frag:
+			return EVerseCommentKind::Fragment;
+		default:
+			return EVerseCommentKind::None;
+		}
+	}
+
+	FVerseByteRange TrimClauseDelimiters(
+		const Verse::Vst::Clause& Clause,
+		FVerseByteRange Range,
+		FUtf8StringView Source)
+	{
+		if (!Range.IsSet() || Range.EndByte() > Source.Len())
+		{
+			return {};
+		}
+
+		FUtf8StringView Text = Source.Mid(Range.BeginByte, Range.NumBytes);
+		int32 RelativeBegin = 0;
+		int32 RelativeEnd = Text.Len();
+		if (Clause.GetPunctuation() == Verse::Vst::Clause::EPunctuation::Braces)
+		{
+			int32 OpenBrace = INDEX_NONE;
+			int32 CloseBrace = INDEX_NONE;
+			for (int32 Index = 0; Index < Text.Len(); ++Index)
+			{
+				if (OpenBrace == INDEX_NONE && Text[Index] == static_cast<UTF8CHAR>('{'))
+				{
+					OpenBrace = Index;
+				}
+				if (Text[Index] == static_cast<UTF8CHAR>('}'))
+				{
+					CloseBrace = Index;
+				}
+			}
+			if (OpenBrace != INDEX_NONE && CloseBrace != INDEX_NONE && CloseBrace >= OpenBrace)
+			{
+				RelativeBegin = OpenBrace + 1;
+				RelativeEnd = CloseBrace;
+			}
+		}
+		else
+		{
+			while (RelativeBegin < RelativeEnd
+				&& (Text[RelativeBegin] == static_cast<UTF8CHAR>(' ')
+					|| Text[RelativeBegin] == static_cast<UTF8CHAR>('\t')))
+			{
+				++RelativeBegin;
+			}
+			if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>(':'))
+			{
+				++RelativeBegin;
+				if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>('\r'))
+				{
+					++RelativeBegin;
+				}
+				if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>('\n'))
+				{
+					++RelativeBegin;
+				}
+			}
+		}
+		return FVerseByteRange::FromBounds(
+			Range.BeginByte + RelativeBegin,
+			Range.BeginByte + RelativeEnd);
+	}
+
+	FVerseByteRange FindBodyRange(
+		const Verse::Vst::Node& RightOperand,
+		const FSourceIndex& SourceIndex)
+	{
+		const Verse::Vst::Node* Unwrapped = UnwrapSingleClause(&RightOperand);
+		if (const Verse::Vst::Macro* Macro = Unwrapped != nullptr
+			? Unwrapped->AsNullable<Verse::Vst::Macro>()
+			: nullptr)
+		{
+			if (Macro->GetChildCount() <= 1)
+			{
+				return {};
+			}
+			const Verse::Vst::Clause& BodyClause = *Macro->GetClause(Macro->GetChildCount() - 2);
+			return TrimClauseDelimiters(
+				BodyClause,
+				SourceIndex.ToRange(BodyClause.Whence()),
+				SourceIndex.GetSource());
+		}
+
+		return Unwrapped != nullptr ? SourceIndex.ToRange(Unwrapped->Whence()) : FVerseByteRange();
 	}
 
 	const Verse::Vst::Identifier* FindFirstIdentifier(const Verse::Vst::Node& Node)
@@ -124,12 +226,16 @@ namespace VerseParseSnapshotBuilder
 		}
 		VisitedNodes.Add(&Node);
 
-		if (Node.IsA<Verse::Vst::Comment>())
+		if (const Verse::Vst::Comment* Comment = Node.AsNullable<Verse::Vst::Comment>())
 		{
 			const FVerseByteRange Range = SourceIndex.ToRange(Node.Whence());
 			if (Range.IsSet() && Range.NumBytes > 0)
 			{
-				OutRegions.Add({Range, EVerseSourceRegionKind::Comment, NAME_None});
+				FVerseSourceRegion& Region = OutRegions.AddDefaulted_GetRef();
+				Region.Range = Range;
+				Region.Kind = EVerseSourceRegionKind::Comment;
+				Region.BodyRange = Range;
+				Region.CommentKind = ToCommentKind(Comment->_Type);
 			}
 			return;
 		}
@@ -264,6 +370,7 @@ namespace VerseParseSnapshotBuilder
 		OutRegion.TypeRange = TypeOperand != nullptr
 			? SourceIndex.ToRange(TypeOperand->Whence())
 			: FVerseByteRange();
+		OutRegion.BodyRange = FindBodyRange(RightOperand, SourceIndex);
 		return true;
 	}
 }

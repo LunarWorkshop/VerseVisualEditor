@@ -213,7 +213,8 @@ This step delivers a structural representation independently of Slate.
 #### 2.3 Global-scope block presentation (complete)
 
 - Convert the Step 2.2 parse snapshot into visual blocks.
-- Stack blocks vertically in source order.
+- Arrange global-scope blocks horizontally in source order, with structural
+  definitions growing vertically inside tile-shaped containers.
 - Display each definition's name and type.
 - Represent unimplemented contents as raw `unknown` blocks.
 - Add collapse controls; reserve dotted composition guides for nested function
@@ -221,6 +222,10 @@ This step delivers a structural representation independently of Slate.
 - Add graph scrolling, panning, and bounded zooming.
 
 This step delivers the first read-only visual representation of Verse source.
+
+##### Further work
+- let's call these things 'tiles' not 'blocks' since blocks are already a thing in verse
+- moving the canvas should be RMB not MMB, and scroll should be zoom
 
 ### 3. Line numbers
 
@@ -296,6 +301,9 @@ blocks, line numbers, and copying.
   preservation, dirty transitions, and external-change behavior.
 
 This step delivers the first complete edit-and-save workflow.
+
+##### Further work
+- UI options to compile the open file or all files immediately
 
 #### 5.3 Undo and redo
 
@@ -376,8 +384,43 @@ introduced immediately beforehand.
 - Never mutate, undo, or discard source because compilation failed.
 - Test stale-result rejection and diagnostic mapping.
 
+### 7a. Comments
+
+- Support for adding/removing/changing/etc comments. Needs a plan, which may be complicated because of inline comments.
+- Preserve VST comment attachment and comment type while partitioning nested
+  bodies. Inline, prefix, and postfix comments must become children or raw gaps
+  of the appropriate clause without scanning body text for comment syntax.
+
+#### Nested-body range transition for Steps 7 through 13
+
+- `FVerseSourceRegion::BodyRange` is a durable requirement, but the current
+  `FindBodyRange()` and `TrimClauseDelimiters()` implementation is transitional.
+  It uses the official VST to select a body clause, then performs a small
+  source-range trim for its enclosing braces or colon. Replace that specific
+  trimming path with the richer VST-derived clause model in these steps as soon
+  as nested contents are represented.
+- Retain both the complete definition range and the body/interior range. They
+  serve different operations: whole-definition selection, copying, deletion,
+  and movement versus child layout and insertion inside the definition.
+- Replace `FindBodyRange()`/`TrimClauseDelimiters()` with a VST-derived clause
+  descriptor containing the interior range, opening punctuation range, closing
+  punctuation range, punctuation style (braces or colon/indentation), and an
+  empty-body insertion anchor.
+- Recursively traverse the official Verse VST clause children to build nested
+  visual regions. Never run a second parser over `BodyRange`.
+- Partition every body into complete ordered coverage: recognized child
+  regions plus exact raw gaps for whitespace, comments not yet modeled at that
+  step, invalid syntax, and unsupported constructs.
+- Preserve leading and trailing interior trivia even when no VST child owns it.
+  Child loci alone are not a replacement for the parent interior range.
+- Add lossless brace-style, colon/indentation-style, empty-body, comment/trivia,
+  invalid-body, and nested-definition fixtures before removing the transitional
+  delimiter trimming.
+
 ### 7. Enum contents
 
+- Make enum bodies the first consumer of the VST-derived clause descriptor and
+  retire the transitional delimiter trim for enum definitions.
 - Represent each enum label with an indented block.
 - Add renaming and identifier validation.
 - Add drag handles for reordering.
@@ -388,15 +431,24 @@ introduced immediately beforehand.
 
 ### 8. Functions
 
+- Represent the function body using its VST clause descriptor, keeping the
+  signature outside the body and its enclosing punctuation outside child
+  regions.
 - Display parameters, their names, types, and Blueprint-style type colors.
 - Display the return value and type.
 - Distinguish used and unused parameters.
 - Show reference locations when hovering usage indicators.
 - Display and edit effects and access specifiers in properties.
 - Keep function bodies as raw `unknown` blocks initially.
+- Build that initial raw body from the descriptor's exact interior range; later
+  expression steps must replace portions with VST-derived children while
+  preserving the remaining raw gaps.
 
 ### 9. Global constants
 
+- Model the initializer as its own VST-derived expression range rather than
+  treating it as a delimited definition body or using
+  `TrimClauseDelimiters()`.
 - Display and edit the declared type.
 - Provide an appropriate editor for simple typed literal values.
 - Provide selection controls for enums, types, and other discoverable values.
@@ -405,23 +457,33 @@ introduced immediately beforehand.
 
 ### 10. Modules
 
+- Use the VST-derived module clause descriptor and recursively convert its VST
+  children into nested definitions and exact raw gaps.
 - Display module names and effects.
 - Allow modules to contain all definition types already implemented.
 - Reuse selection, insertion, deletion, renaming, and reordering behavior.
 - Allow definitions to move between valid module and global scopes.
 - Support nested modules.
+- Preserve each nested module's independent complete, header, punctuation, and
+  interior ranges so movement and insertion target the correct scope.
 
 ### 11. Structs
 
+- Replace transitional struct body trimming with the shared VST clause
+  descriptor before presenting fields as child tiles.
 - Add shared effect support suitable for structs, classes, and interfaces.
 - Enforce and explain effect availability and inheritance rules.
 - Extend definitions to represent mutable `var` fields.
 - Add constant and optional properties.
 - Support field initializers and the `converges` requirement.
 - Reuse existing definition selection and movement behavior.
+- Partition struct interiors into VST-derived fields and lossless raw gaps,
+  including empty brace and empty indentation forms.
 
 ### 12. Classes
 
+- Replace transitional class body trimming with the shared VST clause
+  descriptor before presenting members as child tiles.
 - Add class fields and methods.
 - Add class-specific effects and constraints.
 - Add initializer and `let` blocks.
@@ -432,14 +494,21 @@ introduced immediately beforehand.
 - Add parametric classes and editable type parameters.
 - Enforce valid effects for parametric classes.
 - Add implemented-interface lists.
+- Recursively derive fields, methods, nested types, initializer blocks, and
+  unsupported gaps from the class VST body without reparsing its source text.
 
 ### 13. Interfaces
 
+- Replace transitional interface body trimming with the shared VST clause
+  descriptor before presenting members as child tiles.
 - Add interface blocks and interface-specific effects.
 - Add inherited-interface lists.
 - Support interface fields.
 - Add getter and setter selection for fields with accessors.
 - Add support for external definitions.
+- Recursively derive interface fields, accessors, nested definitions, and raw
+  gaps from the interface VST body while retaining the parent interior range
+  for empty-body insertion and trivia preservation.
 
 ### 14. Statements and identifiers
 
@@ -514,3 +583,4 @@ These items are intentionally not planned in detail yet:
   introducing identifiers and splitting statements when necessary.
 - Open Verse files in VVE via the "Verse Explorer"
 - Move/copy/paste/duplicate/delete files and folders via the tree
+- A panel that shows all global scope items in a file for easy access, in case there are a hojillion of them and you want fast access.

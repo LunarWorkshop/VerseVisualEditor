@@ -5,6 +5,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class SScaleBox;
+class SScrollBar;
 class SScrollBox;
 
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
@@ -29,9 +30,13 @@ public:
 private:
 	TSharedRef<SWidget> BuildBlockList();
 	TSharedRef<SWidget> BuildBlock(const struct FVerseVisualBlock& Block);
+	TSharedRef<SWidget> BuildTileBlock(const struct FVerseVisualBlock& Block);
+	TSharedRef<SWidget> BuildCompactBlock(const struct FVerseVisualBlock& Block);
 	FText Decode(FVerseByteRange Range) const;
 
 	TOptional<FVerseParseSnapshot> Snapshot;
+	TSharedPtr<SScrollBar> HorizontalScrollbar;
+	TSharedPtr<SScrollBar> VerticalScrollbar;
 	TSharedPtr<SScrollBox> HorizontalScrollBox;
 	TSharedPtr<SScrollBox> VerticalScrollBox;
 	TSharedPtr<SScaleBox> ScaleBox;

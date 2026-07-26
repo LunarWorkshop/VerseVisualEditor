@@ -18,6 +18,8 @@ struct FVerseVisualBlock
 	FName DefinitionKind;
 	FVerseByteRange NameRange;
 	FVerseByteRange TypeRange;
+	FVerseByteRange BodyRange;
+	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 
 class FVerseVisualBlockBuilder

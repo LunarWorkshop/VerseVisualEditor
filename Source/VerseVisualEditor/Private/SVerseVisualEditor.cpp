@@ -551,25 +551,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			.AutoHeight()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(ActiveDocument->FilePath))
-				.ToolTipText(FText::FromString(ActiveDocument->FilePath))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 2.0f, 0.0f, 6.0f)
-			[
-				SNew(STextBlock)
-				.Text_Lambda([WeakDocument]()
-				{
-					const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
-					return Document.IsValid() ? GetSourceControlStatus(Document->FilePath) : FText::GetEmpty();
-				})
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(STextBlock)
 					.Text_Lambda([WeakDocument]()
 					{
 						const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();

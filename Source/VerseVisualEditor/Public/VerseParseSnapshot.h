@@ -17,6 +17,15 @@ enum class EVerseSourceRegionKind : uint8
 	Syntax,
 };
 
+enum class EVerseCommentKind : uint8
+{
+	None,
+	Line,
+	Block,
+	Indented,
+	Fragment,
+};
+
 /** A visual-model-facing description of a range in a particular source document. */
 struct VERSEVISUALEDITOR_API FVerseSourceRegion
 {
@@ -25,6 +34,8 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	FName SyntaxKind;
 	FVerseByteRange NameRange;
 	FVerseByteRange TypeRange;
+	FVerseByteRange BodyRange;
+	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 
 /**

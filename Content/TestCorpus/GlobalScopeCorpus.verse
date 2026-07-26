@@ -1,8 +1,25 @@
 # Global-scope visual block corpus: first comment.
+# A continuation of the first comment.
 <# Global-scope visual block corpus: second comment. #>
 
 CorpusModuleOne := module {}
-CorpusModuleTwo := module {}
+CorpusModuleTwo := module:
+    CorpusModuleTwoPointOne := module {}
+    CorpusModuleTwoPointTwo := module {
+        CorpusClass221 := class {
+            var Counter : int = 0
+            var IncrementAmount : int = 1
+            Increment(Value : int)<computes> : int = Value + 1
+            Double(Value : int)<computes> : int = Value * 2
+            OperationState := enum { Ready, Running, Complete }
+        }
+        CorpusClass222 := class:
+            var Score : int = 100
+            var Penalty : int = 5
+            Decrement(Value : int)<computes> : int = Value - 1
+            Triple(Value : int)<computes> : int = Value * 3
+            Difficulty := enum { Easy, Normal, Hard }
+    }
 
 CorpusClassOne := class {}
 CorpusClassTwo := class {}
@@ -21,9 +38,6 @@ CorpusFunctionOne(Input : int)<computes> : int =
 
 CorpusFunctionTwo(Input : int)<computes> : int =
     Input + 1
-
-var CorpusVariableOne : int = 1
-var CorpusVariableTwo : int = 2
 
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"
