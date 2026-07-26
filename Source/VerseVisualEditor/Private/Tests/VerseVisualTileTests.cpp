@@ -66,6 +66,14 @@ bool FVerseGlobalScopeTilePresentationTest::RunTest(const FString& Parameters)
 	{
 		const FVerseVisualTile& Tile = Tiles[Index];
 		TestTrue(*FString::Printf(TEXT("Tile %d has a source range"), Index), Tile.Range.IsSet());
+		TestEqual(
+			*FString::Printf(TEXT("Tile %d starts on its original one-based source line"), Index),
+			Tile.FirstSourceLine,
+			Document->GetOriginalLineNumber(Tile.Range.BeginByte));
+		TestEqual(
+			*FString::Printf(TEXT("Tile %d ends on its last occupied original source line"), Index),
+			Tile.LastSourceLine,
+			Document->GetOriginalLineNumber(Tile.Range.EndByte() - 1));
 		TestTrue(*FString::Printf(TEXT("Tile %d follows its predecessor"), Index), Tile.Range.BeginByte >= PreviousEnd);
 		PreviousEnd = Tile.Range.EndByte();
 
@@ -159,12 +167,27 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	TMap<FName, int32> DefinitionCounts;
 	int32 CommentCount = 0;
 	int32 UnknownCount = 0;
+	int32 ModuleOneFirstLine = INDEX_NONE;
+	int32 ModuleOneLastLine = INDEX_NONE;
+	int32 ModuleTwoFirstLine = INDEX_NONE;
+	int32 ModuleTwoLastLine = INDEX_NONE;
 	TArray<const FVerseVisualTile*> Comments;
 	for (const FVerseVisualTile& Tile : Tiles)
 	{
 		if (Tile.Kind == EVerseVisualTileKind::Definition)
 		{
 			++DefinitionCounts.FindOrAdd(Tile.DefinitionKind);
+			const FString Name = Document->DecodeOriginalRange(Tile.NameRange);
+			if (Name == TEXT("CorpusModuleOne"))
+			{
+				ModuleOneFirstLine = Tile.FirstSourceLine;
+				ModuleOneLastLine = Tile.LastSourceLine;
+			}
+			else if (Name == TEXT("CorpusModuleTwo"))
+			{
+				ModuleTwoFirstLine = Tile.FirstSourceLine;
+				ModuleTwoLastLine = Tile.LastSourceLine;
+			}
 		}
 		else if (Tile.Kind == EVerseVisualTileKind::Comment)
 		{
@@ -192,10 +215,18 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Corpus contains two dedicated comments"), CommentCount, 2);
 	TestEqual(TEXT("Valid corpus contains no unknown tiles"), UnknownCount, 0);
+	TestEqual(TEXT("Single-line module starts on line 5"), ModuleOneFirstLine, 5);
+	TestEqual(TEXT("Single-line module ends on line 5"), ModuleOneLastLine, 5);
+	TestEqual(TEXT("Multi-line module starts on line 6"), ModuleTwoFirstLine, 6);
+	TestEqual(TEXT("Multi-line module ends on line 22"), ModuleTwoLastLine, 22);
 	if (TestEqual(TEXT("Comment stack has a line group and a block comment"), Comments.Num(), 2))
 	{
 		const FUtf8StringView LineGroup = Snapshot.GetSourceView(Comments[0]->BodyRange);
 		const FUtf8StringView BlockComment = Snapshot.GetSourceView(Comments[1]->BodyRange);
+		TestEqual(TEXT("Merged line-comment tile starts on line 1"), Comments[0]->FirstSourceLine, 1);
+		TestEqual(TEXT("Merged line-comment tile ends on line 2"), Comments[0]->LastSourceLine, 2);
+		TestEqual(TEXT("Block-comment tile starts on line 3"), Comments[1]->FirstSourceLine, 3);
+		TestEqual(TEXT("Block-comment tile ends on line 3"), Comments[1]->LastSourceLine, 3);
 		TestTrue(TEXT("Adjacent hashtag comments merge into one visual tile"),
 			LineGroup.Find(UTF8TEXTVIEW("first comment")) != INDEX_NONE
 			&& LineGroup.Find(UTF8TEXTVIEW("continuation")) != INDEX_NONE);

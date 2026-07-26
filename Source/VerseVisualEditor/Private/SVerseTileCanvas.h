@@ -44,6 +44,7 @@ private:
 	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile);
 	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile);
 	FText Decode(FVerseByteRange Range) const;
+	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
 
 	TOptional<FVerseParseSnapshot> Snapshot;
 	TSharedPtr<SScrollBar> HorizontalScrollbar;

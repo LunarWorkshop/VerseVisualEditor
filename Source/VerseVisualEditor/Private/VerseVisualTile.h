@@ -14,6 +14,8 @@ enum class EVerseVisualTileKind : uint8
 struct FVerseVisualTile
 {
 	FVerseByteRange Range;
+	int32 FirstSourceLine = INDEX_NONE;
+	int32 LastSourceLine = INDEX_NONE;
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	FName DefinitionKind;
 	FVerseByteRange NameRange;

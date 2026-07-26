@@ -51,6 +51,15 @@ namespace
 		}
 		return LineBreakCount <= 1;
 	}
+
+	void UpdateSourceLines(FVerseVisualTile& Tile, const FVerseDocument& Document)
+	{
+		Tile.FirstSourceLine = Document.GetOriginalLineNumber(Tile.Range.BeginByte);
+		const int32 LastOccupiedByte = Tile.Range.NumBytes > 0
+			? Tile.Range.EndByte() - 1
+			: Tile.Range.BeginByte;
+		Tile.LastSourceLine = Document.GetOriginalLineNumber(LastOccupiedByte);
+	}
 }
 
 TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(const FVerseParseSnapshot& Snapshot)
@@ -70,11 +79,13 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(const FVerseParseSnapsho
 				Tiles.Last().Range.BeginByte,
 				Region.Range.EndByte());
 			Tiles.Last().BodyRange = Tiles.Last().Range;
+			UpdateSourceLines(Tiles.Last(), *Snapshot.GetDocument());
 			continue;
 		}
 
 		FVerseVisualTile& Tile = Tiles.AddDefaulted_GetRef();
 		Tile.Range = Region.Range;
+		UpdateSourceLines(Tile, *Snapshot.GetDocument());
 		if (Region.Kind == EVerseSourceRegionKind::Syntax)
 		{
 			Tile.Kind = EVerseVisualTileKind::Definition;

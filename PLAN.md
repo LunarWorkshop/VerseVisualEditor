@@ -32,6 +32,8 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Global-scope tile presentation: complete; parser-backed definitions,
   comments, and unknown regions render as collapsible source-ordered tiles in
   a scrollable, pannable, bounded-zoom graph.
+- Original-source line ranges: complete; every tile displays its one-based
+  source line or inclusive line range beneath its expansion arrow.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -228,10 +230,15 @@ This step delivers the first read-only visual representation of Verse source.
 - moving the canvas should be RMB not MMB, and scroll should be zoom
 - do that thing where the mouse gets replaced and hidden when you scroll past the edge so you can keep dragging the canvas forever like blueprint does
 
-### 3. Line numbers
+### 3. Line numbers (complete)
 
 - Associate every tile with its parse-snapshot `FVerseByteRange`.
-- Display the corresponding original source line numbers in a left margin.
+- Derive an inclusive, one-based original source line range from each tile's
+  half-open byte range.
+- Display `L8` for a single-line tile or `L5-6` for a multi-line tile beneath
+  the expansion arrow in a small, regular-weight, subdued font.
+- Cover exact single-line, multi-line, and merged-comment ranges with
+  automation tests.
 - Defer updating line information after localized edits to Step 5.1, where
   current document revisions first exist.
 
@@ -579,6 +586,7 @@ requirements justify them:
 These items are intentionally not planned in detail yet:
 
 - Detect required function effects while authoring and offer to add them.
+- User option to show or hide line numbers at all
 - Show source lines modified relative to version control.
 - Allow complex expression connections to refactor code automatically by
   introducing identifiers and splitting statements when necessary.

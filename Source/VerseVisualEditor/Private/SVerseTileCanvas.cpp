@@ -370,6 +370,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.BorderBackgroundColor(TileColor)
 			.BodyBorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
 			.HeaderPadding(FMargin(8.0f, 6.0f))
+			.AreaTitlePadding(FMargin(0.0f, 0.0f, 3.0f, 12.0f))
 			.HeaderContent()
 			[
 				SNew(SVerticalBox)
@@ -391,8 +392,18 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
+				.Padding(-19.0f, 6.0f, 0.0f, 0.0f)
 				[
 					SNew(STextBlock)
+					.Text(FormatSourceLines(Tile))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+					.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Visibility(TypeText.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 					.Text(TypeText.IsEmpty()
 						? FText::GetEmpty()
 						: FText::Format(LOCTEXT("TileDefinitionType", "Type: {0}"), TypeText))
@@ -428,34 +439,49 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.BorderBackgroundColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
 		.BodyBorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
+		.AreaTitlePadding(FMargin(0.0f, 0.0f, 3.0f, 12.0f))
 		.HeaderContent()
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(2.0f, 0.0f, 10.0f, 0.0f)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
-				SNew(STextBlock)
-				.Text(KindText)
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-				.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(2.0f, 0.0f, 10.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(KindText)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+					.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(STextBlock)
+					.Text(NameText)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(8.0f, 0.0f, 2.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(TypeText.IsEmpty()
+						? FText::GetEmpty()
+						: FText::Format(LOCTEXT("CompactDefinitionType", ": {0}"), TypeText))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
 			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(-19.0f, 6.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock)
-				.Text(NameText)
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(8.0f, 0.0f, 2.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(TypeText.IsEmpty()
-					? FText::GetEmpty()
-					: FText::Format(LOCTEXT("CompactDefinitionType", ": {0}"), TypeText))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.Text(FormatSourceLines(Tile))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+				.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
 			]
 		]
 		.BodyContent()
@@ -476,6 +502,18 @@ FText SVerseTileCanvas::Decode(FVerseByteRange Range) const
 	return Range.IsSet()
 		? FText::FromString(Snapshot->GetDocument()->DecodeOriginalRange(Range))
 		: FText::GetEmpty();
+}
+
+FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
+{
+	if (Tile.FirstSourceLine == INDEX_NONE || Tile.LastSourceLine == INDEX_NONE)
+	{
+		return FText::GetEmpty();
+	}
+
+	return FText::FromString(Tile.FirstSourceLine == Tile.LastSourceLine
+		? FString::Printf(TEXT("L%d"), Tile.FirstSourceLine)
+		: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine));
 }
 
 #undef LOCTEXT_NAMESPACE
