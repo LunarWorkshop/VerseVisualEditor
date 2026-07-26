@@ -7,7 +7,8 @@
 	"Category": "Verse",
 	"CreatedBy": "Lunar Workshop",
 	"EnabledByDefault": false,
-	"CanContainContent": false,
+	"CanContainContent": true,
+	"CanContainVerse": true,
 	"IsBetaVersion": true,
 	"Installed": false,
 	"Modules": [

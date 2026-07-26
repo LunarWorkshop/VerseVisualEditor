@@ -29,6 +29,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Top-level recognition: complete; the official Verse compiler VST supplies
   supported definitions, unsupported gaps produce complete ordered source
   coverage, and all `VerseVisualEditor` automation tests pass.
+- Global-scope block presentation: complete; parser-backed definitions,
+  comments, and unknown regions render as collapsible source-ordered blocks in
+  a scrollable, pannable, bounded-zoom graph.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -207,13 +210,14 @@ introducing editing concepts.
 
 This step delivers a structural representation independently of Slate.
 
-#### 2.3 Global-scope block presentation
+#### 2.3 Global-scope block presentation (complete)
 
 - Convert the Step 2.2 parse snapshot into visual blocks.
 - Stack blocks vertically in source order.
 - Display each definition's name and type.
 - Represent unimplemented contents as raw `unknown` blocks.
-- Add collapse controls and dotted composition guides.
+- Add collapse controls; reserve dotted composition guides for nested function
+  composition rather than global scope.
 - Add graph scrolling, panning, and bounded zooming.
 
 This step delivers the first read-only visual representation of Verse source.

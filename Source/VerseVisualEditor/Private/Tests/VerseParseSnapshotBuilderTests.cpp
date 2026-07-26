@@ -55,6 +55,12 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestFalse(TEXT("Raw region has no name range"), Region.NameRange.IsSet());
 				Test.TestFalse(TEXT("Raw region has no type range"), Region.TypeRange.IsSet());
 			}
+			else if (Region.Kind == EVerseSourceRegionKind::Comment)
+			{
+				Test.TestEqual(TEXT("Comment region has no syntax kind"), Region.SyntaxKind, NAME_None);
+				Test.TestFalse(TEXT("Comment region has no name range"), Region.NameRange.IsSet());
+				Test.TestFalse(TEXT("Comment region has no type range"), Region.TypeRange.IsSet());
+			}
 			else
 			{
 				Test.TestTrue(TEXT("Typed region has a syntax kind"), !Region.SyntaxKind.IsNone());

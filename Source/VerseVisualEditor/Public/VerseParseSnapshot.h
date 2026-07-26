@@ -10,6 +10,9 @@ enum class EVerseSourceRegionKind : uint8
 	/** Source not yet recognized by the visual editor. Its text remains authoritative. */
 	Raw,
 
+	/** A comment recognized by the official Verse parser. */
+	Comment,
+
 	/** Source recognized as a Verse construct. SyntaxKind identifies the construct. */
 	Syntax,
 };

@@ -112,6 +112,46 @@ namespace VerseParseSnapshotBuilder
 		return false;
 	}
 
+	void CollectCommentRegions(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		TSet<const Verse::Vst::Node*>& VisitedNodes,
+		TArray<FVerseSourceRegion>& OutRegions)
+	{
+		if (VisitedNodes.Contains(&Node))
+		{
+			return;
+		}
+		VisitedNodes.Add(&Node);
+
+		if (Node.IsA<Verse::Vst::Comment>())
+		{
+			const FVerseByteRange Range = SourceIndex.ToRange(Node.Whence());
+			if (Range.IsSet() && Range.NumBytes > 0)
+			{
+				OutRegions.Add({Range, EVerseSourceRegionKind::Comment, NAME_None});
+			}
+			return;
+		}
+
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPrefixComments())
+		{
+			CollectCommentRegions(*Comment, SourceIndex, VisitedNodes, OutRegions);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPostfixComments())
+		{
+			CollectCommentRegions(*Comment, SourceIndex, VisitedNodes, OutRegions);
+		}
+		if (Node.GetAux())
+		{
+			CollectCommentRegions(*Node.GetAux(), SourceIndex, VisitedNodes, OutRegions);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			CollectCommentRegions(*Child, SourceIndex, VisitedNodes, OutRegions);
+		}
+	}
+
 	FName ClassifyMacro(const Verse::Vst::Node& RightOperand)
 	{
 		const Verse::Vst::Node* Unwrapped = UnwrapSingleClause(&RightOperand);
@@ -253,42 +293,50 @@ FVerseParseSnapshot FVerseParseSnapshotBuilder::Build(
 		VerseFN::UploadedAtFNVersion::Latest);
 
 	const VerseParseSnapshotBuilder::FSourceIndex SourceIndex(Source);
-	TArray<FVerseSourceRegion> TypedRegions;
+	TArray<FVerseSourceRegion> RecognizedRegions;
 	for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Node : Snippet->GetChildren())
 	{
 		FVerseSourceRegion Region;
 		if (VerseParseSnapshotBuilder::TryMakeTypedRegion(*Node, SourceIndex, Region))
 		{
-			TypedRegions.Add(MoveTemp(Region));
+			RecognizedRegions.Add(MoveTemp(Region));
 		}
 	}
+	TSet<const Verse::Vst::Node*> VisitedNodes;
+	VerseParseSnapshotBuilder::CollectCommentRegions(
+		*Snippet,
+		SourceIndex,
+		VisitedNodes,
+		RecognizedRegions);
 
-	if (TypedRegions.IsEmpty())
+	if (RecognizedRegions.IsEmpty())
 	{
 		return FVerseParseSnapshot::CreateRaw(MoveTemp(Document));
 	}
 
-	TypedRegions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
+	RecognizedRegions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
 	{
-		return Left.Range.BeginByte < Right.Range.BeginByte;
+		return Left.Range.BeginByte == Right.Range.BeginByte
+			? Left.Range.NumBytes < Right.Range.NumBytes
+			: Left.Range.BeginByte < Right.Range.BeginByte;
 	});
 
 	TArray<FVerseSourceRegion> CompleteRegions;
 	int32 Cursor = 0;
-	for (FVerseSourceRegion& TypedRegion : TypedRegions)
+	for (FVerseSourceRegion& RecognizedRegion : RecognizedRegions)
 	{
-		if (TypedRegion.Range.BeginByte < Cursor || TypedRegion.Range.EndByte() > Source.Len())
+		if (RecognizedRegion.Range.BeginByte < Cursor || RecognizedRegion.Range.EndByte() > Source.Len())
 		{
 			continue;
 		}
-		if (Cursor < TypedRegion.Range.BeginByte)
+		if (Cursor < RecognizedRegion.Range.BeginByte)
 		{
 			CompleteRegions.Add({
-				FVerseByteRange::FromBounds(Cursor, TypedRegion.Range.BeginByte),
+				FVerseByteRange::FromBounds(Cursor, RecognizedRegion.Range.BeginByte),
 				EVerseSourceRegionKind::Raw,
 				NAME_None});
 		}
-		CompleteRegions.Add(MoveTemp(TypedRegion));
+		CompleteRegions.Add(MoveTemp(RecognizedRegion));
 		Cursor = CompleteRegions.Last().Range.EndByte();
 	}
 	if (Cursor < Source.Len())

@@ -1,5 +1,7 @@
 #include "SVerseVisualEditor.h"
 
+#include "SVerseBlockGraph.h"
+
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
 #include "Framework/Application/SlateApplication.h"
@@ -23,10 +25,8 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
-#include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
@@ -39,7 +39,7 @@ struct FOpenVerseDocument
 	FText LoadError;
 	bool bIsTemporary = false;
 	float ScrollOffset = 0.0f;
-	TSharedPtr<SScrollBox> ScrollBox;
+	TSharedPtr<SVerseBlockGraph> BlockGraph;
 };
 
 namespace
@@ -541,9 +541,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 
 	const TWeakPtr<FOpenVerseDocument> WeakDocument = ActiveDocument;
-	const FString SourceText = ActiveDocument->Document.IsValid()
-		? ActiveDocument->Document->DecodeOriginalRange(ActiveDocument->Document->GetWholeOriginalRange())
-		: FString();
 	ActiveDocumentBox->SetContent(
 		SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -590,24 +587,21 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
-				SAssignNew(ActiveDocument->ScrollBox, SScrollBox)
-				+ SScrollBox::Slot()
-				[
-					SNew(SMultiLineEditableText)
-					.Text(FText::FromString(SourceText))
-					.IsReadOnly(true)
-				]
+				SAssignNew(
+					ActiveDocument->BlockGraph,
+					SVerseBlockGraph,
+					ActiveDocument->ParseSnapshot.GetValue(),
+					ActiveDocument->ScrollOffset)
 			]
 		]);
-	ActiveDocument->ScrollBox->SetScrollOffset(ActiveDocument->ScrollOffset);
 }
 
 void SVerseVisualEditor::CaptureActiveScrollOffset()
 {
-	if (ActiveDocument.IsValid() && ActiveDocument->ScrollBox.IsValid())
+	if (ActiveDocument.IsValid() && ActiveDocument->BlockGraph.IsValid())
 	{
-		ActiveDocument->ScrollOffset = ActiveDocument->ScrollBox->GetScrollOffset();
-		ActiveDocument->ScrollBox.Reset();
+		ActiveDocument->ScrollOffset = ActiveDocument->BlockGraph->GetVerticalScrollOffset();
+		ActiveDocument->BlockGraph.Reset();
 	}
 }
 
