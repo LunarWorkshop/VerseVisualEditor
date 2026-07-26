@@ -34,6 +34,7 @@ struct FOpenVerseDocument
 	FString FilePath;
 	TSharedPtr<FVerseDocument> Document;
 	FText LoadError;
+	bool bIsTemporary = false;
 };
 
 namespace
@@ -110,6 +111,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 						.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
 						.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
 						.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
+						.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleTreeItemDoubleClicked)
 						.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
 						.SelectionMode(ESelectionMode::Single)
 					]
@@ -210,7 +212,15 @@ void SVerseVisualEditor::HandleTreeSelectionChanged(
 {
 	if (Item.IsValid() && !Item->bIsDirectory)
 	{
-		OpenDocument(Item->FullPath);
+		OpenDocument(Item->FullPath, true);
+	}
+}
+
+void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item)
+{
+	if (Item.IsValid() && !Item->bIsDirectory)
+	{
+		OpenDocument(Item->FullPath, false);
 	}
 }
 
@@ -227,7 +237,12 @@ TSharedPtr<SWidget> SVerseVisualEditor::MakeTreeContextMenu()
 		return nullptr;
 	}
 
-	return MakeRevealContextMenu(SelectedItems[0]->FullPath);
+	const TSharedPtr<FVerseFileTreeItem>& SelectedItem = SelectedItems[0];
+	if (!SelectedItem->bIsDirectory)
+	{
+		OpenDocument(SelectedItem->FullPath, false);
+	}
+	return MakeRevealContextMenu(SelectedItem->FullPath);
 }
 
 TSharedPtr<SWidget> SVerseVisualEditor::MakeRevealContextMenu(FString Path)
@@ -249,23 +264,38 @@ void SVerseVisualEditor::RevealInFileExplorer(FString Path)
 FReply SVerseVisualEditor::HandleTabMouseButtonUp(
 	const FGeometry& Geometry,
 	const FPointerEvent& PointerEvent,
-	FString Path)
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
 	if (PointerEvent.GetEffectingButton() != EKeys::RightMouseButton)
 	{
 		return FReply::Unhandled();
 	}
 
+	PinDocument(OpenDocument);
 	FSlateApplication::Get().PushMenu(
 		SharedThis(this),
 		FWidgetPath(),
-		MakeRevealContextMenu(MoveTemp(Path)).ToSharedRef(),
+		MakeRevealContextMenu(OpenDocument->FilePath).ToSharedRef(),
 		PointerEvent.GetScreenSpacePosition(),
 		FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
 	return FReply::Handled();
 }
 
-void SVerseVisualEditor::OpenDocument(const FString& FilePath)
+FReply SVerseVisualEditor::HandleTabMouseButtonDoubleClick(
+	const FGeometry& Geometry,
+	const FPointerEvent& PointerEvent,
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (PointerEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+
+	PinDocument(OpenDocument);
+	return FReply::Handled();
+}
+
+void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 {
 	FString NormalizedPath = FPaths::ConvertRelativePathToFull(FilePath);
 	FPaths::NormalizeFilename(NormalizedPath);
@@ -276,6 +306,10 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath)
 		}))
 	{
 		ActiveDocument = *Existing;
+		if (!bTemporary)
+		{
+			PinDocument(ActiveDocument);
+		}
 		RebuildDocumentTabs();
 		RefreshActiveDocument();
 		return;
@@ -283,6 +317,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath)
 
 	TSharedPtr<FOpenVerseDocument> NewDocument = MakeShared<FOpenVerseDocument>();
 	NewDocument->FilePath = MoveTemp(NormalizedPath);
+	NewDocument->bIsTemporary = bTemporary;
 	if (!ReloadDocument(NewDocument))
 	{
 		FMessageDialog::Open(
@@ -292,10 +327,25 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath)
 		return;
 	}
 
+	if (bTemporary)
+	{
+		OpenDocuments.RemoveAll([](const TSharedPtr<FOpenVerseDocument>& Candidate)
+		{
+			return Candidate.IsValid() && Candidate->bIsTemporary;
+		});
+	}
 	OpenDocuments.Add(NewDocument);
 	ActiveDocument = MoveTemp(NewDocument);
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
+}
+
+void SVerseVisualEditor::PinDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (OpenDocument.IsValid())
+	{
+		OpenDocument->bIsTemporary = false;
+	}
 }
 
 bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
@@ -352,7 +402,8 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 		.Padding(3.0f, 1.0f)
 		[
 			SNew(SBorder)
-			.OnMouseButtonUp(this, &SVerseVisualEditor::HandleTabMouseButtonUp, OpenDocument->FilePath)
+			.OnMouseButtonUp(this, &SVerseVisualEditor::HandleTabMouseButtonUp, OpenDocument)
+			.OnMouseDoubleClick(this, &SVerseVisualEditor::HandleTabMouseButtonDoubleClick, OpenDocument)
 			.BorderImage(FAppStyle::GetBrush(ActiveDocument == OpenDocument
 				? "DetailsView.CategoryTop"
 				: "ToolPanel.GroupBorder"))
@@ -378,7 +429,13 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 					[
 						SNew(STextBlock)
 						.Text(FText::FromString(FPaths::GetCleanFilename(OpenDocument->FilePath)))
-						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+						.Font_Lambda([WeakDocument]()
+						{
+							const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
+							return FCoreStyle::GetDefaultFontStyle(
+								Document.IsValid() && Document->bIsTemporary ? "Italic" : "Regular",
+								10);
+						})
 					]
 				]
 				+ SHorizontalBox::Slot()

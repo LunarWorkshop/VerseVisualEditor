@@ -31,15 +31,21 @@ private:
 	void HandleTreeSelectionChanged(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		ESelectInfo::Type SelectInfo);
+	void HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item);
 	TSharedPtr<SWidget> MakeTreeContextMenu();
 	TSharedPtr<SWidget> MakeRevealContextMenu(FString Path);
 	void RevealInFileExplorer(FString Path);
 	FReply HandleTabMouseButtonUp(
 		const FGeometry& Geometry,
 		const FPointerEvent& PointerEvent,
-		FString Path);
+		TSharedPtr<FOpenVerseDocument> OpenDocument);
+	FReply HandleTabMouseButtonDoubleClick(
+		const FGeometry& Geometry,
+		const FPointerEvent& PointerEvent,
+		TSharedPtr<FOpenVerseDocument> OpenDocument);
 
-	void OpenDocument(const FString& FilePath);
+	void OpenDocument(const FString& FilePath, bool bTemporary);
+	void PinDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	bool ReloadDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	FReply ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	FReply CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
