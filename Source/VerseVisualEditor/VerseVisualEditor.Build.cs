@@ -11,6 +11,7 @@ public class VerseVisualEditor : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"Projects",
 			"Slate",
 			"SlateCore",
 			"UnrealEd",
