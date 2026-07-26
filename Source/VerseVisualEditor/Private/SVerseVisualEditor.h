@@ -31,6 +31,13 @@ private:
 	void HandleTreeSelectionChanged(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		ESelectInfo::Type SelectInfo);
+	TSharedPtr<SWidget> MakeTreeContextMenu();
+	TSharedPtr<SWidget> MakeRevealContextMenu(FString Path);
+	void RevealInFileExplorer(FString Path);
+	FReply HandleTabMouseButtonUp(
+		const FGeometry& Geometry,
+		const FPointerEvent& PointerEvent,
+		FString Path);
 
 	void OpenDocument(const FString& FilePath);
 	bool ReloadDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);

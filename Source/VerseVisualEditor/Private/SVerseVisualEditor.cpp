@@ -2,7 +2,10 @@
 
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "IDirectoryWatcher.h"
 #include "ISourceControlModule.h"
 #include "ISourceControlProvider.h"
@@ -107,6 +110,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 						.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
 						.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
 						.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
+						.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
 						.SelectionMode(ESelectionMode::Single)
 					]
 					+ SOverlay::Slot()
@@ -210,6 +214,57 @@ void SVerseVisualEditor::HandleTreeSelectionChanged(
 	}
 }
 
+TSharedPtr<SWidget> SVerseVisualEditor::MakeTreeContextMenu()
+{
+	if (!FileTree.IsValid())
+	{
+		return nullptr;
+	}
+
+	const TArray<TSharedPtr<FVerseFileTreeItem>> SelectedItems = FileTree->GetSelectedItems();
+	if (SelectedItems.Num() != 1 || !SelectedItems[0].IsValid())
+	{
+		return nullptr;
+	}
+
+	return MakeRevealContextMenu(SelectedItems[0]->FullPath);
+}
+
+TSharedPtr<SWidget> SVerseVisualEditor::MakeRevealContextMenu(FString Path)
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("RevealInFileExplorer", "Reveal in File Explorer"),
+		LOCTEXT("RevealInFileExplorerTooltip", "Open File Explorer and reveal this item."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.FolderOpen"),
+		FUIAction(FExecuteAction::CreateSP(this, &SVerseVisualEditor::RevealInFileExplorer, MoveTemp(Path))));
+	return MenuBuilder.MakeWidget();
+}
+
+void SVerseVisualEditor::RevealInFileExplorer(FString Path)
+{
+	FPlatformProcess::ExploreFolder(*Path);
+}
+
+FReply SVerseVisualEditor::HandleTabMouseButtonUp(
+	const FGeometry& Geometry,
+	const FPointerEvent& PointerEvent,
+	FString Path)
+{
+	if (PointerEvent.GetEffectingButton() != EKeys::RightMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+
+	FSlateApplication::Get().PushMenu(
+		SharedThis(this),
+		FWidgetPath(),
+		MakeRevealContextMenu(MoveTemp(Path)).ToSharedRef(),
+		PointerEvent.GetScreenSpacePosition(),
+		FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
+	return FReply::Handled();
+}
+
 void SVerseVisualEditor::OpenDocument(const FString& FilePath)
 {
 	FString NormalizedPath = FPaths::ConvertRelativePathToFull(FilePath);
@@ -297,6 +352,7 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 		.Padding(3.0f, 1.0f)
 		[
 			SNew(SBorder)
+			.OnMouseButtonUp(this, &SVerseVisualEditor::HandleTabMouseButtonUp, OpenDocument->FilePath)
 			.BorderImage(FAppStyle::GetBrush(ActiveDocument == OpenDocument
 				? "DetailsView.CategoryTop"
 				: "ToolPanel.GroupBorder"))
