@@ -178,15 +178,6 @@ bool FVerseDocumentSourceRangeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Decoded block range"), Document->DecodeOriginalRange({6, 4}), FString(TEXT("beta")));
 	TestEqual(TEXT("First line number"), Document->GetOriginalLineNumber(0), 1);
 	TestEqual(TEXT("Second line number"), Document->GetOriginalLineNumber(6), 2);
-	TestEqual(TEXT("Initial source is one raw region"), Document->GetSourceRegions().Num(), 1);
-	TestEqual(TEXT("Raw region covers all content"), Document->GetSourceRegions()[0].Range, Document->GetWholeOriginalRange());
-
-	TArray<FVerseSourceRegion> Regions;
-	Regions.Add({{0, 5}, EVerseSourceRegionKind::Syntax, TEXT("Identifier")});
-	Regions.Add({{5, 1}, EVerseSourceRegionKind::Raw, NAME_None});
-	Regions.Add({{6, 4}, EVerseSourceRegionKind::Syntax, TEXT("Identifier")});
-	Regions.Add({{10, 1}, EVerseSourceRegionKind::Raw, NAME_None});
-	TestTrue(TEXT("Non-overlapping syntax and raw regions are accepted"), Document->SetSourceRegions(MoveTemp(Regions), Error));
 	return true;
 }
 

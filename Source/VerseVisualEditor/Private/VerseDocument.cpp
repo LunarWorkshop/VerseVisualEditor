@@ -101,12 +101,6 @@ void FVerseDocument::RebuildOriginalMetadata()
 			OriginalLineStarts.Add(ByteIndex + 1);
 		}
 	}
-
-	SourceRegions.Reset();
-	if (!OriginalView.IsEmpty())
-	{
-		SourceRegions.Add({{0, OriginalView.Len()}, EVerseSourceRegionKind::Raw, NAME_None});
-	}
 }
 
 FUtf8StringView FVerseDocument::GetOriginalUtf8View() const
@@ -133,34 +127,6 @@ FUtf8StringView FVerseDocument::GetOriginalUtf8View(FVerseByteRange Range) const
 FString FVerseDocument::DecodeOriginalRange(FVerseByteRange Range) const
 {
 	return DecodeUtf8(GetOriginalUtf8View(Range));
-}
-
-bool FVerseDocument::SetSourceRegions(TArray<FVerseSourceRegion> NewRegions, FText& OutError)
-{
-	const FVerseByteRange WholeRange = GetWholeOriginalRange();
-	NewRegions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
-	{
-		return Left.Range.BeginByte < Right.Range.BeginByte;
-	});
-
-	for (int32 RegionIndex = 0; RegionIndex < NewRegions.Num(); ++RegionIndex)
-	{
-		const FVerseByteRange Range = NewRegions[RegionIndex].Range;
-		if (!Range.IsSet() || Range.BeginByte < 0 || Range.NumBytes < 0 || Range.EndByte() > WholeRange.EndByte())
-		{
-			OutError = LOCTEXT("InvalidSourceRegion", "A source region is outside the original document.");
-			return false;
-		}
-		if (RegionIndex > 0 && RangesOverlap(NewRegions[RegionIndex - 1].Range, Range))
-		{
-			OutError = LOCTEXT("OverlappingSourceRegions", "Source regions may not overlap.");
-			return false;
-		}
-	}
-
-	SourceRegions = MoveTemp(NewRegions);
-	OutError = FText::GetEmpty();
-	return true;
 }
 
 int32 FVerseDocument::GetOriginalLineNumber(int32 ContentByteOffset) const
@@ -311,13 +277,6 @@ FString FVerseDocument::DecodeUtf8(FUtf8StringView Text)
 
 	const FUTF8ToTCHAR Converted(Text.GetData(), Text.Len());
 	return FString(Converted.Length(), Converted.Get());
-}
-
-bool FVerseDocument::RangesOverlap(
-	const FVerseByteRange& Left,
-	const FVerseByteRange& Right)
-{
-	return Left.BeginByte < Right.EndByte() && Right.BeginByte < Left.EndByte();
 }
 
 #undef LOCTEXT_NAMESPACE

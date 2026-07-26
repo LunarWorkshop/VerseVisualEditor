@@ -24,6 +24,8 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Window implementation: complete; the nomad window, project Verse source
   tree, read-only document tabs, source-control status, and external-change
   monitoring are implemented and covered by `VerseVisualEditor.Window` tests.
+- Revision-neutral parse snapshot: complete; the editor target builds
+  successfully and all `VerseVisualEditor.Foundation` automation tests pass.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -175,7 +177,7 @@ prompts are deferred to Step 5.2, when local edits and saving first exist.
 
 ### 2. Global scope view
 
-#### 2.1 Revision-neutral parse snapshot
+#### 2.1 Revision-neutral parse snapshot (complete)
 
 - Introduce an error-tolerant recognizer interface and
   `FVerseParseSnapshot`.

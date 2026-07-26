@@ -38,23 +38,6 @@ struct FVerseByteRange
 	bool operator==(const FVerseByteRange& Other) const = default;
 };
 
-enum class EVerseSourceRegionKind : uint8
-{
-	/** Source not yet recognized by the visual editor. Its text remains authoritative. */
-	Raw,
-
-	/** Source recognized as a Verse construct. SyntaxKind identifies the construct. */
-	Syntax,
-};
-
-/** A block-facing description of a range in the immutable original source. */
-struct FVerseSourceRegion
-{
-	FVerseByteRange Range;
-	EVerseSourceRegionKind Kind = EVerseSourceRegionKind::Raw;
-	FName SyntaxKind;
-};
-
 enum class EVerseLineEnding : uint8
 {
 	None,
@@ -87,9 +70,6 @@ public:
 	FUtf8StringView GetOriginalUtf8View(FVerseByteRange Range) const;
 	FString DecodeOriginalRange(FVerseByteRange Range) const;
 
-	const TArray<FVerseSourceRegion>& GetSourceRegions() const { return SourceRegions; }
-	bool SetSourceRegions(TArray<FVerseSourceRegion> NewRegions, FText& OutError);
-
 	bool HasUtf8Bom() const { return bHasUtf8Bom; }
 	EVerseLineEnding GetLineEnding() const { return LineEnding; }
 	int32 GetOriginalLineNumber(int32 ContentByteOffset) const;
@@ -101,11 +81,8 @@ private:
 	static bool ValidateUtf8(TConstArrayView<uint8> Bytes, int32& OutInvalidByte);
 	static EVerseLineEnding DetectLineEnding(FUtf8StringView Text);
 	static FString DecodeUtf8(FUtf8StringView Text);
-	static bool RangesOverlap(const FVerseByteRange& Left, const FVerseByteRange& Right);
-
 	FUtf8String OriginalText;
 	bool bHasUtf8Bom = false;
 	EVerseLineEnding LineEnding = EVerseLineEnding::None;
 	TArray<int32> OriginalLineStarts;
-	TArray<FVerseSourceRegion> SourceRegions;
 };
