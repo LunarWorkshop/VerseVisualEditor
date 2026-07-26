@@ -226,6 +226,7 @@ This step delivers the first read-only visual representation of Verse source.
 ##### Further work
 - let's call these things 'tiles' not 'blocks' since blocks are already a thing in verse
 - moving the canvas should be RMB not MMB, and scroll should be zoom
+- do that thing where the mouse gets replaced and hidden when you scroll past the edge so you can keep dragging the canvas forever like blueprint does
 
 ### 3. Line numbers
 

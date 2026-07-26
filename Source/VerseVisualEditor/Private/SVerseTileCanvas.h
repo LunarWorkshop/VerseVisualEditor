@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Input/CursorReply.h"
 #include "Input/Reply.h"
 #include "VerseParseSnapshot.h"
 #include "Widgets/SCompoundWidget.h"
@@ -22,10 +23,20 @@ public:
 
 	float GetVerticalScrollOffset() const;
 
-	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual int32 OnPaint(
+		const FPaintArgs& Args,
+		const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId,
+		const FWidgetStyle& InWidgetStyle,
+		bool bParentEnabled) const override;
+	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override;
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 
 private:
 	TSharedRef<SWidget> BuildTileRow();
@@ -42,5 +53,5 @@ private:
 	TSharedPtr<SScaleBox> ScaleBox;
 	float Zoom = 1.0f;
 	bool bIsPanning = false;
-	FVector2D PreviousPointerPosition = FVector2D::ZeroVector;
+	FVector2D SoftwareCursorPosition = FVector2D::ZeroVector;
 };
