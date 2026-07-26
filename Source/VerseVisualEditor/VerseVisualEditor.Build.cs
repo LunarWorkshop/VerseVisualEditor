@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class VisualVerseEditor : ModuleRules
+public class VerseVisualEditor : ModuleRules
 {
-	public VisualVerseEditor(ReadOnlyTargetRules Target) : base(Target)
+	public VerseVisualEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

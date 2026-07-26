@@ -2,7 +2,7 @@
 
 #include "Modules/ModuleInterface.h"
 
-class FVisualVerseEditorModule final : public IModuleInterface
+class FVerseVisualEditorModule final : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override;

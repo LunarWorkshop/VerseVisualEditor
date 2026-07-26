@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "0.1.0",
-	"FriendlyName": "Visual Verse Editor",
+	"FriendlyName": "Verse Visual Editor",
 	"Description": "A visual editor for authoring Verse while preserving the underlying source text.",
 	"Category": "Verse",
 	"CreatedBy": "Jorge",
@@ -12,7 +12,7 @@
 	"Installed": false,
 	"Modules": [
 		{
-			"Name": "VisualVerseEditor",
+			"Name": "VerseVisualEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
 		}

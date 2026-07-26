@@ -1,6 +1,6 @@
-# Contributing to Visual Verse Editor
+# Contributing to Verse Visual Editor
 
-Thank you for considering a contribution to Visual Verse Editor. Contributions
+Thank you for considering a contribution to Verse Visual Editor. Contributions
 of all sizes can help make visual Verse authoring clearer, safer, and more
 useful.
 
@@ -65,7 +65,7 @@ Search existing issues before opening a new report. Include:
 
 - The UE6-main revision or date you are using.
 - Your operating system.
-- The Visual Verse Editor version or commit.
+- The Verse Visual Editor version or commit.
 - A minimal Verse example that reproduces the problem, when possible.
 - Clear steps to reproduce the behavior.
 - What you expected to happen.

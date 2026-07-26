@@ -1,6 +1,6 @@
-# Visual Verse Editor License
+# Verse Visual Editor License
 
-Visual Verse Editor is provided under the **Fab Standard License**.
+Verse Visual Editor is provided under the **Fab Standard License**.
 
 The complete, legally binding Fab Standard License is available at:
 
