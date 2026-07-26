@@ -10,6 +10,7 @@
 #include "ISourceControlModule.h"
 #include "ISourceControlProvider.h"
 #include "ISourceControlState.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
@@ -35,10 +36,14 @@ struct FOpenVerseDocument
 	TSharedPtr<FVerseDocument> Document;
 	FText LoadError;
 	bool bIsTemporary = false;
+	float ScrollOffset = 0.0f;
+	TSharedPtr<SScrollBox> ScrollBox;
 };
 
 namespace
 {
+	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
+
 	FText GetSourceControlStatus(const FString& FilePath)
 	{
 		if (!ISourceControlModule::Get().IsEnabled()
@@ -148,6 +153,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 		]
 	];
 
+	LoadSession();
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 	RegisterDirectoryWatcher();
@@ -155,6 +161,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 
 SVerseVisualEditor::~SVerseVisualEditor()
 {
+	SaveSession();
 	UnregisterDirectoryWatcher();
 }
 
@@ -305,6 +312,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 			return Candidate->FilePath.Equals(NormalizedPath, ESearchCase::IgnoreCase);
 		}))
 	{
+		CaptureActiveScrollOffset();
 		ActiveDocument = *Existing;
 		if (!bTemporary)
 		{
@@ -334,6 +342,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 			return Candidate.IsValid() && Candidate->bIsTemporary;
 		});
 	}
+	CaptureActiveScrollOffset();
 	OpenDocuments.Add(NewDocument);
 	ActiveDocument = MoveTemp(NewDocument);
 	RebuildDocumentTabs();
@@ -365,6 +374,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 
 FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	CaptureActiveScrollOffset();
 	ActiveDocument = MoveTemp(OpenDocument);
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
@@ -373,6 +383,10 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 
 FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	if (ActiveDocument == OpenDocument)
+	{
+		CaptureActiveScrollOffset();
+	}
 	const int32 RemovedIndex = OpenDocuments.IndexOfByKey(OpenDocument);
 	OpenDocuments.Remove(OpenDocument);
 	if (ActiveDocument == OpenDocument)
@@ -463,6 +477,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	{
 		return;
 	}
+	CaptureActiveScrollOffset();
 
 	if (!ActiveDocument.IsValid())
 	{
@@ -528,7 +543,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
-				SNew(SScrollBox)
+				SAssignNew(ActiveDocument->ScrollBox, SScrollBox)
 				+ SScrollBox::Slot()
 				[
 					SNew(SMultiLineEditableText)
@@ -537,6 +552,118 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				]
 			]
 		]);
+	ActiveDocument->ScrollBox->SetScrollOffset(ActiveDocument->ScrollOffset);
+}
+
+void SVerseVisualEditor::CaptureActiveScrollOffset()
+{
+	if (ActiveDocument.IsValid() && ActiveDocument->ScrollBox.IsValid())
+	{
+		ActiveDocument->ScrollOffset = ActiveDocument->ScrollBox->GetScrollOffset();
+		ActiveDocument->ScrollBox.Reset();
+	}
+}
+
+void SVerseVisualEditor::LoadSession()
+{
+	if (!GConfig)
+	{
+		return;
+	}
+
+	int32 TabCount = 0;
+	GConfig->GetInt(SessionSection, TEXT("TabCount"), TabCount, GEditorPerProjectIni);
+
+	FString ActiveFilePath;
+	GConfig->GetString(SessionSection, TEXT("ActiveFilePath"), ActiveFilePath, GEditorPerProjectIni);
+	FPaths::NormalizeFilename(ActiveFilePath);
+
+	for (int32 TabIndex = 0; TabIndex < TabCount; ++TabIndex)
+	{
+		const FString KeyPrefix = FString::Printf(TEXT("Tab%d."), TabIndex);
+		FString FilePath;
+		if (!GConfig->GetString(SessionSection, *(KeyPrefix + TEXT("FilePath")), FilePath, GEditorPerProjectIni))
+		{
+			continue;
+		}
+
+		FilePath = FPaths::ConvertRelativePathToFull(FilePath);
+		FPaths::NormalizeFilename(FilePath);
+		if (!FPaths::FileExists(FilePath))
+		{
+			continue;
+		}
+
+		TSharedPtr<FOpenVerseDocument> RestoredDocument = MakeShared<FOpenVerseDocument>();
+		RestoredDocument->FilePath = MoveTemp(FilePath);
+		GConfig->GetBool(
+			SessionSection,
+			*(KeyPrefix + TEXT("Temporary")),
+			RestoredDocument->bIsTemporary,
+			GEditorPerProjectIni);
+		GConfig->GetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("ScrollOffset")),
+			RestoredDocument->ScrollOffset,
+			GEditorPerProjectIni);
+		RestoredDocument->ScrollOffset = FMath::Max(0.0f, RestoredDocument->ScrollOffset);
+
+		if (!ReloadDocument(RestoredDocument))
+		{
+			continue;
+		}
+
+		OpenDocuments.Add(RestoredDocument);
+		if (RestoredDocument->FilePath.Equals(ActiveFilePath, ESearchCase::IgnoreCase))
+		{
+			ActiveDocument = RestoredDocument;
+		}
+	}
+
+	if (!ActiveDocument.IsValid() && !OpenDocuments.IsEmpty())
+	{
+		ActiveDocument = OpenDocuments[0];
+	}
+}
+
+void SVerseVisualEditor::SaveSession()
+{
+	CaptureActiveScrollOffset();
+	if (!GConfig)
+	{
+		return;
+	}
+
+	GConfig->EmptySection(SessionSection, GEditorPerProjectIni);
+	GConfig->SetInt(SessionSection, TEXT("TabCount"), OpenDocuments.Num(), GEditorPerProjectIni);
+	GConfig->SetString(
+		SessionSection,
+		TEXT("ActiveFilePath"),
+		ActiveDocument.IsValid() ? *ActiveDocument->FilePath : TEXT(""),
+		GEditorPerProjectIni);
+
+	for (int32 TabIndex = 0; TabIndex < OpenDocuments.Num(); ++TabIndex)
+	{
+		const TSharedPtr<FOpenVerseDocument>& OpenDocument = OpenDocuments[TabIndex];
+		const FString KeyPrefix = FString::Printf(TEXT("Tab%d."), TabIndex);
+		GConfig->SetString(
+			SessionSection,
+			*(KeyPrefix + TEXT("FilePath")),
+			*OpenDocument->FilePath,
+			GEditorPerProjectIni);
+		GConfig->SetBool(
+			SessionSection,
+			*(KeyPrefix + TEXT("Temporary")),
+			OpenDocument->bIsTemporary,
+			GEditorPerProjectIni);
+		GConfig->SetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("ScrollOffset")),
+			OpenDocument->ScrollOffset,
+			GEditorPerProjectIni);
+	}
+
+	GConfig->Flush(false, GEditorPerProjectIni);
 }
 
 void SVerseVisualEditor::RegisterDirectoryWatcher()

@@ -156,6 +156,8 @@ editing without introducing edit state prematurely.
 - Add a Verse folder tree on the left.
 - Add a tabbed editing area on the right.
 - Open a file in a tab when selected in the tree.
+- Restore open tabs, the active tab, temporary-tab state, and per-tab vertical
+  scroll offsets when the editor window is reopened.
 - Display version-control state independently from document state.
 - Monitor files for external changes.
 - Reload externally changed files immediately while documents are read-only.
@@ -167,7 +169,7 @@ prompts are deferred to Step 5.2, when local edits and saving first exist.
 - Right click a folder or file to go to that folder
 - Single click a file to open it in a "temporary" tab that closes again if another file opens via that temporary tab. Double click or right click to open for real
 - Save the tabs that are open and their scroll status (don't care about cursor since that won't be a hting later) and open them when the editor starts again
-- open the tree to the file that was just opened whenever the file is opened
+- open the tree to the file that was just opened whenever the file is opened, including when you open for the first time and files are auto opened
 
 ### 2. Global scope view
 

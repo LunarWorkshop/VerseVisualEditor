@@ -51,6 +51,9 @@ private:
 	FReply CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	void RebuildDocumentTabs();
 	void RefreshActiveDocument();
+	void CaptureActiveScrollOffset();
+	void LoadSession();
+	void SaveSession();
 
 	void RegisterDirectoryWatcher();
 	void UnregisterDirectoryWatcher();
