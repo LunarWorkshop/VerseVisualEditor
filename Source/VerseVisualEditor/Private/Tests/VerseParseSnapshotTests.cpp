@@ -41,8 +41,6 @@ bool FVerseRawParseSnapshotTest::RunTest(const FString& Parameters)
 		{TEXT("Unsupported construct"), VerseParseSnapshotTests::Bytes(UTF8TEXTVIEW("future_syntax<unknown> := 42\n")), UTF8TEXTVIEW("future_syntax<unknown> := 42\n")},
 	};
 
-	FVerseRawSourceRecognizer RawRecognizer;
-	const IVerseSourceRecognizer& Recognizer = RawRecognizer;
 	for (const FFixture& Fixture : Fixtures)
 	{
 		FText Error;
@@ -52,7 +50,7 @@ bool FVerseRawParseSnapshotTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		FVerseParseSnapshot Snapshot = Recognizer.Recognize(Document.ToSharedRef());
+		FVerseParseSnapshot Snapshot = FVerseParseSnapshot::CreateRaw(Document.ToSharedRef());
 		TestTrue(
 			*FString::Printf(TEXT("%s snapshot retains its exact document"), *Fixture.Name),
 			&Snapshot.GetDocument().Get() == Document.Get());

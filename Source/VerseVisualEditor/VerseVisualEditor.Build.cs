@@ -20,7 +20,9 @@ public class VerseVisualEditor : ModuleRules
 			"SlateCore",
 			"SourceControl",
 			"UnrealEd",
-			"Verse"
+			"Verse",
+			"VerseCompiler",
+			"uLangCore"
 		});
 	}
 }

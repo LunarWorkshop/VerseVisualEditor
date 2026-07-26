@@ -20,6 +20,8 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	FVerseByteRange Range;
 	EVerseSourceRegionKind Kind = EVerseSourceRegionKind::Raw;
 	FName SyntaxKind;
+	FVerseByteRange NameRange;
+	FVerseByteRange TypeRange;
 };
 
 /**
@@ -36,25 +38,16 @@ public:
 	FUtf8StringView GetSourceView(const FVerseSourceRegion& Region) const;
 
 private:
+	friend class FVerseParseSnapshotBuilder;
+
+	static FVerseParseSnapshot CreateRecognized(
+		TSharedRef<const FVerseDocument> Document,
+		TArray<FVerseSourceRegion> SourceRegions);
+
 	FVerseParseSnapshot(
 		TSharedRef<const FVerseDocument> InDocument,
 		TArray<FVerseSourceRegion> InSourceRegions);
 
 	TSharedRef<const FVerseDocument> Document;
 	TArray<FVerseSourceRegion> SourceRegions;
-};
-
-/** Error-tolerant recognition boundary used to build a parse snapshot from authoritative source. */
-class VERSEVISUALEDITOR_API IVerseSourceRecognizer
-{
-public:
-	virtual ~IVerseSourceRecognizer() = default;
-	virtual FVerseParseSnapshot Recognize(TSharedRef<const FVerseDocument> Document) const = 0;
-};
-
-/** Fallback recognizer that preserves the complete source as one exact raw region. */
-class VERSEVISUALEDITOR_API FVerseRawSourceRecognizer final : public IVerseSourceRecognizer
-{
-public:
-	virtual FVerseParseSnapshot Recognize(TSharedRef<const FVerseDocument> Document) const override;
 };

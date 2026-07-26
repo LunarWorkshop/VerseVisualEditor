@@ -18,7 +18,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "VerseDocument.h"
-#include "VerseParseSnapshot.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -411,8 +411,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 		return false;
 	}
 
-	FVerseRawSourceRecognizer Recognizer;
-	OpenDocument->ParseSnapshot = Recognizer.Recognize(LoadedDocument.ToSharedRef());
+	OpenDocument->ParseSnapshot = FVerseParseSnapshotBuilder::Build(LoadedDocument.ToSharedRef());
 	OpenDocument->Document = MoveTemp(LoadedDocument);
 	OpenDocument->LoadError = FText::GetEmpty();
 	return true;

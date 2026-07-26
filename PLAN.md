@@ -26,6 +26,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
   monitoring are implemented and covered by `VerseVisualEditor.Window` tests.
 - Revision-neutral parse snapshot: complete; the editor target builds
   successfully and all `VerseVisualEditor.Foundation` automation tests pass.
+- Top-level recognition: complete; the official Verse compiler VST supplies
+  supported definitions, unsupported gaps produce complete ordered source
+  coverage, and all `VerseVisualEditor` automation tests pass.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -179,20 +182,20 @@ prompts are deferred to Step 5.2, when local edits and saving first exist.
 
 #### 2.1 Revision-neutral parse snapshot (complete)
 
-- Introduce an error-tolerant recognizer interface and
-  `FVerseParseSnapshot`.
+- Introduce `FVerseParseSnapshot` and a concrete compiler-backed snapshot
+  builder.
 - Move typed and raw source regions out of immutable `FVerseDocument` and into
   the parse snapshot.
 - Store `FVerseByteRange` on every region.
-- Supply a fallback recognizer that represents the complete source as one exact
-  raw region.
+- Supply raw snapshot construction that represents the complete source as one
+  exact raw region when parsing fails.
 - Ensure failure, incomplete input, and unsupported input always produce a
   usable raw snapshot.
 
 This step gives every Verse file a uniform, lossless visual-model input without
 introducing editing concepts.
 
-#### 2.2 Top-level recognition
+#### 2.2 Top-level recognition (complete)
 
 - Recognize top-level modules, classes, structs, interfaces, enums, functions,
   variables, constants, and type aliases.
