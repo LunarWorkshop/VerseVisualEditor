@@ -135,7 +135,7 @@ Each implementation substep must build and pass its focused automation tests
 before the next begins. Infrastructure will be introduced only in the first
 step with a direct consumer.
 
-## Implementation Steps
+## Prototype Implementation Steps
 
 ### 0. Foundation (complete)
 
@@ -242,18 +242,10 @@ This step delivers the first read-only visual representation of Verse source.
 - Defer updating line information after localized edits to Step 5.1, where
   current document revisions first exist.
 
-### 4. Selection, copying, and properties
+### 4. Selection and properties
 
 - Add single-tile selection.
-- Add Shift-click selection toggling.
-- Select a tile and its descendants on double-click.
-- Remove descendants automatically when their parent leaves the selection.
-- Copy immutable source represented by selected tiles' `FVerseByteRange`
-  values.
-- Add equivalent context-menu commands.
 - Add the properties panel and property filter.
-- Show only common properties with matching names and types for multiple
-  selection.
 
 Do not add edit transactions or selection-history snapshots until Step 5.
 
@@ -277,13 +269,13 @@ Do not add edit transactions or selection-history snapshots until Step 5.
 - After a replacement, increment the revision and rebuild the error-tolerant
   parse and tile representations from current source.
 - Preserve invalid edits as raw regions rather than rolling them back.
-- Update line numbers and copying to use current revisioned ranges.
+- Update line numbers to use current revisioned ranges.
 - Test localized replacement, span splitting and coalescing, append-only added
   storage, cache reuse and invalidation, revision validation, reparsing, and
   preservation of all unaffected bytes.
 
 This step delivers one tested localized source change through source, parsing,
-tiles, line numbers, and copying.
+tiles, and line numbers.
 
 #### 5.2 Rename and save vertical slice
 
@@ -310,75 +302,6 @@ tiles, line numbers, and copying.
 
 This step delivers the first complete edit-and-save workflow.
 
-##### Further work
-- UI options to compile the open file or all files immediately
-
-#### 5.3 Undo and redo
-
-- Add linear command history using lightweight before and after span snapshots
-  that share the original and added UTF-8 buffers.
-- Store revisioned selected ranges plus caret and anchor offsets with each
-  command.
-- On undo or redo, restore the corresponding spans, allocate a new monotonically
-  increasing document revision, invalidate materialized source, reparse, rebuild
-  tiles, and restore selection state.
-- Discard the redo tail when a new edit follows undo.
-- Keep history after saving.
-- Use `FVerseContentStateId` so undoing away from the saved state becomes dirty
-  and redoing back to it becomes clean.
-- Test source, tile, revision, selection, and saved-state restoration.
-
-This step makes the existing rename workflow safely reversible.
-
-#### 5.4 Atomic multi-edit transactions
-
-- Generalize the single replacement operation into
-  `FVerseEditTransaction`.
-- Give each transaction a description, one or more localized edits, and before
-  and after selection state.
-- Require every edit to target the same current revision.
-- Validate the complete transaction before changing source state.
-- Reject overlapping edits and invalid UTF-8 boundaries without partial
-  application.
-- Apply edits in descending byte order or with an equivalent one-pass span
-  rewrite.
-- Record the complete transaction as one undo step.
-- Test multiple edits, stale revisions, overlaps, failed atomic validation, and
-  one-command/one-undo behavior.
-
-This step supplies compound editing only when later visual operations need it.
-
-#### 5.5 Insertion and deletion
-
-- Add insertion controls between global definitions.
-- Offer every supported global definition type.
-- Create definitions with an automatically focused name field.
-- Generate the smallest required Verse fragment using the local line-ending and
-  indentation context.
-- Express insertion as a zero-length revisioned range.
-- Delete a definition's exact current range plus only the separator trivia
-  assigned by the command's documented policy.
-- Preserve every unaffected byte and reparse after each transaction.
-- Treat each insertion or deletion as one undo step.
-- Add lossless insertion and deletion fixtures.
-
-This step delivers creation and removal without introducing source
-regeneration.
-
-#### 5.6 Reordering
-
-- Allow valid contiguous selections to be reordered by dragging.
-- Move the selected current-source range through one atomic delete-and-insert
-  transaction without regenerating its contents.
-- Preserve the selection's formatting and internal raw regions exactly.
-- Reject destinations inside the moved range or outside the valid scope.
-- Restore selection to the moved definitions after reparsing.
-- Treat the complete move as one undo step.
-- Test byte preservation and invalid destination rejection.
-
-This step delivers lossless definition movement using the transaction support
-introduced immediately beforehand.
-
 ### 6. Compile errors
 
 - Add continuous, compile-on-save, and manual compilation modes.
@@ -392,14 +315,7 @@ introduced immediately beforehand.
 - Never mutate, undo, or discard source because compilation failed.
 - Test stale-result rejection and diagnostic mapping.
 
-### 7a. Comments
-
-- Support for adding/removing/changing/etc comments. Needs a plan, which may be complicated because of inline comments.
-- Preserve VST comment attachment and comment type while partitioning nested
-  bodies. Inline, prefix, and postfix comments must become children or raw gaps
-  of the appropriate clause without scanning body text for comment syntax.
-
-#### Nested-body range transition for Steps 7 through 13
+### 7. Nested-body range transition
 
 - `FVerseSourceRegion::BodyRange` is a durable requirement, but the current
   `FindBodyRange()` and `TrimClauseDelimiters()` implementation is transitional.
@@ -425,18 +341,6 @@ introduced immediately beforehand.
   invalid-body, and nested-definition fixtures before removing the transitional
   delimiter trimming.
 
-### 7. Enum contents
-
-- Make enum bodies the first consumer of the VST-derived clause descriptor and
-  retire the transitional delimiter trim for enum definitions.
-- Represent each enum label with an indented tile.
-- Add renaming and identifier validation.
-- Add drag handles for reordering.
-- Add removal buttons.
-- Add insertion controls before, between, and after labels.
-- Add the open/closed property.
-- Add lossless fixtures for supported enum formatting styles.
-
 ### 8. Functions
 
 - Represent the function body using its VST clause descriptor, keeping the
@@ -452,7 +356,175 @@ introduced immediately beforehand.
   expression steps must replace portions with VST-derived children while
   preserving the remaining raw gaps.
 
-### 9. Global constants
+### 9. Modules
+
+- Use the VST-derived module clause descriptor and recursively convert its VST
+  children into nested definitions and exact raw gaps.
+- Display module names and effects.
+- Allow modules to contain all definition types already implemented.
+- Reuse single-tile selection, insertion, deletion, renaming, and reordering
+  behavior.
+- Allow definitions to move between valid module and global scopes.
+- Support nested modules.
+- Preserve each nested module's independent complete, header, punctuation, and
+  interior ranges so movement and insertion target the correct scope.
+
+### 10. Statements and identifiers
+
+- Represent each statement-level expression with a tile.
+- Display statement order with Blueprint-style execution lines.
+- Represent extra blank lines visually without losing their source text.
+- Add typed expression sockets where assignment or reference is valid.
+- Add identifier expressions and scope-aware references.
+- Display the corresponding Verse line as a read-only tile label.
+
+### 11. Expression search
+
+- Add a prominent creation control to empty expression positions.
+- Open a filterable, automatically focused expression menu.
+- Filter entries by expected type and current scope.
+- Initially populate the menu with valid identifiers.
+- Replace the empty expression with the selected expression type.
+- Allow later expression implementations to register their own entries.
+
+### 12. Literal expressions
+
+- Add literal entries for each supported primitive type.
+- Provide type-appropriate inline and property-panel editors.
+- Add explicit controls for supported floating-point special values.
+- Restrict the first implementation to literals that require no casts.
+
+### 13. Basic expressions
+
+- Add arithmetic, comparison, Boolean, and other basic operators.
+- Create correctly typed child expression positions automatically.
+- Support unary and binary layouts.
+- Restrict expression choices according to operand and result types.
+
+### 14. Function calls
+
+- Add scope-aware function discovery to expression search.
+- Display and edit function arguments.
+- Enforce parameter and return types visually.
+- Add support for intrinsic functions.
+
+### 15. Control expressions
+
+- Add branching and looping constructs such as `if`, `for`, and `while`.
+- Represent each body with its own automatically created tile region.
+- Display main and nested execution paths distinctly.
+- Preserve and expose supported formatting variations.
+- Add whitespace properties for choosing among supported body styles.
+
+## Additional Implementation Steps
+
+### 1. Multi-selection and copying
+
+- Add Shift-click selection toggling.
+- Select a tile and its descendants on double-click.
+- Remove descendants automatically when their parent leaves the selection.
+- Copy current source represented by selected tiles' current-revision
+  `FVerseTextRange` values, materializing only the selected ranges.
+- Add equivalent context-menu commands.
+- Show only common properties with matching names and types for multiple
+  selection.
+- When undo/redo and edit transactions are available, upgrade their optional
+  single-selected-tile range to an ordered collection of revisioned selected
+  ranges and restore that collection after history operations.
+
+This step owns the transition from single-selection to multi-selection state.
+
+##### Further work
+- UI options to compile the open file or all files immediately
+
+### 2. Undo and redo
+
+- Add linear command history using lightweight before and after span snapshots
+  that share the original and added UTF-8 buffers.
+- Store the optional current-revision range of the single selected tile with
+  each command.
+- On undo or redo, restore the corresponding spans, allocate a new monotonically
+  increasing document revision, invalidate materialized source, reparse, rebuild
+  tiles, and restore the single selected tile when it still has a corresponding
+  rebuilt range.
+- Discard the redo tail when a new edit follows undo.
+- Keep history after saving.
+- Use `FVerseContentStateId` so undoing away from the saved state becomes dirty
+  and redoing back to it becomes clean.
+- Test source, tile, revision, single-selection, and saved-state restoration.
+
+This step makes the existing rename workflow safely reversible.
+
+### 3. Atomic multi-edit transactions
+
+- Generalize the single replacement operation into
+  `FVerseEditTransaction`.
+- Give each transaction a description, one or more localized edits, and
+  optional before and after single-selected-tile ranges.
+- Require every edit to target the same current revision.
+- Validate the complete transaction before changing source state.
+- Reject overlapping edits and invalid UTF-8 boundaries without partial
+  application.
+- Apply edits in descending byte order or with an equivalent one-pass span
+  rewrite.
+- Record the complete transaction as one undo step.
+- Test multiple edits, stale revisions, overlaps, failed atomic validation, and
+  one-command/one-undo behavior.
+
+This step supplies compound editing only when later visual operations need it.
+
+### 4. Insertion and deletion
+
+- Add insertion controls between global definitions.
+- Offer every supported global definition type.
+- Create definitions with an automatically focused name field.
+- Generate the smallest required Verse fragment using the local line-ending and
+  indentation context.
+- Express insertion as a zero-length revisioned range.
+- Delete a definition's exact current range plus only the separator trivia
+  assigned by the command's documented policy.
+- Preserve every unaffected byte and reparse after each transaction.
+- Treat each insertion or deletion as one undo step.
+- Add lossless insertion and deletion fixtures.
+
+This step delivers creation and removal without introducing source
+regeneration.
+
+### 5. Reordering
+
+- Allow one selected definition to be reordered by dragging.
+- Move that definition's current-source range through one atomic
+  delete-and-insert
+  transaction without regenerating its contents.
+- Preserve the definition's formatting and internal raw regions exactly.
+- Reject destinations inside the moved range or outside the valid scope.
+- Restore the single selection to the moved definition after reparsing.
+- Treat the complete move as one undo step.
+- Test byte preservation and invalid destination rejection.
+
+This step delivers lossless definition movement using the transaction support
+introduced immediately beforehand.
+
+### 6. Comments
+
+- Support for adding/removing/changing/etc comments. Needs a plan, which may be complicated because of inline comments.
+- Preserve VST comment attachment and comment type while partitioning nested
+  bodies. Inline, prefix, and postfix comments must become children or raw gaps
+  of the appropriate clause without scanning body text for comment syntax.
+
+### 7. Enum contents
+
+- Make enum bodies the first consumer of the VST-derived clause descriptor and
+  retire the transitional delimiter trim for enum definitions.
+- Represent each enum label with an indented tile.
+- Add renaming and identifier validation.
+- Add drag handles for reordering.
+- Add removal buttons.
+- Add insertion controls before, between, and after labels.
+- Add the open/closed property.
+- Add lossless fixtures for supported enum formatting styles.
+
+### 8. Global constants
 
 - Model the initializer as its own VST-derived expression range rather than
   treating it as a delimited definition body or using
@@ -463,19 +535,7 @@ introduced immediately beforehand.
 - Add Blueprint-style type indicators and usage indicators.
 - Preserve complex initializer expressions as raw tiles initially.
 
-### 10. Modules
-
-- Use the VST-derived module clause descriptor and recursively convert its VST
-  children into nested definitions and exact raw gaps.
-- Display module names and effects.
-- Allow modules to contain all definition types already implemented.
-- Reuse selection, insertion, deletion, renaming, and reordering behavior.
-- Allow definitions to move between valid module and global scopes.
-- Support nested modules.
-- Preserve each nested module's independent complete, header, punctuation, and
-  interior ranges so movement and insertion target the correct scope.
-
-### 11. Structs
+### 9. Structs
 
 - Replace transitional struct body trimming with the shared VST clause
   descriptor before presenting fields as child tiles.
@@ -484,11 +544,11 @@ introduced immediately beforehand.
 - Extend definitions to represent mutable `var` fields.
 - Add constant and optional properties.
 - Support field initializers and the `converges` requirement.
-- Reuse existing definition selection and movement behavior.
+- Reuse existing single-definition selection and movement behavior.
 - Partition struct interiors into VST-derived fields and lossless raw gaps,
   including empty brace and empty indentation forms.
 
-### 12. Classes
+### 10. Classes
 
 - Replace transitional class body trimming with the shared VST clause
   descriptor before presenting members as child tiles.
@@ -505,7 +565,7 @@ introduced immediately beforehand.
 - Recursively derive fields, methods, nested types, initializer blocks, and
   unsupported gaps from the class VST body without reparsing its source text.
 
-### 13. Interfaces
+### 11. Interfaces
 
 - Replace transitional interface body trimming with the shared VST clause
   descriptor before presenting members as child tiles.
@@ -518,57 +578,11 @@ introduced immediately beforehand.
   gaps from the interface VST body while retaining the parent interior range
   for empty-body insertion and trivia preservation.
 
-### 14. Statements and identifiers
-
-- Represent each statement-level expression with a tile.
-- Display statement order with Blueprint-style execution lines.
-- Represent extra blank lines visually without losing their source text.
-- Add typed expression sockets where assignment or reference is valid.
-- Add identifier expressions and scope-aware references.
-- Display the corresponding Verse line as a read-only tile label.
-
-### 15. Expression search
-
-- Add a prominent creation control to empty expression positions.
-- Open a filterable, automatically focused expression menu.
-- Filter entries by expected type and current scope.
-- Initially populate the menu with valid identifiers.
-- Replace the empty expression with the selected expression type.
-- Allow later expression implementations to register their own entries.
-
-### 16. Literal expressions
-
-- Add literal entries for each supported primitive type.
-- Provide type-appropriate inline and property-panel editors.
-- Add explicit controls for supported floating-point special values.
-- Restrict the first implementation to literals that require no casts.
-
-### 17. Basic expressions
-
-- Add arithmetic, comparison, Boolean, and other basic operators.
-- Create correctly typed child expression positions automatically.
-- Support unary and binary layouts.
-- Restrict expression choices according to operand and result types.
-
-### 18. Function calls
-
-- Add scope-aware function discovery to expression search.
-- Display and edit function arguments.
-- Enforce parameter and return types visually.
-- Add support for intrinsic functions.
-
-### 19. Control expressions
-
-- Add branching and looping constructs such as `if`, `for`, and `while`.
-- Represent each body with its own automatically created tile region.
-- Display main and nested execution paths distinctly.
-- Preserve and expose supported formatting variations.
-- Add whitespace properties for choosing among supported body styles.
-
-All editing features in Steps 7 through 19 must reuse localized revisioned
-replacements, atomic transactions, span-snapshot undo and redo, saved
-content-state tracking, and error-tolerant reparsing. They must not introduce a
-second serialization, editing, or history path.
+All editing features for comments, definitions, statements, and expressions
+must reuse localized revisioned replacements, atomic transactions,
+span-snapshot undo and redo, saved content-state tracking, and error-tolerant
+reparsing. They must not introduce a second serialization, editing, or history
+path.
 
 ## Deferred Optimizations
 
