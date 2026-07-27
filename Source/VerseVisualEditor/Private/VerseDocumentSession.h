@@ -16,9 +16,15 @@ public:
 	explicit FVerseDocumentSession(TSharedRef<const FVerseDocument> InOriginalDocument);
 
 	bool Replace(FVerseTextRange Range, FUtf8StringView Replacement, FText& OutError);
+	void Reload(TSharedRef<const FVerseDocument> InDocument);
+	bool SaveToFile(const FString& FilePath, FText& OutError);
+	TArray<uint8> BuildCurrentFileBytes() const;
 
 	const TSharedRef<const FVerseDocument>& GetOriginalDocument() const { return OriginalDocument; }
 	FVerseDocumentRevision GetRevision() const { return Revision; }
+	FVerseContentStateId GetContentStateId() const { return ContentStateId; }
+	FVerseContentStateId GetSavedContentStateId() const { return SavedContentStateId; }
+	bool IsDirty() const { return ContentStateId != SavedContentStateId; }
 	FVerseTextRange GetWholeTextRange() const;
 	const FVerseEditBuffer& GetEditBuffer() const { return EditBuffer; }
 	const FUtf8String& GetCurrentUtf8() const;
@@ -32,6 +38,8 @@ private:
 	TSharedRef<const FVerseDocument> OriginalDocument;
 	FVerseEditBuffer EditBuffer;
 	FVerseDocumentRevision Revision;
+	FVerseContentStateId ContentStateId;
+	FVerseContentStateId SavedContentStateId;
 	mutable TOptional<FUtf8String> MaterializedSource;
 	mutable uint32 MaterializationCount = 0;
 	TSharedPtr<const FVerseDocument> CurrentSourceDocument;

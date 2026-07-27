@@ -11,6 +11,14 @@ struct FVerseDocumentRevision
 	bool operator==(const FVerseDocumentRevision& Other) const = default;
 };
 
+/** Identity of source contents, independent of how many revisions have displayed them. */
+struct FVerseContentStateId
+{
+	uint64 Value = 0;
+
+	bool operator==(const FVerseContentStateId& Other) const = default;
+};
+
 /** A UTF-8 byte range whose offsets are valid only in one document revision. */
 struct FVerseTextRange : FVerseByteRange
 {

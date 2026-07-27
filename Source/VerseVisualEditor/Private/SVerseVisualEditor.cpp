@@ -21,10 +21,13 @@
 #include "Styling/CoreStyle.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
+#include "VerseExternalChange.h"
+#include "VerseIdentifier.h"
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -40,7 +43,9 @@ struct FOpenVerseDocument
 {
 	FString FilePath;
 	TSharedPtr<FVerseDocumentSession> Session;
+	TArray<uint8> LastKnownDiskBytes;
 	FText LoadError;
+	FText RenameValidationMessage;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
@@ -66,26 +71,10 @@ namespace
 			: LOCTEXT("SourceControlUnknown", "Source control: unknown");
 	}
 
-	bool MatchesOriginalFile(const FVerseDocument& Document, TConstArrayView<uint8> DiskBytes)
+	bool ByteArraysEqual(TConstArrayView<uint8> Left, TConstArrayView<uint8> Right)
 	{
-		constexpr uint8 Utf8Bom[] = {0xEF, 0xBB, 0xBF};
-		const FUtf8StringView OriginalText = Document.GetOriginalUtf8View();
-		const int32 BomLength = Document.HasUtf8Bom() ? UE_ARRAY_COUNT(Utf8Bom) : 0;
-		if (DiskBytes.Num() != BomLength + OriginalText.Len())
-		{
-			return false;
-		}
-
-		if (BomLength > 0 && FMemory::Memcmp(DiskBytes.GetData(), Utf8Bom, BomLength) != 0)
-		{
-			return false;
-		}
-
-		return OriginalText.IsEmpty()
-			|| FMemory::Memcmp(
-				DiskBytes.GetData() + BomLength,
-				OriginalText.GetData(),
-				OriginalText.Len()) == 0;
+		return Left.Num() == Right.Num()
+			&& (Left.IsEmpty() || FMemory::Memcmp(Left.GetData(), Right.GetData(), Left.Num()) == 0);
 	}
 }
 
@@ -95,73 +84,106 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SNew(SSplitter)
-		+ SSplitter::Slot()
-		.Value(0.22f)
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
 		[
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(6.0f)
+			.Padding(4.0f, 2.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(4.0f)
+					.ToolTipText(LOCTEXT("SaveActiveDocumentTooltip", "Save Active Verse File (Ctrl+S)"))
+					.IsEnabled_Lambda([this]()
+					{
+						return CanSaveActiveDocument();
+					})
+					.OnClicked(this, &SVerseVisualEditor::SaveActiveDocument)
+					[
+						SNew(SImage)
+						.Image(FAppStyle::GetBrush("Icons.Save"))
+					]
+				]
+			]
+		]
+		+ SVerticalBox::Slot()
+		.FillHeight(1.0f)
+		[
+			SNew(SSplitter)
+			+ SSplitter::Slot()
+			.Value(0.22f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(6.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(2.0f, 2.0f, 2.0f, 6.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("VerseFilesHeading", "Verse Files"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					[
+						SNew(SOverlay)
+						+ SOverlay::Slot()
+						[
+							SAssignNew(FileTree, STreeView<TSharedPtr<FVerseFileTreeItem>>)
+							.TreeItemsSource(&RootItems)
+							.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
+							.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
+							.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
+							.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleTreeItemDoubleClicked)
+							.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
+							.SelectionMode(ESelectionMode::Single)
+						]
+						+ SOverlay::Slot()
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("NoVerseRoots", "No project Verse source folders were found."))
+							.AutoWrapText(true)
+							.Justification(ETextJustify::Center)
+							.Visibility_Lambda([this]()
+							{
+								return RootItems.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+						]
+					]
+				]
+			]
+			+ SSplitter::Slot()
+			.Value(0.58f)
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot()
 				.AutoHeight()
-				.Padding(2.0f, 2.0f, 2.0f, 6.0f)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("VerseFilesHeading", "Verse Files"))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+					SAssignNew(DocumentTabBar, SHorizontalBox)
 				]
 				+ SVerticalBox::Slot()
 				.FillHeight(1.0f)
 				[
-					SNew(SOverlay)
-					+ SOverlay::Slot()
-					[
-						SAssignNew(FileTree, STreeView<TSharedPtr<FVerseFileTreeItem>>)
-						.TreeItemsSource(&RootItems)
-						.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
-						.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
-						.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
-						.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleTreeItemDoubleClicked)
-						.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
-						.SelectionMode(ESelectionMode::Single)
-					]
-					+ SOverlay::Slot()
-					.HAlign(HAlign_Center)
-					.VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("NoVerseRoots", "No project Verse source folders were found."))
-						.AutoWrapText(true)
-						.Justification(ETextJustify::Center)
-						.Visibility_Lambda([this]()
-						{
-							return RootItems.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
-						})
-					]
+					SAssignNew(ActiveDocumentBox, SBox)
 				]
 			]
-		]
-		+ SSplitter::Slot()
-		.Value(0.58f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			+ SSplitter::Slot()
+			.Value(0.20f)
 			[
-				SAssignNew(DocumentTabBar, SHorizontalBox)
+				SAssignNew(DetailsPanelHost, SBox)
 			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			[
-				SAssignNew(ActiveDocumentBox, SBox)
-			]
-		]
-		+ SSplitter::Slot()
-		.Value(0.20f)
-		[
-			SAssignNew(DetailsPanelHost, SBox)
 		]
 	];
 
@@ -238,6 +260,25 @@ void SVerseVisualEditor::HandleTreeSelectionChanged(
 	{
 		OpenDocument(Item->FullPath, true);
 	}
+}
+
+FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::S)
+	{
+		if (InKeyEvent.IsShiftDown())
+		{
+			SaveAllDocuments();
+			return FReply::Handled();
+		}
+		return SaveActiveDocument();
+	}
+	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::W)
+	{
+		CloseActiveDocument();
+		return FReply::Handled();
+	}
+	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
 void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item)
@@ -416,16 +457,34 @@ void SVerseVisualEditor::PinDocument(const TSharedPtr<FOpenVerseDocument>& OpenD
 
 bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
 {
+	TArray<uint8> DiskBytes;
+	if (!FFileHelper::LoadFileToArray(DiskBytes, *OpenDocument->FilePath))
+	{
+		OpenDocument->LoadError = FText::Format(
+			LOCTEXT("ReloadReadFailed", "Could not read Verse file: {0}"),
+			FText::FromString(OpenDocument->FilePath));
+		return false;
+	}
+
 	FText Error;
-	TSharedPtr<FVerseDocument> LoadedDocument = FVerseDocument::LoadFromFile(OpenDocument->FilePath, Error);
+	TSharedPtr<FVerseDocument> LoadedDocument = FVerseDocument::CreateFromBytes(DiskBytes, Error);
 	if (!LoadedDocument.IsValid())
 	{
 		OpenDocument->LoadError = Error;
 		return false;
 	}
 
-	OpenDocument->Session = MakeShared<FVerseDocumentSession>(LoadedDocument.ToSharedRef());
+	if (OpenDocument->Session.IsValid())
+	{
+		OpenDocument->Session->Reload(LoadedDocument.ToSharedRef());
+	}
+	else
+	{
+		OpenDocument->Session = MakeShared<FVerseDocumentSession>(LoadedDocument.ToSharedRef());
+	}
+	OpenDocument->LastKnownDiskBytes = MoveTemp(DiskBytes);
 	OpenDocument->LoadError = FText::GetEmpty();
+	OpenDocument->RenameValidationMessage = FText::GetEmpty();
 	OpenDocument->SelectedTile.Reset();
 	return true;
 }
@@ -442,6 +501,21 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 
 FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	if (OpenDocument.IsValid() && OpenDocument->Session.IsValid() && OpenDocument->Session->IsDirty())
+	{
+		const EAppReturnType::Type Choice = FMessageDialog::Open(
+			EAppMsgType::YesNoCancel,
+			FText::Format(
+				LOCTEXT("SaveBeforeClose", "Save changes to {0} before closing?\n\nYes: Save\nNo: Discard\nCancel: Keep the tab open"),
+				FText::FromString(FPaths::GetCleanFilename(OpenDocument->FilePath))),
+			LOCTEXT("UnsavedVerseFileTitle", "Unsaved Verse File"));
+		if (Choice == EAppReturnType::Cancel
+			|| (Choice == EAppReturnType::Yes && !SaveDocument(OpenDocument)))
+		{
+			return FReply::Handled();
+		}
+	}
+
 	if (ActiveDocument == OpenDocument)
 	{
 		CaptureActiveCanvasView();
@@ -458,6 +532,111 @@ FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocu
 	RefreshActiveDocument();
 	RevealActiveDocumentInTree();
 	return FReply::Handled();
+}
+
+FReply SVerseVisualEditor::SaveActiveDocument()
+{
+	SaveDocument(ActiveDocument);
+	return FReply::Handled();
+}
+
+bool SVerseVisualEditor::SaveDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return false;
+	}
+	if (!OpenDocument->Session->IsDirty())
+	{
+		return true;
+	}
+
+	FText Error;
+	if (!OpenDocument->Session->SaveToFile(OpenDocument->FilePath, Error))
+	{
+		OpenDocument->LoadError = Error;
+		FMessageDialog::Open(
+			EAppMsgType::Ok,
+			Error,
+			LOCTEXT("SaveVerseFileFailedTitle", "Unable to Save Verse File"));
+		return false;
+	}
+
+	OpenDocument->LastKnownDiskBytes = OpenDocument->Session->BuildCurrentFileBytes();
+	OpenDocument->LoadError = FText::GetEmpty();
+	RebuildDocumentTabs();
+	return true;
+}
+
+void SVerseVisualEditor::SaveActiveDocumentFromMenu()
+{
+	SaveDocument(ActiveDocument);
+}
+
+void SVerseVisualEditor::SaveAllDocuments()
+{
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (OpenDocument.IsValid()
+			&& OpenDocument->Session.IsValid()
+			&& OpenDocument->Session->IsDirty()
+			&& !SaveDocument(OpenDocument))
+		{
+			break;
+		}
+	}
+}
+
+void SVerseVisualEditor::RevertActiveDocument()
+{
+	if (!HasActiveDocument())
+	{
+		return;
+	}
+	if (ActiveDocument->Session->IsDirty()
+		&& FMessageDialog::Open(
+			EAppMsgType::YesNo,
+			FText::Format(
+				LOCTEXT("ConfirmRevert", "Revert {0} and discard all unsaved changes?"),
+				FText::FromString(FPaths::GetCleanFilename(ActiveDocument->FilePath))),
+			LOCTEXT("ConfirmRevertTitle", "Revert Verse File")) != EAppReturnType::Yes)
+	{
+		return;
+	}
+
+	ReloadDocument(ActiveDocument);
+	RebuildDocumentTabs();
+	RefreshActiveDocument();
+}
+
+void SVerseVisualEditor::CloseActiveDocument()
+{
+	if (ActiveDocument.IsValid())
+	{
+		CloseDocument(ActiveDocument);
+	}
+}
+
+bool SVerseVisualEditor::CanSaveActiveDocument() const
+{
+	return ActiveDocument.IsValid()
+		&& ActiveDocument->Session.IsValid()
+		&& ActiveDocument->Session->IsDirty();
+}
+
+bool SVerseVisualEditor::CanSaveAnyDocument() const
+{
+	return OpenDocuments.ContainsByPredicate([](const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+	{
+		return OpenDocument.IsValid()
+			&& OpenDocument->Session.IsValid()
+			&& OpenDocument->Session->IsDirty();
+	});
+}
+
+bool SVerseVisualEditor::HasActiveDocument() const
+{
+	return ActiveDocument.IsValid() && ActiveDocument->Session.IsValid();
 }
 
 void SVerseVisualEditor::RebuildDocumentTabs()
@@ -501,13 +680,25 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 							: FText::GetEmpty();
 					})
 					[
-						SNew(STextBlock)
-						.Text(FText::FromString(FPaths::GetCleanFilename(OpenDocument->FilePath)))
+					SNew(STextBlock)
+						.Text_Lambda([WeakDocument]()
+						{
+							const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
+							if (!Document.IsValid())
+							{
+								return FText::GetEmpty();
+							}
+							const FString Name = FPaths::GetCleanFilename(Document->FilePath)
+								+ (Document->Session.IsValid() && Document->Session->IsDirty() ? TEXT("*") : TEXT(""));
+							return FText::FromString(Name);
+						})
 						.Font_Lambda([WeakDocument]()
 						{
 							const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
 							return FCoreStyle::GetDefaultFontStyle(
-								Document.IsValid() && Document->bIsTemporary ? "Italic" : "Regular",
+								Document.IsValid() && Document->Session.IsValid() && Document->Session->IsDirty()
+									? (Document->bIsTemporary ? "BoldItalic" : "Bold")
+									: (Document.IsValid() && Document->bIsTemporary ? "Italic" : "Regular"),
 								10);
 						})
 					]
@@ -641,6 +832,73 @@ void SVerseVisualEditor::HandlePropertyFilterChanged(const FText& FilterText)
 	RebuildProperties();
 }
 
+void SVerseVisualEditor::HandleRenameCommitted(
+	const FText& NewText,
+	ETextCommit::Type CommitType,
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	FVerseTextRange NameRange)
+{
+	if (CommitType == ETextCommit::OnCleared
+		|| !OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	const FString NewName = NewText.ToString();
+	OpenDocument->RenameValidationMessage = ValidateVerseIdentifier(NewName);
+	const FString CurrentName = OpenDocument->Session->GetParseSnapshot()
+		.GetDocument()->DecodeOriginalRange(NameRange);
+	if (CurrentName == NewName)
+	{
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+
+	const TOptional<FVerseVisualTile> PreviousSelection = OpenDocument->SelectedTile;
+	const FTCHARToUTF8 Converted(*NewName, NewName.Len());
+	const FUtf8StringView Replacement(
+		reinterpret_cast<const UTF8CHAR*>(Converted.Get()),
+		Converted.Length());
+	FText EditError;
+	if (!OpenDocument->Session->Replace(NameRange, Replacement, EditError))
+	{
+		OpenDocument->RenameValidationMessage = EditError;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+
+	OpenDocument->bIsTemporary = false;
+	OpenDocument->SelectedTile.Reset();
+	if (PreviousSelection.IsSet())
+	{
+		const FVerseVisualTile& PreviousTile = PreviousSelection.GetValue();
+		if (const FVerseVisualTile* ReplacementTile = OpenDocument->Session->GetTiles().FindByPredicate(
+			[&PreviousTile](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == PreviousTile.Kind
+					&& Tile.DefinitionKind == PreviousTile.DefinitionKind
+					&& Tile.NameRange.IsSet()
+					&& Tile.NameRange.BeginByte == PreviousTile.NameRange.BeginByte;
+			}))
+		{
+			OpenDocument->SelectedTile = *ReplacementTile;
+		}
+	}
+
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
 void SVerseVisualEditor::HandleDetailsTabClosed(TSharedRef<SDockTab> ClosedTab)
 {
 	if (DetailsTab == ClosedTab)
@@ -721,6 +979,24 @@ void SVerseVisualEditor::RebuildProperties()
 	}
 
 	PropertyRows->ClearChildren();
+	if (ActiveDocument.IsValid() && !ActiveDocument->RenameValidationMessage.IsEmpty())
+	{
+		PropertyRows->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderBackgroundColor(FLinearColor(0.35f, 0.04f, 0.02f, 1.0f))
+			.Padding(6.0f)
+			[
+				SNew(STextBlock)
+				.Text(ActiveDocument->RenameValidationMessage)
+				.AutoWrapText(true)
+				.ColorAndOpacity(FLinearColor(1.0f, 0.55f, 0.2f))
+			]
+		];
+	}
 	if (!ActiveDocument.IsValid()
 		|| !ActiveDocument->SelectedTile.IsSet()
 		|| !ActiveDocument->Session.IsValid())
@@ -740,6 +1016,20 @@ void SVerseVisualEditor::RebuildProperties()
 		}
 
 		++VisiblePropertyCount;
+		TSharedRef<SWidget> ValueWidget = SNew(STextBlock)
+			.Text(FText::FromString(Property.Value))
+			.AutoWrapText(true);
+		if (Property.bEditable)
+		{
+			ValueWidget = SNew(SEditableTextBox)
+				.Text(FText::FromString(Property.Value))
+				.SelectAllTextWhenFocused(true)
+				.OnTextCommitted(
+					this,
+					&SVerseVisualEditor::HandleRenameCommitted,
+					ActiveDocument,
+					ActiveDocument->SelectedTile->NameRange);
+		}
 		PropertyRows->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 4.0f)
@@ -761,9 +1051,7 @@ void SVerseVisualEditor::RebuildProperties()
 				.AutoHeight()
 				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
 				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Property.Value))
-					.AutoWrapText(true)
+					ValueWidget
 				]
 			]
 		];
@@ -977,6 +1265,7 @@ void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileCha
 {
 	bool bRefreshTree = false;
 	bool bRefreshActiveDocument = false;
+	bool bRebuildTabs = false;
 	for (const FFileChangeData& Change : FileChanges)
 	{
 		if (Change.Action == FFileChangeData::FCA_RescanRequired)
@@ -1009,14 +1298,37 @@ void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileCha
 
 		const TSharedPtr<FOpenVerseDocument> OpenDocument = *Found;
 		TArray<uint8> DiskBytes;
-		if (OpenDocument->Session.IsValid()
-			&& FFileHelper::LoadFileToArray(DiskBytes, *OpenDocument->FilePath)
-			&& MatchesOriginalFile(*OpenDocument->Session->GetOriginalDocument(), DiskBytes))
+		const bool bReadDisk = FFileHelper::LoadFileToArray(DiskBytes, *OpenDocument->FilePath);
+		const EVerseExternalChangeAction ExternalChangeAction = DetermineVerseExternalChangeAction(
+			bReadDisk && ByteArraysEqual(OpenDocument->LastKnownDiskBytes, DiskBytes),
+			OpenDocument->Session.IsValid() && OpenDocument->Session->IsDirty());
+		if (ExternalChangeAction == EVerseExternalChangeAction::Ignore)
 		{
 			continue;
 		}
 
+		if (ExternalChangeAction == EVerseExternalChangeAction::PromptReloadOrKeepLocal)
+		{
+			const EAppReturnType::Type Choice = FMessageDialog::Open(
+				EAppMsgType::YesNo,
+				FText::Format(
+					LOCTEXT(
+						"DirtyExternalChange",
+						"{0} changed outside Verse Visual Editor while it has local changes.\n\nYes: Reload and discard local changes\nNo: Keep local changes"),
+					FText::FromString(FPaths::GetCleanFilename(OpenDocument->FilePath))),
+				LOCTEXT("DirtyExternalChangeTitle", "Verse File Changed Externally"));
+			if (Choice == EAppReturnType::No)
+			{
+				if (bReadDisk)
+				{
+					OpenDocument->LastKnownDiskBytes = MoveTemp(DiskBytes);
+				}
+				continue;
+			}
+		}
+
 		ReloadDocument(OpenDocument);
+		bRebuildTabs = true;
 		bRefreshActiveDocument |= OpenDocument == ActiveDocument;
 	}
 
@@ -1027,6 +1339,10 @@ void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileCha
 	if (bRefreshActiveDocument)
 	{
 		RefreshActiveDocument();
+	}
+	if (bRebuildTabs)
+	{
+		RebuildDocumentTabs();
 	}
 }
 

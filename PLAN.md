@@ -40,6 +40,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Editable source and revision pipeline: complete; localized UTF-8 replacements,
   revisioned ranges, cached materialization, reparsing, and rebuilt tiles are
   coordinated by a per-document session.
+- Rename and save vertical slice: complete; Details-driven localized renaming,
+  content-state dirty tracking, atomic BOM-preserving saves, and dirty external
+  change handling are implemented.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -293,7 +296,7 @@ Do not add edit transactions or selection-history snapshots until Step 5.
 This step delivers one tested localized source change through source, parsing,
 tiles, and line numbers.
 
-#### 5.2 Rename and save vertical slice
+#### 5.2 Rename and save vertical slice (complete)
 
 - Implement renaming as the first visual modification.
 - Convert a rename into one localized replacement of the identifier's current
@@ -317,6 +320,9 @@ tiles, and line numbers.
   preservation, dirty transitions, and external-change behavior.
 
 This step delivers the first complete edit-and-save workflow.
+
+##### Further work
+- if there are local edits show a modal confirmation before closing yes/no/cancel
 
 ### 6. Compile errors
 

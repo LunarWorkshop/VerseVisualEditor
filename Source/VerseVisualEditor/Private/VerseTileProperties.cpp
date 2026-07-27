@@ -53,7 +53,7 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 	if (Tile.Kind == EVerseVisualTileKind::Definition)
 	{
 		Properties.Add({TEXT("Kind"), Tile.DefinitionKind.ToString()});
-		Properties.Add({TEXT("Name"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.NameRange)});
+		Properties.Add({TEXT("Name"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.NameRange), true});
 		if (Tile.TypeRange.IsSet())
 		{
 			Properties.Add({TEXT("Type"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange)});

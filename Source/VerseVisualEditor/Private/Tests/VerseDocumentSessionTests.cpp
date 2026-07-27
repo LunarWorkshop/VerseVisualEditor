@@ -1,8 +1,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseDocumentSession.h"
+#include "VerseExternalChange.h"
+#include "VerseIdentifier.h"
 
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 
 namespace VerseDocumentSessionTests
 {
@@ -20,6 +26,23 @@ namespace VerseDocumentSessionTests
 	FUtf8StringView View(const FUtf8String& Text)
 	{
 		return FUtf8StringView(*Text, Text.Len());
+	}
+
+	TArray<uint8> FileBytes(FUtf8StringView Source, bool bWithBom)
+	{
+		TArray<uint8> Bytes;
+		if (bWithBom)
+		{
+			Bytes.Append({0xEF, 0xBB, 0xBF});
+		}
+		Bytes.Append(reinterpret_cast<const uint8*>(Source.GetData()), Source.Len());
+		return Bytes;
+	}
+
+	bool BytesEqual(TConstArrayView<uint8> Left, TConstArrayView<uint8> Right)
+	{
+		return Left.Num() == Right.Num()
+			&& (Left.IsEmpty() || FMemory::Memcmp(Left.GetData(), Right.GetData(), Left.Num()) == 0);
 	}
 
 	bool HasCompleteCoverage(const FVerseDocumentSession& Session)
@@ -186,6 +209,88 @@ bool FVerseDocumentSessionReparseTest::RunTest(const FString& Parameters)
 		{
 			return Region.Kind == EVerseSourceRegionKind::Raw;
 		}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDocumentSessionSaveTest,
+	"VerseVisualEditor.Foundation.DocumentSession.Save",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDocumentSessionSaveTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TArray<uint8> OriginalBytes = FileBytes(
+		UTF8TEXTVIEW("Alpha := class {}\r\n# lf follows\n# cr follows\r"),
+		true);
+	FText Error;
+	const TSharedPtr<FVerseDocument> Document = FVerseDocument::CreateFromBytes(OriginalBytes, Error);
+	if (!TestTrue(TEXT("BOM and mixed-line-ending document loads"), Document.IsValid()))
+	{
+		return false;
+	}
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	TestFalse(TEXT("New session begins clean"), Session.IsDirty());
+	TestTrue(TEXT("Rename replacement succeeds"),
+		Session.Replace(FVerseTextRange(Session.GetRevision(), {0, 5}), UTF8TEXTVIEW("Beta"), Error));
+	TestTrue(TEXT("A replacement makes the session dirty"), Session.IsDirty());
+	TestFalse(TEXT("Current and saved content states differ while dirty"),
+		Session.GetContentStateId() == Session.GetSavedContentStateId());
+
+	const FString TestDirectory = FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("Automation"),
+		FString::Printf(TEXT("VerseVisualEditor-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*TestDirectory, true);
+	const FString TargetPath = FPaths::Combine(TestDirectory, TEXT("Mixed.verse"));
+	const TArray<uint8> OldTarget = FileBytes(UTF8TEXTVIEW("old"), false);
+	FFileHelper::SaveArrayToFile(OldTarget, *TargetPath);
+
+	TestTrue(TEXT("Same-directory temporary save replaces the target"), Session.SaveToFile(TargetPath, Error));
+	TestFalse(TEXT("Successful replacement marks the current content state saved"), Session.IsDirty());
+	TArray<uint8> SavedBytes;
+	TestTrue(TEXT("Saved Verse file can be read"), FFileHelper::LoadFileToArray(SavedBytes, *TargetPath));
+	const TArray<uint8> ExpectedBytes = FileBytes(
+		UTF8TEXTVIEW("Beta := class {}\r\n# lf follows\n# cr follows\r"),
+		true);
+	TestTrue(TEXT("Save restores BOM and preserves every unaffected mixed line-ending byte"),
+		BytesEqual(SavedBytes, ExpectedBytes));
+
+	TestTrue(TEXT("A second rename makes the saved session dirty again"),
+		Session.Replace(FVerseTextRange(Session.GetRevision(), {0, 4}), UTF8TEXTVIEW("Gamma"), Error));
+	const FVerseContentStateId SavedCheckpoint = Session.GetSavedContentStateId();
+	const FString DirectoryAsTarget = FPaths::Combine(TestDirectory, TEXT("CannotReplaceDirectory.verse"));
+	IFileManager::Get().MakeDirectory(*DirectoryAsTarget);
+	TestFalse(TEXT("Save fails when target replacement cannot complete"),
+		Session.SaveToFile(DirectoryAsTarget, Error));
+	TestTrue(TEXT("Failed save leaves local contents dirty"), Session.IsDirty());
+	TestTrue(TEXT("Failed save retains the previous saved checkpoint"),
+		Session.GetSavedContentStateId() == SavedCheckpoint);
+
+	IFileManager::Get().DeleteDirectory(*TestDirectory, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseRenameAndExternalChangePolicyTest,
+	"VerseVisualEditor.Foundation.DocumentSession.RenameAndExternalChangePolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseRenameAndExternalChangePolicyTest::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("Common Verse identifier is accepted"), ValidateVerseIdentifier(TEXT("My_Class2")).IsEmpty());
+	TestFalse(TEXT("Empty identifier reports feedback"), ValidateVerseIdentifier(TEXT("")).IsEmpty());
+	TestFalse(TEXT("Identifier beginning with a number reports feedback"), ValidateVerseIdentifier(TEXT("2Class")).IsEmpty());
+	TestFalse(TEXT("Identifier containing punctuation reports feedback"), ValidateVerseIdentifier(TEXT("My-Class")).IsEmpty());
+	TestFalse(TEXT("Reserved Verse identifier reports feedback"), ValidateVerseIdentifier(TEXT("class")).IsEmpty());
+
+	TestTrue(TEXT("A duplicate watcher notification is ignored"),
+		DetermineVerseExternalChangeAction(true, false) == EVerseExternalChangeAction::Ignore);
+	TestTrue(TEXT("A clean external change reloads immediately"),
+		DetermineVerseExternalChangeAction(false, false) == EVerseExternalChangeAction::Reload);
+	TestTrue(TEXT("A dirty external change requires reload-or-keep-local choice"),
+		DetermineVerseExternalChangeAction(false, true) == EVerseExternalChangeAction::PromptReloadOrKeepLocal);
 	return true;
 }
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Input/Reply.h"
+#include "VerseDocumentRevision.h"
 #include "VerseEditorFileTree.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/STreeView.h"
@@ -24,6 +25,14 @@ public:
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SVerseVisualEditor() override;
+	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	void SaveActiveDocumentFromMenu();
+	void SaveAllDocuments();
+	void RevertActiveDocument();
+	void CloseActiveDocument();
+	bool CanSaveActiveDocument() const;
+	bool CanSaveAnyDocument() const;
+	bool HasActiveDocument() const;
 
 private:
 	void RefreshFileTree();
@@ -59,6 +68,8 @@ private:
 	bool ReloadDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	FReply ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	FReply CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
+	FReply SaveActiveDocument();
+	bool SaveDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	void RebuildDocumentTabs();
 	void RefreshActiveDocument();
 	void HandleTileSelected(
@@ -66,6 +77,11 @@ private:
 		TSharedPtr<FOpenVerseDocument> OpenDocument);
 	void HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	void HandlePropertyFilterChanged(const FText& FilterText);
+	void HandleRenameCommitted(
+		const FText& NewText,
+		ETextCommit::Type CommitType,
+		TSharedPtr<FOpenVerseDocument> OpenDocument,
+		FVerseTextRange NameRange);
 	void HandleDetailsTabClosed(TSharedRef<SDockTab> ClosedTab);
 	void OpenDetailsTab();
 	TSharedRef<SWidget> BuildDetailsPanel();

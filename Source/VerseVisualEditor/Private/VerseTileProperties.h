@@ -10,6 +10,7 @@ struct FVerseTileProperty
 {
 	FString Name;
 	FString Value;
+	bool bEditable = false;
 };
 
 class FVerseTileProperties
