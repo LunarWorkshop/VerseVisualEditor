@@ -107,6 +107,17 @@ owner, `FVerseEditBuffer` will represent current source spans, and
 `FVerseDocumentSession` will coordinate current revisions, parse snapshots,
 saving, dirty state, and history.
 
+Structured edits made through tiles or Details controls must validate the
+complete proposed syntax before changing the source. If they don't then the
+code becomes syntactically invalid and parsing is not possible, and creating
+all the tiles depends on parsing, and so suddenly the user is looking at one
+big unknown block.
+Invalid input remains only
+in the UI as a visible validation state; it must not create an edit-buffer
+replacement, increment the revision, dirty the document, or trigger a reparse.
+The error-tolerant parser remains responsible for invalid text that already
+exists on disk or enters through a future raw-source editing workflow.
+
 Document revisions will increase monotonically after edits, undo, redo, reload,
 or replacement. A separate content-state identifier will identify reusable span
 snapshots for saving and history. Undo and redo will use linear before/after
@@ -301,8 +312,9 @@ tiles, and line numbers.
 - Implement renaming as the first visual modification.
 - Convert a rename into one localized replacement of the identifier's current
   `FVerseTextRange`.
-- Validate identifiers for feedback without preventing invalid text from
-  remaining or being saved.
+- Validate identifiers before replacement. Keep rejected text in the Details
+  control with visible feedback, but do not change source, revision, dirty
+  state, parsing, or tiles until the proposed identifier is valid.
 - Add `FVerseContentStateId` to identify span states independently of document
   revisions.
 - Track dirty state against the last successfully saved content state.
@@ -316,13 +328,11 @@ tiles, and line numbers.
   checkpoint.
 - Restore edited-file tab styling, independent dirty and version-control state,
   and reload-or-keep-local-changes prompts for externally changed dirty files.
-- Test renaming, invalid identifiers, atomic save failure, BOM and line-ending
-  preservation, dirty transitions, and external-change behavior.
+- Test renaming, rejection of invalid identifiers without source mutation,
+  atomic save failure, BOM and line-ending preservation, dirty transitions,
+  and external-change behavior.
 
 This step delivers the first complete edit-and-save workflow.
-
-##### Further work
-- if there are local edits show a modal confirmation before closing yes/no/cancel
 
 ### 6. Compile errors
 
@@ -439,6 +449,9 @@ This step delivers the first complete edit-and-save workflow.
 - Add whitespace properties for choosing among supported body styles.
 
 ## Additional Implementation Steps
+
+### Further work
+- if there are local edits show a modal confirmation before closing yes/no/cancel
 
 ### 1. Multi-selection and copying
 

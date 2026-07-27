@@ -279,11 +279,37 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseRenameAndExternalChangePolicyTest::RunTest(const FString& Parameters)
 {
+	using namespace VerseDocumentSessionTests;
+
 	TestTrue(TEXT("Common Verse identifier is accepted"), ValidateVerseIdentifier(TEXT("My_Class2")).IsEmpty());
 	TestFalse(TEXT("Empty identifier reports feedback"), ValidateVerseIdentifier(TEXT("")).IsEmpty());
 	TestFalse(TEXT("Identifier beginning with a number reports feedback"), ValidateVerseIdentifier(TEXT("2Class")).IsEmpty());
 	TestFalse(TEXT("Identifier containing punctuation reports feedback"), ValidateVerseIdentifier(TEXT("My-Class")).IsEmpty());
 	TestFalse(TEXT("Reserved Verse identifier reports feedback"), ValidateVerseIdentifier(TEXT("class")).IsEmpty());
+	TestFalse(TEXT("Parser-reserved Verse symbol reports feedback"), ValidateVerseIdentifier(TEXT("array")).IsEmpty());
+	TestFalse(TEXT("Reserved underscore reports feedback"), ValidateVerseIdentifier(TEXT("_")).IsEmpty());
+
+	const TSharedPtr<FVerseDocument> RenameDocument = MakeDocument(*this, UTF8TEXTVIEW("Original := class {}"));
+	if (!RenameDocument.IsValid())
+	{
+		return false;
+	}
+	FVerseDocumentSession RenameSession(RenameDocument.ToSharedRef());
+	const FVerseDocumentRevision OriginalRevision = RenameSession.GetRevision();
+	const FVerseContentStateId OriginalContentState = RenameSession.GetContentStateId();
+	FText RenameError;
+	TestFalse(TEXT("An invalid identifier is rejected before replacement"),
+		TryReplaceWithValidatedVerseIdentifier(
+			RenameSession,
+			FVerseTextRange(RenameSession.GetRevision(), {0, 8}),
+			TEXT("123Invalid"),
+			RenameError));
+	TestTrue(TEXT("Rejected identifier does not change the document revision"),
+		RenameSession.GetRevision() == OriginalRevision);
+	TestTrue(TEXT("Rejected identifier does not dirty the document"),
+		RenameSession.GetContentStateId() == OriginalContentState && !RenameSession.IsDirty());
+	TestEqual(TEXT("Rejected identifier does not change source"),
+		View(RenameSession.GetCurrentUtf8()), UTF8TEXTVIEW("Original := class {}"));
 
 	TestTrue(TEXT("A duplicate watcher notification is ignored"),
 		DetermineVerseExternalChangeAction(true, false) == EVerseExternalChangeAction::Ignore);

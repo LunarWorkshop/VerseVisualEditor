@@ -46,6 +46,7 @@ struct FOpenVerseDocument
 	TArray<uint8> LastKnownDiskBytes;
 	FText LoadError;
 	FText RenameValidationMessage;
+	TOptional<FString> PendingRenameText;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
@@ -485,6 +486,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	OpenDocument->LastKnownDiskBytes = MoveTemp(DiskBytes);
 	OpenDocument->LoadError = FText::GetEmpty();
 	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PendingRenameText.Reset();
 	OpenDocument->SelectedTile.Reset();
 	return true;
 }
@@ -805,6 +807,8 @@ void SVerseVisualEditor::HandleTileSelected(
 	}
 
 	OpenDocument->SelectedTile = Tile;
+	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PendingRenameText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
 		OpenDetailsTab();
@@ -820,6 +824,8 @@ void SVerseVisualEditor::HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocumen
 	}
 
 	OpenDocument->SelectedTile.Reset();
+	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PendingRenameText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
 		RebuildProperties();
@@ -847,6 +853,16 @@ void SVerseVisualEditor::HandleRenameCommitted(
 
 	const FString NewName = NewText.ToString();
 	OpenDocument->RenameValidationMessage = ValidateVerseIdentifier(NewName);
+	if (!OpenDocument->RenameValidationMessage.IsEmpty())
+	{
+		OpenDocument->PendingRenameText = NewName;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+	OpenDocument->PendingRenameText.Reset();
 	const FString CurrentName = OpenDocument->Session->GetParseSnapshot()
 		.GetDocument()->DecodeOriginalRange(NameRange);
 	if (CurrentName == NewName)
@@ -859,12 +875,12 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	}
 
 	const TOptional<FVerseVisualTile> PreviousSelection = OpenDocument->SelectedTile;
-	const FTCHARToUTF8 Converted(*NewName, NewName.Len());
-	const FUtf8StringView Replacement(
-		reinterpret_cast<const UTF8CHAR*>(Converted.Get()),
-		Converted.Length());
 	FText EditError;
-	if (!OpenDocument->Session->Replace(NameRange, Replacement, EditError))
+	if (!TryReplaceWithValidatedVerseIdentifier(
+		*OpenDocument->Session,
+		NameRange,
+		NewName,
+		EditError))
 	{
 		OpenDocument->RenameValidationMessage = EditError;
 		if (OpenDocument == ActiveDocument)
@@ -1021,8 +1037,9 @@ void SVerseVisualEditor::RebuildProperties()
 			.AutoWrapText(true);
 		if (Property.bEditable)
 		{
+			const FString EditableValue = ActiveDocument->PendingRenameText.Get(Property.Value);
 			ValueWidget = SNew(SEditableTextBox)
-				.Text(FText::FromString(Property.Value))
+				.Text(FText::FromString(EditableValue))
 				.SelectAllTextWhenFocused(true)
 				.OnTextCommitted(
 					this,
