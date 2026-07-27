@@ -62,7 +62,9 @@ namespace
 	}
 }
 
-TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(const FVerseParseSnapshot& Snapshot)
+TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(
+	const FVerseParseSnapshot& Snapshot,
+	FVerseDocumentRevision Revision)
 {
 	TArray<FVerseVisualTile> Tiles;
 	for (const FVerseSourceRegion& Region : Snapshot.GetSourceRegions())
@@ -75,29 +77,31 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(const FVerseParseSnapsho
 			&& !Tiles.IsEmpty()
 			&& CanMergeLineComment(Snapshot, Tiles.Last(), Region))
 		{
-			Tiles.Last().Range = FVerseByteRange::FromBounds(
-				Tiles.Last().Range.BeginByte,
-				Region.Range.EndByte());
+			Tiles.Last().Range = FVerseTextRange(
+				Revision,
+				FVerseByteRange::FromBounds(
+					Tiles.Last().Range.BeginByte,
+					Region.Range.EndByte()));
 			Tiles.Last().BodyRange = Tiles.Last().Range;
 			UpdateSourceLines(Tiles.Last(), *Snapshot.GetDocument());
 			continue;
 		}
 
 		FVerseVisualTile& Tile = Tiles.AddDefaulted_GetRef();
-		Tile.Range = Region.Range;
+		Tile.Range = FVerseTextRange(Revision, Region.Range);
 		UpdateSourceLines(Tile, *Snapshot.GetDocument());
 		if (Region.Kind == EVerseSourceRegionKind::Syntax)
 		{
 			Tile.Kind = EVerseVisualTileKind::Definition;
 			Tile.DefinitionKind = Region.SyntaxKind;
-			Tile.NameRange = Region.NameRange;
-			Tile.TypeRange = Region.TypeRange;
-			Tile.BodyRange = Region.BodyRange;
+			Tile.NameRange = FVerseTextRange(Revision, Region.NameRange);
+			Tile.TypeRange = FVerseTextRange(Revision, Region.TypeRange);
+			Tile.BodyRange = FVerseTextRange(Revision, Region.BodyRange);
 		}
 		else if (Region.Kind == EVerseSourceRegionKind::Comment)
 		{
 			Tile.Kind = EVerseVisualTileKind::Comment;
-			Tile.BodyRange = Region.BodyRange;
+			Tile.BodyRange = FVerseTextRange(Revision, Region.BodyRange);
 			Tile.CommentKind = Region.CommentKind;
 		}
 	}

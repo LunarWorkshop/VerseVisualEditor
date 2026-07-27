@@ -20,7 +20,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "VerseDocument.h"
-#include "VerseParseSnapshotBuilder.h"
+#include "VerseDocumentSession.h"
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Images/SImage.h"
@@ -39,8 +39,7 @@
 struct FOpenVerseDocument
 {
 	FString FilePath;
-	TSharedPtr<FVerseDocument> Document;
-	TOptional<FVerseParseSnapshot> ParseSnapshot;
+	TSharedPtr<FVerseDocumentSession> Session;
 	FText LoadError;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
@@ -425,8 +424,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 		return false;
 	}
 
-	OpenDocument->ParseSnapshot = FVerseParseSnapshotBuilder::Build(LoadedDocument.ToSharedRef());
-	OpenDocument->Document = MoveTemp(LoadedDocument);
+	OpenDocument->Session = MakeShared<FVerseDocumentSession>(LoadedDocument.ToSharedRef());
 	OpenDocument->LoadError = FText::GetEmpty();
 	OpenDocument->SelectedTile.Reset();
 	return true;
@@ -557,9 +555,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 
 	const TWeakPtr<FOpenVerseDocument> WeakDocument = ActiveDocument;
-	const TOptional<FVerseByteRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
-		? TOptional<FVerseByteRange>(ActiveDocument->SelectedTile->Range)
-		: TOptional<FVerseByteRange>();
+	const TOptional<FVerseTextRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
+		? TOptional<FVerseTextRange>(ActiveDocument->SelectedTile->Range)
+		: TOptional<FVerseTextRange>();
 	ActiveDocumentBox->SetContent(
 		SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -590,7 +588,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				SAssignNew(
 					ActiveDocument->TileCanvas,
 					SVerseTileCanvas,
-					ActiveDocument->ParseSnapshot.GetValue(),
+					ActiveDocument->Session.ToSharedRef(),
 					ActiveDocument->ViewState,
 					InitialSelectedRange,
 					FOnVerseTileSelected::CreateSP(
@@ -725,14 +723,14 @@ void SVerseVisualEditor::RebuildProperties()
 	PropertyRows->ClearChildren();
 	if (!ActiveDocument.IsValid()
 		|| !ActiveDocument->SelectedTile.IsSet()
-		|| !ActiveDocument->ParseSnapshot.IsSet())
+		|| !ActiveDocument->Session.IsValid())
 	{
 		return;
 	}
 
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(
 		ActiveDocument->SelectedTile.GetValue(),
-		ActiveDocument->ParseSnapshot.GetValue());
+		ActiveDocument->Session->GetParseSnapshot());
 	int32 VisiblePropertyCount = 0;
 	for (const FVerseTileProperty& Property : Properties)
 	{
@@ -1011,9 +1009,9 @@ void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileCha
 
 		const TSharedPtr<FOpenVerseDocument> OpenDocument = *Found;
 		TArray<uint8> DiskBytes;
-		if (OpenDocument->Document.IsValid()
+		if (OpenDocument->Session.IsValid()
 			&& FFileHelper::LoadFileToArray(DiskBytes, *OpenDocument->FilePath)
-			&& MatchesOriginalFile(*OpenDocument->Document, DiskBytes))
+			&& MatchesOriginalFile(*OpenDocument->Session->GetOriginalDocument(), DiskBytes))
 		{
 			continue;
 		}

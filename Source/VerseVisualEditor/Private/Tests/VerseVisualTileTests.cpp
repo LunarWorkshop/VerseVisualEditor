@@ -144,7 +144,10 @@ bool FVerseRawTilePresentationTest::RunTest(const FString& Parameters)
 	if (TestEqual(TEXT("Failed parsing still produces one visual tile"), Tiles.Num(), 1))
 	{
 		TestTrue(TEXT("Failed parsing is presented as unknown"), Tiles[0].Kind == EVerseVisualTileKind::Unknown);
-		TestEqual(TEXT("Unknown tile retains the complete source range"), Tiles[0].Range, Document->GetWholeOriginalRange());
+		TestEqual(
+			TEXT("Unknown tile retains the complete source range"),
+			Tiles[0].Range,
+			FVerseTextRange({}, Document->GetWholeOriginalRange()));
 	}
 	return true;
 }

@@ -1,5 +1,6 @@
 #include "SVerseTileCanvas.h"
 
+#include "VerseDocumentSession.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
@@ -163,13 +164,14 @@ namespace
 
 void SVerseTileCanvas::Construct(
 	const FArguments& InArgs,
-	FVerseParseSnapshot InSnapshot,
+	TSharedRef<const FVerseDocumentSession> InSession,
 	FVerseCanvasViewState InitialViewState,
-	TOptional<FVerseByteRange> InitialSelectedRange,
+	TOptional<FVerseTextRange> InitialSelectedRange,
 	FOnVerseTileSelected InOnTileSelected,
 	FSimpleDelegate InOnSelectionCleared)
 {
-	Snapshot.Emplace(MoveTemp(InSnapshot));
+	Snapshot.Emplace(InSession->GetParseSnapshot());
+	Tiles = InSession->GetTiles();
 	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
@@ -433,7 +435,6 @@ void SVerseTileCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEv
 TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 {
 	TSharedRef<SHorizontalBox> TileRow = SNew(SHorizontalBox);
-	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot.GetValue());
 	for (int32 TileIndex = 0; TileIndex < Tiles.Num();)
 	{
 		TSharedRef<SWidget> Presentation = BuildTile(Tiles[TileIndex]);

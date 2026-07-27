@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "VerseDocumentRevision.h"
 #include "VerseParseSnapshot.h"
 
 enum class EVerseVisualTileKind : uint8
@@ -13,19 +14,21 @@ enum class EVerseVisualTileKind : uint8
 /** Read-only presentation data. All text remains referenced by snapshot byte ranges. */
 struct FVerseVisualTile
 {
-	FVerseByteRange Range;
+	FVerseTextRange Range;
 	int32 FirstSourceLine = INDEX_NONE;
 	int32 LastSourceLine = INDEX_NONE;
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	FName DefinitionKind;
-	FVerseByteRange NameRange;
-	FVerseByteRange TypeRange;
-	FVerseByteRange BodyRange;
+	FVerseTextRange NameRange;
+	FVerseTextRange TypeRange;
+	FVerseTextRange BodyRange;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 
 class FVerseVisualTileBuilder
 {
 public:
-	static TArray<FVerseVisualTile> Build(const FVerseParseSnapshot& Snapshot);
+	static TArray<FVerseVisualTile> Build(
+		const FVerseParseSnapshot& Snapshot,
+		FVerseDocumentRevision Revision = {});
 };

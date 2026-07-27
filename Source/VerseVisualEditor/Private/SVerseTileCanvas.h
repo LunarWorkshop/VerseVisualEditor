@@ -10,6 +10,7 @@
 class SScaleBox;
 class SScrollBar;
 class SScrollBox;
+class FVerseDocumentSession;
 
 DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
 
@@ -28,9 +29,9 @@ public:
 
 	void Construct(
 		const FArguments& InArgs,
-		FVerseParseSnapshot InSnapshot,
+		TSharedRef<const FVerseDocumentSession> InSession,
 		FVerseCanvasViewState InitialViewState,
-		TOptional<FVerseByteRange> InitialSelectedRange,
+		TOptional<FVerseTextRange> InitialSelectedRange,
 		FOnVerseTileSelected InOnTileSelected,
 		FSimpleDelegate InOnSelectionCleared);
 
@@ -62,6 +63,7 @@ private:
 	FReply SelectTile(FVerseVisualTile Tile);
 
 	TOptional<FVerseParseSnapshot> Snapshot;
+	TArray<FVerseVisualTile> Tiles;
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
 	TSharedPtr<SScrollBar> VerticalScrollbar;
 	TSharedPtr<SScrollBox> HorizontalScrollBox;

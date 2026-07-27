@@ -37,6 +37,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Single-tile selection and properties: complete; selected tiles receive a
   bright gold outline and expose filterable read-only properties in a persistent
   panel.
+- Editable source and revision pipeline: complete; localized UTF-8 replacements,
+  revisioned ranges, cached materialization, reparsing, and rebuilt tiles are
+  coordinated by a per-document session.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -264,7 +267,7 @@ Do not add edit transactions or selection-history snapshots until Step 5.
 
 ### 5. Global-scope modifications
 
-#### 5.1 Editable source and revision pipeline
+#### 5.1 Editable source and revision pipeline (complete)
 
 - Keep `FVerseDocument` as the immutable original-source owner.
 - Add `FVerseEditBuffer` containing spans into the immutable original source,

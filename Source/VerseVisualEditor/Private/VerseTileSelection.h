@@ -1,12 +1,12 @@
 #pragma once
 
-#include "VerseDocument.h"
+#include "VerseDocumentRevision.h"
 
 /** Single visual-tile selection state for one document canvas. */
 class FVerseTileSelection
 {
 public:
-	void Select(FVerseByteRange Range)
+	void Select(FVerseTextRange Range)
 	{
 		SelectedRange = Range;
 	}
@@ -16,16 +16,16 @@ public:
 		SelectedRange.Reset();
 	}
 
-	bool IsSelected(FVerseByteRange Range) const
+	bool IsSelected(FVerseTextRange Range) const
 	{
 		return SelectedRange.IsSet() && SelectedRange.GetValue() == Range;
 	}
 
-	const TOptional<FVerseByteRange>& GetSelectedRange() const
+	const TOptional<FVerseTextRange>& GetSelectedRange() const
 	{
 		return SelectedRange;
 	}
 
 private:
-	TOptional<FVerseByteRange> SelectedRange;
+	TOptional<FVerseTextRange> SelectedRange;
 };
