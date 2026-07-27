@@ -42,6 +42,20 @@ namespace
 			? FString::Printf(TEXT("L%d"), Tile.FirstSourceLine)
 			: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine);
 	}
+
+	FString FormatSpecifiers(
+		TConstArrayView<FVerseTextRange> Ranges,
+		const FVerseParseSnapshot& Snapshot)
+	{
+		FString Result;
+		for (const FVerseTextRange& Range : Ranges)
+		{
+			Result += TEXT("<");
+			Result += Snapshot.GetDocument()->DecodeOriginalRange(Range);
+			Result += TEXT(">");
+		}
+		return Result;
+	}
 }
 
 TArray<FVerseTileProperty> FVerseTileProperties::Build(
@@ -54,21 +68,36 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 	if (Tile.Kind == EVerseVisualTileKind::Definition)
 	{
 		Properties.Add({TEXT("Kind"), Tile.DefinitionKind.ToString()});
-		Properties.Add({TEXT("Name"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.NameRange), true});
+		Properties.Add({
+			TEXT("Name"),
+			Snapshot.GetDocument()->DecodeOriginalRange(Tile.NameRange),
+			true,
+			EVerseTilePropertyEditKind::Name});
 		if (Tile.TypeRange.IsSet())
 		{
 			Properties.Add({TEXT("Type"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange)});
 		}
 		if (Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.SpecifierRanges.IsEmpty())
 		{
-			FString Specifiers;
-			for (const FVerseTextRange& Range : Tile.SpecifierRanges)
+			Properties.Add({
+				TEXT("Effects / Specifiers"),
+				FormatSpecifiers(Tile.SpecifierRanges, Snapshot)});
+		}
+		else if (Tile.DefinitionKind == VerseSyntaxKind::Function)
+		{
+			Properties.Add({
+				TEXT("Access Specifiers"),
+				FormatSpecifiers(Tile.FunctionAccessSpecifierRanges, Snapshot),
+				true,
+				EVerseTilePropertyEditKind::AccessSpecifiers});
+			if (!Tile.FunctionEffectSpecifierRanges.IsEmpty())
 			{
-				Specifiers += TEXT("<");
-				Specifiers += Snapshot.GetDocument()->DecodeOriginalRange(Range);
-				Specifiers += TEXT(">");
+				Properties.Add({
+					TEXT("Effects"),
+					FormatSpecifiers(Tile.FunctionEffectSpecifierRanges, Snapshot),
+					true,
+					EVerseTilePropertyEditKind::EffectSpecifiers});
 			}
-			Properties.Add({TEXT("Effects / Specifiers"), MoveTemp(Specifiers)});
 		}
 	}
 	else if (Tile.Kind == EVerseVisualTileKind::Comment)

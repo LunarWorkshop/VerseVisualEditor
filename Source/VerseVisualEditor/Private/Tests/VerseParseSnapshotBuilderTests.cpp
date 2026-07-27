@@ -336,4 +336,58 @@ bool FVerseInvalidNestedBodyRetentionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseFunctionRecognitionTest,
+	"VerseVisualEditor.Prototype.Functions.VstMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this,
+		TEXT("functions.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const FVerseSourceRegion* Function = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("Transform"));
+	if (!TestNotNull(TEXT("Function is recognized from the VST"), Function))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Function kind is retained"), Function->SyntaxKind, VerseSyntaxKind::Function);
+	TestTrue(TEXT("Function signature is outside its body"),
+		Snapshot.GetSourceView(Function->HeaderRange).Find(UTF8TEXTVIEW("Transform")) != INDEX_NONE
+		&& Snapshot.GetSourceView(Function->BodyRange).Find(UTF8TEXTVIEW("Transform")) == INDEX_NONE);
+	TestEqual(TEXT("Function has two parameters"), Function->FunctionParameters.Num(), 2);
+	if (Function->FunctionParameters.Num() == 2)
+	{
+		const FVerseFunctionParameter& Used = Function->FunctionParameters[0];
+		const FVerseFunctionParameter& Unused = Function->FunctionParameters[1];
+		TestTrue(TEXT("First parameter name is exact"), Snapshot.GetSourceView(Used.NameRange) == UTF8TEXTVIEW("Used"));
+		TestTrue(TEXT("First parameter type is exact"), Snapshot.GetSourceView(Used.TypeRange) == UTF8TEXTVIEW("int"));
+		TestEqual(TEXT("Every body reference is retained"), Used.ReferenceRanges.Num(), 2);
+		TestFalse(TEXT("Second parameter is classified as unused"), Unused.IsUsed());
+	}
+	TestTrue(TEXT("Return type is exact"), Snapshot.GetSourceView(Function->TypeRange) == UTF8TEXTVIEW("int"));
+	TestEqual(TEXT("Access and effects are classified around the parameter clause"),
+		Function->FunctionAccessSpecifierRanges.Num(), 1);
+	TestEqual(TEXT("One effect is retained"), Function->FunctionEffectSpecifierRanges.Num(), 1);
+	TestEqual(TEXT("Function body remains one raw region"), Function->Children.Num(), 1);
+	if (Function->Children.Num() == 1)
+	{
+		TestEqual(TEXT("Raw body covers the descriptor interior"), Function->Children[0].Range, Function->BodyRange);
+		TestEqual(TEXT("Raw body is not prematurely parsed into expressions"),
+			Function->Children[0].Kind,
+			EVerseSourceRegionKind::Raw);
+	}
+	return true;
+}
+
 #endif

@@ -340,7 +340,7 @@ tiles, and line numbers.
 
 This step delivers the first complete edit-and-save workflow.
 
-### 6. Compile errors
+### 6. Compile errors (complete)
 
 - Add continuous, compile-on-save, and manual compilation modes.
 - Compile materialized source for a specified document revision.
@@ -375,7 +375,7 @@ This step delivers the first complete edit-and-save workflow.
 - Cover brace-style, colon/indentation-style, empty-body, comment/trivia,
   invalid-body, and nested-definition cases with lossless fixtures.
 
-### 8. Functions
+### 8. Functions (complete)
 
 - Represent the function body using its VST clause descriptor, keeping the
   signature outside the body and its enclosing punctuation outside child

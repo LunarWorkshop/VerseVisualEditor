@@ -307,6 +307,197 @@ namespace VerseParseSnapshotBuilder
 		return nullptr;
 	}
 
+	const Verse::Vst::PrePostCall* FindFunctionCall(const Verse::Vst::Node& Node)
+	{
+		if (const Verse::Vst::PrePostCall* Call = Node.AsNullable<Verse::Vst::PrePostCall>())
+		{
+			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Call->GetChildren())
+			{
+				const Verse::Vst::PrePostCall::Op Tag = Child->GetTag<Verse::Vst::PrePostCall::Op>();
+				if (Tag == Verse::Vst::PrePostCall::SureCall
+					|| Tag == Verse::Vst::PrePostCall::FailCall)
+				{
+					return Call;
+				}
+			}
+		}
+		if (Node.GetAux())
+		{
+			if (const Verse::Vst::PrePostCall* Call = FindFunctionCall(*Node.GetAux()))
+			{
+				return Call;
+			}
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			if (const Verse::Vst::PrePostCall* Call = FindFunctionCall(*Child))
+			{
+				return Call;
+			}
+		}
+		return nullptr;
+	}
+
+	bool TryMakeFunctionParameter(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		FVerseFunctionParameter& OutParameter)
+	{
+		const Verse::Vst::Node* ParameterNode = UnwrapSingleClause(&Node);
+		if (ParameterNode == nullptr)
+		{
+			return false;
+		}
+		if (const Verse::Vst::Definition* DefaultValue = ParameterNode->AsNullable<Verse::Vst::Definition>())
+		{
+			ParameterNode = DefaultValue->GetOperandLeft().Get();
+		}
+
+		const Verse::Vst::Node* NameNode = ParameterNode;
+		const Verse::Vst::Node* TypeNode = nullptr;
+		if (const Verse::Vst::TypeSpec* TypeSpec = ParameterNode->AsNullable<Verse::Vst::TypeSpec>())
+		{
+			if (TypeSpec->HasLhs())
+			{
+				NameNode = TypeSpec->GetLhs().Get();
+				TypeNode = TypeSpec->GetRhs().Get();
+			}
+		}
+
+		const Verse::Vst::Identifier* Name = FindFirstIdentifier(*NameNode);
+		if (Name == nullptr)
+		{
+			return false;
+		}
+		OutParameter.Range = SourceIndex.ToRange(Node.Whence());
+		OutParameter.NameRange = SourceIndex.ToRange(Name->Whence());
+		const int32 NameByteLength = Name->GetSourceText().ByteLen();
+		if (OutParameter.NameRange.IsSet()
+			&& NameByteLength > 0
+			&& OutParameter.NameRange.NumBytes >= NameByteLength)
+		{
+			OutParameter.NameRange = {
+				OutParameter.NameRange.EndByte() - NameByteLength,
+				NameByteLength};
+		}
+		OutParameter.TypeRange = TypeNode != nullptr
+			? SourceIndex.ToRange(TypeNode->Whence())
+			: FVerseByteRange();
+		return OutParameter.Range.IsSet() && OutParameter.NameRange.IsSet();
+	}
+
+	void CollectFunctionParametersFromArguments(
+		const Verse::Vst::Node& Arguments,
+		const FSourceIndex& SourceIndex,
+		TArray<FVerseFunctionParameter>& OutParameters)
+	{
+		if (const Verse::Vst::Clause* Clause = Arguments.AsNullable<Verse::Vst::Clause>())
+		{
+			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause->GetChildren())
+			{
+				FVerseFunctionParameter Parameter;
+				if (TryMakeFunctionParameter(*Child, SourceIndex, Parameter))
+				{
+					OutParameters.Add(MoveTemp(Parameter));
+				}
+				else if (Child->IsA<Verse::Vst::Clause>())
+				{
+					CollectFunctionParametersFromArguments(*Child, SourceIndex, OutParameters);
+				}
+			}
+			return;
+		}
+
+		FVerseFunctionParameter Parameter;
+		if (TryMakeFunctionParameter(Arguments, SourceIndex, Parameter))
+		{
+			OutParameters.Add(MoveTemp(Parameter));
+		}
+	}
+
+	void CollectIdentifierReferences(
+		const Verse::Vst::Node& Node,
+		const uLang::CUTF8StringView& Name,
+		FVerseByteRange BodyRange,
+		const FSourceIndex& SourceIndex,
+		TArray<FVerseByteRange>& OutReferences)
+	{
+		if (const Verse::Vst::Identifier* Identifier = Node.AsNullable<Verse::Vst::Identifier>())
+		{
+			const FVerseByteRange Range = SourceIndex.ToRange(Identifier->Whence());
+			if (Identifier->GetSourceText() == Name
+				&& Range.IsSet()
+				&& Range.BeginByte >= BodyRange.BeginByte
+				&& Range.EndByte() <= BodyRange.EndByte())
+			{
+				OutReferences.AddUnique(Range);
+			}
+		}
+		if (Node.GetAux())
+		{
+			CollectIdentifierReferences(*Node.GetAux(), Name, BodyRange, SourceIndex, OutReferences);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			CollectIdentifierReferences(*Child, Name, BodyRange, SourceIndex, OutReferences);
+		}
+	}
+
+	void PopulateFunctionMetadata(
+		const Verse::Vst::Node& NameOperand,
+		const Verse::Vst::Node& Body,
+		const FSourceIndex& SourceIndex,
+		FVerseSourceRegion& OutRegion)
+	{
+		const Verse::Vst::PrePostCall* Call = FindFunctionCall(NameOperand);
+		if (Call == nullptr)
+		{
+			return;
+		}
+		FVerseByteRange ArgumentRange;
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Call->GetChildren())
+		{
+			const Verse::Vst::PrePostCall::Op Tag = Child->GetTag<Verse::Vst::PrePostCall::Op>();
+			if (Tag == Verse::Vst::PrePostCall::SureCall
+				|| Tag == Verse::Vst::PrePostCall::FailCall)
+			{
+				ArgumentRange = SourceIndex.ToRange(Child->Whence());
+				CollectFunctionParametersFromArguments(*Child, SourceIndex, OutRegion.FunctionParameters);
+				break;
+			}
+		}
+		for (const FVerseByteRange SpecifierRange : OutRegion.SpecifierRanges)
+		{
+			if (ArgumentRange.IsSet() && SpecifierRange.BeginByte < ArgumentRange.BeginByte)
+			{
+				OutRegion.FunctionAccessSpecifierRanges.Add(SpecifierRange);
+			}
+			else
+			{
+				OutRegion.FunctionEffectSpecifierRanges.Add(SpecifierRange);
+			}
+		}
+		for (FVerseFunctionParameter& Parameter : OutRegion.FunctionParameters)
+		{
+			const FUtf8StringView NameView = SourceIndex.GetSource().Mid(
+				Parameter.NameRange.BeginByte,
+				Parameter.NameRange.NumBytes);
+			const uLang::CUTF8StringView ParameterName(
+				reinterpret_cast<const char*>(NameView.GetData()),
+				NameView.Len());
+			CollectIdentifierReferences(
+				Body,
+				ParameterName,
+				OutRegion.BodyRange,
+				SourceIndex,
+				Parameter.ReferenceRanges);
+			Parameter.ReferenceRanges.Sort([](const FVerseByteRange& Left, const FVerseByteRange& Right)
+			{
+				return Left.BeginByte < Right.BeginByte;
+			});
+		}
+	}
+
 	bool ContainsNodeType(const Verse::Vst::Node& Node, Verse::Vst::NodeType Type)
 	{
 		if (Node.GetElementType() == Type)
@@ -547,6 +738,12 @@ namespace VerseParseSnapshotBuilder
 		{
 			OutRegion.BodyClause = MakeExpressionDescriptor(*UnwrappedRight, SourceIndex);
 			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+		}
+		if (SyntaxKind == VerseSyntaxKind::Function && OutRegion.BodyRange.IsSet())
+		{
+			PopulateFunctionMetadata(*NameOperand, RightOperand, SourceIndex, OutRegion);
+			FVerseSourceRegion& RawBody = OutRegion.Children.AddDefaulted_GetRef();
+			RawBody.Range = OutRegion.BodyRange;
 		}
 		if (OutRegion.BodyClause.OpeningPunctuationRange.IsSet())
 		{

@@ -34,6 +34,36 @@ namespace
 					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias));
 	}
 
+	FLinearColor GetVerseTypeColor(const FString& TypeName)
+	{
+		const FString Type = TypeName.TrimStartAndEnd().ToLower();
+		if (Type == TEXT("logic"))
+		{
+			return FLinearColor(0.78f, 0.08f, 0.12f, 1.0f);
+		}
+		if (Type == TEXT("int"))
+		{
+			return FLinearColor(0.10f, 0.72f, 0.62f, 1.0f);
+		}
+		if (Type == TEXT("float"))
+		{
+			return FLinearColor(0.32f, 0.82f, 0.18f, 1.0f);
+		}
+		if (Type == TEXT("string") || Type == TEXT("message"))
+		{
+			return FLinearColor(0.92f, 0.18f, 0.62f, 1.0f);
+		}
+		if (Type == TEXT("char"))
+		{
+			return FLinearColor(0.42f, 0.85f, 0.35f, 1.0f);
+		}
+		if (Type == TEXT("void"))
+		{
+			return FLinearColor(0.72f, 0.72f, 0.72f, 1.0f);
+		}
+		return FLinearColor(0.24f, 0.58f, 1.0f, 1.0f);
+	}
+
 	class SVerseTileContainer final : public SCompoundWidget
 	{
 	public:
@@ -520,7 +550,9 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			? FText::GetEmpty()
 			: LOCTEXT("UnknownTileName", "raw source");
 	const FText TypeText = bDefinition && Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
-	const FText SpecifierText = bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module
+	const FText SpecifierText = bDefinition
+		&& (Tile.DefinitionKind == VerseSyntaxKind::Module
+			|| Tile.DefinitionKind == VerseSyntaxKind::Function)
 		? FormatSpecifiers(Tile)
 		: FText::GetEmpty();
 	const FText DisplayNameText = SpecifierText.IsEmpty()
@@ -543,6 +575,22 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 	if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.Children.IsEmpty())
 	{
 		BodyContent = BuildTileSequence(Tile.Children, TileIndex, false);
+	}
+	else if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Function)
+	{
+		TSharedRef<SVerticalBox> FunctionBody = SNew(SVerticalBox);
+		FunctionBody->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+		[
+			BuildFunctionSignature(Tile)
+		];
+		FunctionBody->AddSlot()
+		.AutoHeight()
+		[
+			BuildTileSequence(Tile.Children, TileIndex, false)
+		];
+		BodyContent = FunctionBody;
 	}
 
 	return SNew(SBox)
@@ -620,6 +668,96 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 				]
 			]
 		];
+}
+
+TSharedRef<SWidget> SVerseTileCanvas::BuildFunctionSignature(const FVerseVisualTile& Tile) const
+{
+	TSharedRef<SVerticalBox> Signature = SNew(SVerticalBox);
+	for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
+	{
+		const FText ParameterName = Decode(Parameter.NameRange);
+		const FText ParameterType = Decode(Parameter.TypeRange);
+		FText UsageTooltip = LOCTEXT("UnusedParameterTooltip", "Unused parameter");
+		if (Parameter.IsUsed())
+		{
+			FString Locations;
+			for (const FVerseTextRange& Reference : Parameter.ReferenceRanges)
+			{
+				if (!Locations.IsEmpty())
+				{
+					Locations += TEXT("\n");
+				}
+				Locations += FString::Printf(
+					TEXT("L%d"),
+					Snapshot->GetDocument()->GetOriginalLineNumber(Reference.BeginByte));
+			}
+			UsageTooltip = FText::Format(
+				LOCTEXT("UsedParameterTooltip", "Used at:\n{0}"),
+				FText::FromString(Locations));
+		}
+
+		Signature->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 1.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(Parameter.IsUsed() ? FText::FromString(TEXT("●")) : FText::FromString(TEXT("○")))
+				.ToolTipText(UsageTooltip)
+				.ColorAndOpacity(Parameter.IsUsed()
+					? FSlateColor(FLinearColor(0.25f, 0.85f, 0.35f, 1.0f))
+					: FSlateColor::UseSubduedForeground())
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(ParameterName)
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(ParameterType.IsEmpty()
+					? LOCTEXT("UntypedFunctionParameter", "untyped")
+					: ParameterType)
+				.ColorAndOpacity(GetVerseTypeColor(ParameterType.ToString()))
+			]
+		];
+	}
+
+	const FText ReturnType = Decode(Tile.TypeRange);
+	Signature->AddSlot()
+	.AutoHeight()
+	.Padding(0.0f, Tile.FunctionParameters.IsEmpty() ? 0.0f : 5.0f, 0.0f, 0.0f)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("FunctionReturnValue", "Return Value"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(STextBlock)
+			.Text(ReturnType.IsEmpty() ? LOCTEXT("InferredReturnType", "inferred") : ReturnType)
+			.ColorAndOpacity(GetVerseTypeColor(ReturnType.ToString()))
+		]
+	];
+	return Signature;
 }
 
 TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& Tile, int32 TileIndex)

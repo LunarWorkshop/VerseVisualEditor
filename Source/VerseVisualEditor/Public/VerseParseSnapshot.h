@@ -45,6 +45,17 @@ struct VERSEVISUALEDITOR_API FVerseClauseDescriptor
 	bool IsSet() const { return InteriorRange.IsSet(); }
 };
 
+/** Parser-derived function parameter and the identifier occurrences in its body. */
+struct VERSEVISUALEDITOR_API FVerseFunctionParameter
+{
+	FVerseByteRange Range;
+	FVerseByteRange NameRange;
+	FVerseByteRange TypeRange;
+	TArray<FVerseByteRange> ReferenceRanges;
+
+	bool IsUsed() const { return !ReferenceRanges.IsEmpty(); }
+};
+
 /** A visual-model-facing description of a range in a particular source document. */
 struct VERSEVISUALEDITOR_API FVerseSourceRegion
 {
@@ -55,6 +66,12 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	FVerseByteRange TypeRange;
 	/** VST append-specifier/effect identifiers attached to this definition's name. */
 	TArray<FVerseByteRange> SpecifierRanges;
+	/** Function specifiers before the parameter clause (for example, access). */
+	TArray<FVerseByteRange> FunctionAccessSpecifierRanges;
+	/** Function specifiers after the parameter clause (for example, effects). */
+	TArray<FVerseByteRange> FunctionEffectSpecifierRanges;
+	/** Populated only for function definitions. */
+	TArray<FVerseFunctionParameter> FunctionParameters;
 	/** Definition text preceding the body's opening punctuation or expression. */
 	FVerseByteRange HeaderRange;
 	/** Exact body interior, retained separately from the complete definition Range. */

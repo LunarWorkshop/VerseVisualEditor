@@ -20,6 +20,16 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange EmptyBodyInsertionAnchor;
 };
 
+struct FVerseVisualFunctionParameter
+{
+	FVerseTextRange Range;
+	FVerseTextRange NameRange;
+	FVerseTextRange TypeRange;
+	TArray<FVerseTextRange> ReferenceRanges;
+
+	bool IsUsed() const { return !ReferenceRanges.IsEmpty(); }
+};
+
 /** Read-only presentation data. All text remains referenced by snapshot byte ranges. */
 struct FVerseVisualTile
 {
@@ -31,6 +41,9 @@ struct FVerseVisualTile
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
 	TArray<FVerseTextRange> SpecifierRanges;
+	TArray<FVerseTextRange> FunctionAccessSpecifierRanges;
+	TArray<FVerseTextRange> FunctionEffectSpecifierRanges;
+	TArray<FVerseVisualFunctionParameter> FunctionParameters;
 	FVerseTextRange HeaderRange;
 	FVerseTextRange BodyRange;
 	FVerseVisualClauseDescriptor BodyClause;

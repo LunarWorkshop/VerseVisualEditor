@@ -31,6 +31,7 @@
 #include "VerseDocumentSession.h"
 #include "VerseExternalChange.h"
 #include "VerseIdentifier.h"
+#include "VerseSpecifier.h"
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
 #include "VerseVisualEditorSettings.h"
@@ -55,8 +56,9 @@ struct FOpenVerseDocument
 	TSharedPtr<FVerseDocumentSession> Session;
 	TArray<uint8> LastKnownDiskBytes;
 	FText LoadError;
-	FText RenameValidationMessage;
+	FText PropertyValidationMessage;
 	TOptional<FString> PendingRenameText;
+	TOptional<FString> PendingSpecifierText;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
@@ -935,8 +937,9 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	}
 	OpenDocument->LastKnownDiskBytes = MoveTemp(DiskBytes);
 	OpenDocument->LoadError = FText::GetEmpty();
-	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
 	OpenDocument->PendingRenameText.Reset();
+	OpenDocument->PendingSpecifierText.Reset();
 	OpenDocument->SelectedTile.Reset();
 	InvalidateCompilationResult(OpenDocument);
 	if (CompilationMode == EVerseCompilationMode::Continuous)
@@ -1363,8 +1366,9 @@ void SVerseVisualEditor::HandleTileSelected(
 	}
 
 	OpenDocument->SelectedTile = Tile;
-	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
 	OpenDocument->PendingRenameText.Reset();
+	OpenDocument->PendingSpecifierText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
 		OpenDetailsTab();
@@ -1380,8 +1384,9 @@ void SVerseVisualEditor::HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocumen
 	}
 
 	OpenDocument->SelectedTile.Reset();
-	OpenDocument->RenameValidationMessage = FText::GetEmpty();
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
 	OpenDocument->PendingRenameText.Reset();
+	OpenDocument->PendingSpecifierText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
 		RebuildProperties();
@@ -1408,8 +1413,8 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	}
 
 	const FString NewName = NewText.ToString();
-	OpenDocument->RenameValidationMessage = ValidateVerseIdentifier(NewName);
-	if (!OpenDocument->RenameValidationMessage.IsEmpty())
+	OpenDocument->PropertyValidationMessage = ValidateVerseIdentifier(NewName);
+	if (!OpenDocument->PropertyValidationMessage.IsEmpty())
 	{
 		OpenDocument->PendingRenameText = NewName;
 		if (OpenDocument == ActiveDocument)
@@ -1438,7 +1443,7 @@ void SVerseVisualEditor::HandleRenameCommitted(
 		NewName,
 		EditError))
 	{
-		OpenDocument->RenameValidationMessage = EditError;
+		OpenDocument->PropertyValidationMessage = EditError;
 		if (OpenDocument == ActiveDocument)
 		{
 			RebuildProperties();
@@ -1464,6 +1469,97 @@ void SVerseVisualEditor::HandleRenameCommitted(
 		}
 	}
 
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+void SVerseVisualEditor::HandleSpecifiersCommitted(
+	const FText& NewText,
+	ETextCommit::Type CommitType,
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	FVerseVisualTile Tile,
+	bool bEffects)
+{
+	if (CommitType == ETextCommit::OnCleared
+		|| !OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	FVerseTextRange ReplacementRange(
+		OpenDocument->Session->GetRevision(),
+		FVerseByteRange::FromBounds(Tile.NameRange.EndByte(), Tile.NameRange.EndByte()));
+	const TArray<FVerseTextRange>& SpecifierRanges = bEffects
+		? Tile.FunctionEffectSpecifierRanges
+		: Tile.FunctionAccessSpecifierRanges;
+	if (!SpecifierRanges.IsEmpty())
+	{
+		const FUtf8StringView Source = OpenDocument->Session->GetParseSnapshot()
+			.GetDocument()->GetOriginalUtf8View();
+		const int32 Begin = SpecifierRanges[0].BeginByte - 1;
+		const int32 End = SpecifierRanges.Last().EndByte() + 1;
+		if (Begin < 0
+			|| End > Source.Len()
+			|| Source[Begin] != static_cast<UTF8CHAR>('<')
+			|| Source[End - 1] != static_cast<UTF8CHAR>('>'))
+		{
+			OpenDocument->PropertyValidationMessage = LOCTEXT(
+				"InvalidExistingSpecifierRange",
+				"The existing specifier source range is invalid. Source was not changed.");
+			RebuildProperties();
+			return;
+		}
+		ReplacementRange = FVerseTextRange(
+			OpenDocument->Session->GetRevision(),
+			FVerseByteRange::FromBounds(Begin, End));
+	}
+
+	const FString ProposedText = NewText.ToString();
+	FString NormalizedText;
+	OpenDocument->PropertyValidationMessage = NormalizeVerseSpecifiers(ProposedText, NormalizedText);
+	if (!OpenDocument->PropertyValidationMessage.IsEmpty())
+	{
+		OpenDocument->PendingSpecifierText = ProposedText;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+	OpenDocument->PendingSpecifierText.Reset();
+
+	FText EditError;
+	if (!TryReplaceWithValidatedVerseSpecifiers(
+		*OpenDocument->Session,
+		ReplacementRange,
+		NormalizedText,
+		EditError))
+	{
+		OpenDocument->PropertyValidationMessage = EditError;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+
+	OpenDocument->bIsTemporary = false;
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
+	OpenDocument->SelectedTile.Reset();
+	if (const FVerseVisualTile* ReplacementTile = FindReplacementTile(
+		OpenDocument->Session->GetTiles(),
+		Tile))
+	{
+		OpenDocument->SelectedTile = *ReplacementTile;
+	}
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
@@ -1551,7 +1647,7 @@ void SVerseVisualEditor::RebuildProperties()
 	}
 
 	PropertyRows->ClearChildren();
-	if (ActiveDocument.IsValid() && !ActiveDocument->RenameValidationMessage.IsEmpty())
+	if (ActiveDocument.IsValid() && !ActiveDocument->PropertyValidationMessage.IsEmpty())
 	{
 		PropertyRows->AddSlot()
 		.AutoHeight()
@@ -1563,7 +1659,7 @@ void SVerseVisualEditor::RebuildProperties()
 			.Padding(6.0f)
 			[
 				SNew(STextBlock)
-				.Text(ActiveDocument->RenameValidationMessage)
+				.Text(ActiveDocument->PropertyValidationMessage)
 				.AutoWrapText(true)
 				.ColorAndOpacity(FLinearColor(1.0f, 0.55f, 0.2f))
 			]
@@ -1593,15 +1689,32 @@ void SVerseVisualEditor::RebuildProperties()
 			.AutoWrapText(true);
 		if (Property.bEditable)
 		{
-			const FString EditableValue = ActiveDocument->PendingRenameText.Get(Property.Value);
-			ValueWidget = SNew(SEditableTextBox)
-				.Text(FText::FromString(EditableValue))
-				.SelectAllTextWhenFocused(true)
-				.OnTextCommitted(
-					this,
-					&SVerseVisualEditor::HandleRenameCommitted,
-					ActiveDocument,
-					ActiveDocument->SelectedTile->NameRange);
+			if (Property.EditKind == EVerseTilePropertyEditKind::AccessSpecifiers
+				|| Property.EditKind == EVerseTilePropertyEditKind::EffectSpecifiers)
+			{
+				const FString EditableValue = ActiveDocument->PendingSpecifierText.Get(Property.Value);
+				ValueWidget = SNew(SEditableTextBox)
+					.Text(FText::FromString(EditableValue))
+					.SelectAllTextWhenFocused(true)
+					.OnTextCommitted(
+						this,
+						&SVerseVisualEditor::HandleSpecifiersCommitted,
+						ActiveDocument,
+						ActiveDocument->SelectedTile.GetValue(),
+						Property.EditKind == EVerseTilePropertyEditKind::EffectSpecifiers);
+			}
+			else
+			{
+				const FString EditableValue = ActiveDocument->PendingRenameText.Get(Property.Value);
+				ValueWidget = SNew(SEditableTextBox)
+					.Text(FText::FromString(EditableValue))
+					.SelectAllTextWhenFocused(true)
+					.OnTextCommitted(
+						this,
+						&SVerseVisualEditor::HandleRenameCommitted,
+						ActiveDocument,
+						ActiveDocument->SelectedTile->NameRange);
+			}
 		}
 		PropertyRows->AddSlot()
 		.AutoHeight()

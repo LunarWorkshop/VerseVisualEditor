@@ -6,11 +6,20 @@
 class FVerseParseSnapshot;
 struct FVerseVisualTile;
 
+enum class EVerseTilePropertyEditKind : uint8
+{
+	None,
+	Name,
+	AccessSpecifiers,
+	EffectSpecifiers,
+};
+
 struct FVerseTileProperty
 {
 	FString Name;
 	FString Value;
 	bool bEditable = false;
+	EVerseTilePropertyEditKind EditKind = EVerseTilePropertyEditKind::None;
 };
 
 class FVerseTileProperties

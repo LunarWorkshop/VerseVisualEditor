@@ -86,6 +86,21 @@ namespace
 		return Result;
 	}
 
+	FVerseVisualFunctionParameter MakeVisualFunctionParameter(
+		const FVerseFunctionParameter& Parameter,
+		FVerseDocumentRevision Revision)
+	{
+		FVerseVisualFunctionParameter Result;
+		Result.Range = MakeTextRange(Revision, Parameter.Range);
+		Result.NameRange = MakeTextRange(Revision, Parameter.NameRange);
+		Result.TypeRange = MakeTextRange(Revision, Parameter.TypeRange);
+		for (const FVerseByteRange ReferenceRange : Parameter.ReferenceRanges)
+		{
+			Result.ReferenceRanges.Add(MakeTextRange(Revision, ReferenceRange));
+		}
+		return Result;
+	}
+
 	TArray<FVerseVisualTile> BuildTiles(
 		const FVerseParseSnapshot& Snapshot,
 		TConstArrayView<FVerseSourceRegion> Regions,
@@ -124,6 +139,18 @@ namespace
 				for (const FVerseByteRange SpecifierRange : Region.SpecifierRanges)
 				{
 					Tile.SpecifierRanges.Add(MakeTextRange(Revision, SpecifierRange));
+				}
+				for (const FVerseByteRange SpecifierRange : Region.FunctionAccessSpecifierRanges)
+				{
+					Tile.FunctionAccessSpecifierRanges.Add(MakeTextRange(Revision, SpecifierRange));
+				}
+				for (const FVerseByteRange SpecifierRange : Region.FunctionEffectSpecifierRanges)
+				{
+					Tile.FunctionEffectSpecifierRanges.Add(MakeTextRange(Revision, SpecifierRange));
+				}
+				for (const FVerseFunctionParameter& Parameter : Region.FunctionParameters)
+				{
+					Tile.FunctionParameters.Add(MakeVisualFunctionParameter(Parameter, Revision));
 				}
 				Tile.HeaderRange = MakeTextRange(Revision, Region.HeaderRange);
 				Tile.BodyRange = MakeTextRange(Revision, Region.BodyRange);

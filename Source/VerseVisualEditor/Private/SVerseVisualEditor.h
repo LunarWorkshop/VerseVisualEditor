@@ -99,6 +99,12 @@ private:
 		ETextCommit::Type CommitType,
 		TSharedPtr<FOpenVerseDocument> OpenDocument,
 		FVerseTextRange NameRange);
+	void HandleSpecifiersCommitted(
+		const FText& NewText,
+		ETextCommit::Type CommitType,
+		TSharedPtr<FOpenVerseDocument> OpenDocument,
+		FVerseVisualTile Tile,
+		bool bEffects);
 	void HandleDetailsTabClosed(TSharedRef<SDockTab> ClosedTab);
 	void OpenDetailsTab();
 	TSharedRef<SWidget> BuildDetailsPanel();

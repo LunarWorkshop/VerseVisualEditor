@@ -381,4 +381,61 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseFunctionTilePresentationTest,
+	"VerseVisualEditor.Prototype.Functions.VisualTile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(*this, TEXT("functions.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const FVerseDocumentRevision Revision{23};
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot, Revision);
+	const FVerseVisualTile* Function = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("Transform"));
+	if (!TestNotNull(TEXT("Function visual tile exists"), Function))
+	{
+		return false;
+	}
+
+	if (TestEqual(TEXT("Function has two visual parameters"), Function->FunctionParameters.Num(), 2))
+	{
+		TestEqual(TEXT("Function parameters retain the tile revision"),
+			Function->FunctionParameters[0].NameRange.Revision,
+			Revision);
+		TestTrue(TEXT("Used parameter exposes hover reference locations"),
+			Function->FunctionParameters[0].IsUsed()
+			&& Function->FunctionParameters[0].ReferenceRanges.Num() == 2);
+		TestTrue(TEXT("Unused parameter remains visibly distinguishable"),
+			!Function->FunctionParameters[1].IsUsed());
+	}
+	TestTrue(TEXT("Raw body is a child unknown tile"),
+		Function->Children.Num() == 1
+		&& Function->Children[0].Kind == EVerseVisualTileKind::Unknown
+		&& Function->Children[0].Range == Function->BodyRange);
+
+	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Function, Snapshot);
+	const FVerseTileProperty* Access = Properties.FindByPredicate([](const FVerseTileProperty& Property)
+	{
+		return Property.EditKind == EVerseTilePropertyEditKind::AccessSpecifiers;
+	});
+	const FVerseTileProperty* Effects = Properties.FindByPredicate([](const FVerseTileProperty& Property)
+	{
+		return Property.EditKind == EVerseTilePropertyEditKind::EffectSpecifiers;
+	});
+	TestTrue(TEXT("Access specifiers are editable in Details"),
+		Access != nullptr && Access->bEditable && Access->Value == TEXT("<public>"));
+	TestTrue(TEXT("Effects are editable in Details"),
+		Effects != nullptr && Effects->bEditable && Effects->Value == TEXT("<computes>"));
+	return true;
+}
+
 #endif
