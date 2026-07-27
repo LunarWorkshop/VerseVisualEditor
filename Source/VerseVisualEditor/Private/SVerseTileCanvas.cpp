@@ -435,11 +435,22 @@ void SVerseTileCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEv
 
 TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 {
+	return BuildTileSequence(Tiles, INDEX_NONE, true);
+}
+
+TSharedRef<SWidget> SVerseTileCanvas::BuildTileSequence(
+	TConstArrayView<FVerseVisualTile> TilesToBuild,
+	int32 SharedDiagnosticTileIndex,
+	bool bShowEmptyDocumentMessage)
+{
 	TSharedRef<SHorizontalBox> TileRow = SNew(SHorizontalBox);
-	for (int32 TileIndex = 0; TileIndex < Tiles.Num();)
+	for (int32 TileIndex = 0; TileIndex < TilesToBuild.Num();)
 	{
-		TSharedRef<SWidget> Presentation = BuildTile(Tiles[TileIndex], TileIndex);
-		if (BelongsInCompactStack(Tiles[TileIndex]))
+		const int32 DiagnosticTileIndex = SharedDiagnosticTileIndex == INDEX_NONE
+			? TileIndex
+			: SharedDiagnosticTileIndex;
+		TSharedRef<SWidget> Presentation = BuildTile(TilesToBuild[TileIndex], DiagnosticTileIndex);
+		if (BelongsInCompactStack(TilesToBuild[TileIndex]))
 		{
 			TSharedRef<SVerticalBox> CompactStack = SNew(SVerticalBox);
 			do
@@ -448,11 +459,13 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 				.AutoHeight()
 				.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 				[
-					BuildTile(Tiles[TileIndex], TileIndex)
+					BuildTile(
+						TilesToBuild[TileIndex],
+						SharedDiagnosticTileIndex == INDEX_NONE ? TileIndex : SharedDiagnosticTileIndex)
 				];
 				++TileIndex;
 			}
-			while (TileIndex < Tiles.Num() && BelongsInCompactStack(Tiles[TileIndex]));
+			while (TileIndex < TilesToBuild.Num() && BelongsInCompactStack(TilesToBuild[TileIndex]));
 			Presentation = CompactStack;
 		}
 		else
@@ -469,7 +482,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 		];
 	}
 
-	if (Tiles.IsEmpty())
+	if (TilesToBuild.IsEmpty() && bShowEmptyDocumentMessage)
 	{
 		TileRow->AddSlot()
 		.AutoWidth()
@@ -507,6 +520,12 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			? FText::GetEmpty()
 			: LOCTEXT("UnknownTileName", "raw source");
 	const FText TypeText = bDefinition && Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
+	const FText SpecifierText = bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module
+		? FormatSpecifiers(Tile)
+		: FText::GetEmpty();
+	const FText DisplayNameText = SpecifierText.IsEmpty()
+		? NameText
+		: FText::Format(LOCTEXT("DefinitionNameWithSpecifiers", "{0}{1}"), NameText, SpecifierText);
 	const FLinearColor TileColor = bDefinition
 		? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
 		: bComment
@@ -517,8 +536,17 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		? Tile.Range
 		: Tile.BodyRange;
 
+	TSharedRef<SWidget> BodyContent = SNew(SMultiLineEditableText)
+		.Text(Decode(ContentRange))
+		.IsReadOnly(true)
+		.AutoWrapText(true);
+	if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.Children.IsEmpty())
+	{
+		BodyContent = BuildTileSequence(Tile.Children, TileIndex, false);
+	}
+
 	return SNew(SBox)
-		.MaxDesiredWidth(720.0f)
+		.MaxDesiredWidth(bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module ? 2400.0f : 720.0f)
 		[
 			SNew(SVerseTileContainer)
 			.TileColor(TileColor)
@@ -548,7 +576,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
 				[
 					SNew(STextBlock)
-					.Text(NameText)
+					.Text(DisplayNameText)
 					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 				]
 				+ SVerticalBox::Slot()
@@ -588,10 +616,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 				.Padding(10.0f)
 				[
-					SNew(SMultiLineEditableText)
-					.Text(Decode(ContentRange))
-					.IsReadOnly(true)
-					.AutoWrapText(true)
+					BodyContent
 				]
 			]
 		];
@@ -693,6 +718,18 @@ FText SVerseTileCanvas::Decode(FVerseByteRange Range) const
 	return Range.IsSet()
 		? FText::FromString(Snapshot->GetDocument()->DecodeOriginalRange(Range))
 		: FText::GetEmpty();
+}
+
+FText SVerseTileCanvas::FormatSpecifiers(const FVerseVisualTile& Tile) const
+{
+	FString Result;
+	for (const FVerseTextRange& Range : Tile.SpecifierRanges)
+	{
+		Result += TEXT("<");
+		Result += Snapshot->GetDocument()->DecodeOriginalRange(Range);
+		Result += TEXT(">");
+	}
+	return FText::FromString(MoveTemp(Result));
 }
 
 FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const

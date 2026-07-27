@@ -111,6 +111,27 @@ namespace
 				TEXT("/") + DiagnosticPath,
 				ESearchCase::IgnoreCase);
 	}
+
+	const FVerseVisualTile* FindReplacementTile(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		const FVerseVisualTile& PreviousTile)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Kind == PreviousTile.Kind
+				&& Tile.DefinitionKind == PreviousTile.DefinitionKind
+				&& Tile.NameRange.IsSet()
+				&& Tile.NameRange.BeginByte == PreviousTile.NameRange.BeginByte)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Nested = FindReplacementTile(Tile.Children, PreviousTile))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
 }
 
 void SVerseVisualEditor::Construct(const FArguments& InArgs)
@@ -1435,14 +1456,9 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	if (PreviousSelection.IsSet())
 	{
 		const FVerseVisualTile& PreviousTile = PreviousSelection.GetValue();
-		if (const FVerseVisualTile* ReplacementTile = OpenDocument->Session->GetTiles().FindByPredicate(
-			[&PreviousTile](const FVerseVisualTile& Tile)
-			{
-				return Tile.Kind == PreviousTile.Kind
-					&& Tile.DefinitionKind == PreviousTile.DefinitionKind
-					&& Tile.NameRange.IsSet()
-					&& Tile.NameRange.BeginByte == PreviousTile.NameRange.BeginByte;
-			}))
+		if (const FVerseVisualTile* ReplacementTile = FindReplacementTile(
+			OpenDocument->Session->GetTiles(),
+			PreviousTile))
 		{
 			OpenDocument->SelectedTile = *ReplacementTile;
 		}

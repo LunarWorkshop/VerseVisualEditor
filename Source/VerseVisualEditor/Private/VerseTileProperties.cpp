@@ -1,6 +1,7 @@
 #include "VerseTileProperties.h"
 
 #include "VerseParseSnapshot.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
 
 namespace
@@ -57,6 +58,17 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 		if (Tile.TypeRange.IsSet())
 		{
 			Properties.Add({TEXT("Type"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange)});
+		}
+		if (Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.SpecifierRanges.IsEmpty())
+		{
+			FString Specifiers;
+			for (const FVerseTextRange& Range : Tile.SpecifierRanges)
+			{
+				Specifiers += TEXT("<");
+				Specifiers += Snapshot.GetDocument()->DecodeOriginalRange(Range);
+				Specifiers += TEXT(">");
+			}
+			Properties.Add({TEXT("Effects / Specifiers"), MoveTemp(Specifiers)});
 		}
 	}
 	else if (Tile.Kind == EVerseVisualTileKind::Comment)

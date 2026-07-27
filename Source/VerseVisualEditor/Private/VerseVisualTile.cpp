@@ -121,6 +121,11 @@ namespace
 				Tile.DefinitionKind = Region.SyntaxKind;
 				Tile.NameRange = MakeTextRange(Revision, Region.NameRange);
 				Tile.TypeRange = MakeTextRange(Revision, Region.TypeRange);
+				for (const FVerseByteRange SpecifierRange : Region.SpecifierRanges)
+				{
+					Tile.SpecifierRanges.Add(MakeTextRange(Revision, SpecifierRange));
+				}
+				Tile.HeaderRange = MakeTextRange(Revision, Region.HeaderRange);
 				Tile.BodyRange = MakeTextRange(Revision, Region.BodyRange);
 				Tile.BodyClause = MakeVisualClauseDescriptor(Region.BodyClause, Revision);
 				Tile.Children = BuildTiles(Snapshot, Region.Children, Revision);

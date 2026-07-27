@@ -53,6 +53,10 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	FName SyntaxKind;
 	FVerseByteRange NameRange;
 	FVerseByteRange TypeRange;
+	/** VST append-specifier/effect identifiers attached to this definition's name. */
+	TArray<FVerseByteRange> SpecifierRanges;
+	/** Definition text preceding the body's opening punctuation or expression. */
+	FVerseByteRange HeaderRange;
 	/** Exact body interior, retained separately from the complete definition Range. */
 	FVerseByteRange BodyRange;
 	FVerseClauseDescriptor BodyClause;

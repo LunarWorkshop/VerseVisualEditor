@@ -33,6 +33,26 @@ namespace VerseVisualTileTests
 	{
 		return LoadPluginFile(Test, FPaths::Combine(TEXT("Tests/Fixtures"), FileName));
 	}
+
+	const FVerseVisualTile* FindDefinition(
+		const FVerseParseSnapshot& Snapshot,
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FUtf8StringView Name)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Kind == EVerseVisualTileKind::Definition
+				&& Snapshot.GetSourceView(Tile.NameRange) == Name)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Nested = FindDefinition(Snapshot, Tile.Children, Name))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -148,6 +168,89 @@ bool FVerseRawTilePresentationTest::RunTest(const FString& Parameters)
 			TEXT("Unknown tile retains the complete source range"),
 			Tiles[0].Range,
 			FVerseTextRange({}, Document->GetWholeOriginalRange()));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseNestedModulePresentationTest,
+	"VerseVisualEditor.Foundation.VisualTiles.NestedModules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseNestedModulePresentationTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
+		*this,
+		TEXT("nested_modules.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const FVerseDocumentRevision Revision{17};
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot, Revision);
+	const FVerseVisualTile* Root = VerseVisualTileTests::FindDefinition(Snapshot, Tiles, UTF8TEXTVIEW("RootModule"));
+	const FVerseVisualTile* Nested = VerseVisualTileTests::FindDefinition(Snapshot, Tiles, UTF8TEXTVIEW("NestedModule"));
+	const FVerseVisualTile* Deep = VerseVisualTileTests::FindDefinition(Snapshot, Tiles, UTF8TEXTVIEW("DeepModule"));
+
+	if (TestNotNull(TEXT("Root module tile exists"), Root))
+	{
+		TestEqual(TEXT("Root module is a module"), Root->DefinitionKind, VerseSyntaxKind::Module);
+		TestEqual(TEXT("Root module retains its revision"), Root->Range.Revision, Revision);
+		TestEqual(TEXT("Root module has one VST specifier"), Root->SpecifierRanges.Num(), 1);
+		if (Root->SpecifierRanges.Num() == 1)
+		{
+			TestTrue(TEXT("Root module displays the public specifier source"), Snapshot.GetSourceView(Root->SpecifierRanges[0]) == UTF8TEXTVIEW("public"));
+		}
+		TestTrue(TEXT("Root module has nested visual children"), !Root->Children.IsEmpty());
+		TestTrue(TEXT("Root module header contains its declaration"), Snapshot.GetSourceView(Root->HeaderRange).Find(UTF8TEXTVIEW("RootModule<public> := module")) != INDEX_NONE);
+		TestTrue(TEXT("Root module header excludes its body"), Snapshot.GetSourceView(Root->HeaderRange).Find(UTF8TEXTVIEW("NestedModule")) == INDEX_NONE);
+		const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Root, Snapshot);
+		const FVerseTileProperty* SpecifierProperty = Properties.FindByPredicate([](const FVerseTileProperty& Property)
+		{
+			return Property.Name == TEXT("Effects / Specifiers");
+		});
+		TestTrue(
+			TEXT("Module effects/specifiers are exposed in Details"),
+			SpecifierProperty != nullptr && SpecifierProperty->Value == TEXT("<public>"));
+	}
+	if (TestNotNull(TEXT("Brace-style nested module tile exists"), Nested))
+	{
+		TestEqual(TEXT("Nested module retains brace punctuation"), Nested->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::Braces);
+		TestEqual(TEXT("Nested module has one VST specifier"), Nested->SpecifierRanges.Num(), 1);
+		if (Nested->SpecifierRanges.Num() == 1)
+		{
+			TestTrue(TEXT("Nested module displays the internal specifier source"), Snapshot.GetSourceView(Nested->SpecifierRanges[0]) == UTF8TEXTVIEW("internal"));
+		}
+
+		const TArray<FName> ExpectedKinds = {
+			VerseSyntaxKind::Class,
+			VerseSyntaxKind::Struct,
+			VerseSyntaxKind::Interface,
+			VerseSyntaxKind::Enum,
+			VerseSyntaxKind::Function,
+			VerseSyntaxKind::Variable,
+			VerseSyntaxKind::Constant,
+			VerseSyntaxKind::TypeAlias};
+		for (const FName ExpectedKind : ExpectedKinds)
+		{
+			TestTrue(
+				*FString::Printf(TEXT("Nested module contains %s"), *ExpectedKind.ToString()),
+				Nested->Children.ContainsByPredicate([ExpectedKind](const FVerseVisualTile& Tile)
+				{
+					return Tile.Kind == EVerseVisualTileKind::Definition
+						&& Tile.DefinitionKind == ExpectedKind;
+				}));
+		}
+	}
+	if (TestNotNull(TEXT("Arbitrarily deep nested module tile exists"), Deep))
+	{
+		TestEqual(TEXT("Deep module retains the current revision"), Deep->Range.Revision, Revision);
+		TestTrue(TEXT("Deep module range is independently selectable"), Deep->Range.IsSet());
+		FVerseTileSelection Selection;
+		Selection.Select(Deep->Range);
+		TestTrue(TEXT("Single-tile selection accepts a nested module"), Selection.IsSelected(Deep->Range));
 	}
 	return true;
 }

@@ -323,6 +323,33 @@ namespace VerseParseSnapshotBuilder
 		return false;
 	}
 
+	void CollectAppendSpecifierRanges(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		TArray<FVerseByteRange>& OutRanges)
+	{
+		if (const Verse::Vst::Clause* Clause = Node.AsNullable<Verse::Vst::Clause>();
+			Clause != nullptr
+			&& Clause->GetForm() == Verse::Vst::Clause::EForm::IsAppendAttributeHolder)
+		{
+			const FVerseByteRange Range = SourceIndex.ToRange(Clause->Whence());
+			if (Range.IsSet() && Range.NumBytes > 0)
+			{
+				OutRanges.AddUnique(Range);
+			}
+			return;
+		}
+
+		if (Node.GetAux())
+		{
+			CollectAppendSpecifierRanges(*Node.GetAux(), SourceIndex, OutRanges);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			CollectAppendSpecifierRanges(*Child, SourceIndex, OutRanges);
+		}
+	}
+
 	void CollectCommentRegions(
 		const Verse::Vst::Node& Node,
 		const FSourceIndex& SourceIndex,
@@ -500,6 +527,11 @@ namespace VerseParseSnapshotBuilder
 		OutRegion.TypeRange = TypeOperand != nullptr
 			? SourceIndex.ToRange(TypeOperand->Whence())
 			: FVerseByteRange();
+		CollectAppendSpecifierRanges(*NameOperand, SourceIndex, OutRegion.SpecifierRanges);
+		OutRegion.SpecifierRanges.Sort([](const FVerseByteRange& Left, const FVerseByteRange& Right)
+		{
+			return Left.BeginByte < Right.BeginByte;
+		});
 		const Verse::Vst::Node* UnwrappedRight = UnwrapSingleClause(&RightOperand);
 		if (const Verse::Vst::Macro* Macro = UnwrappedRight != nullptr
 			? UnwrappedRight->AsNullable<Verse::Vst::Macro>()
@@ -515,6 +547,18 @@ namespace VerseParseSnapshotBuilder
 		{
 			OutRegion.BodyClause = MakeExpressionDescriptor(*UnwrappedRight, SourceIndex);
 			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+		}
+		if (OutRegion.BodyClause.OpeningPunctuationRange.IsSet())
+		{
+			OutRegion.HeaderRange = FVerseByteRange::FromBounds(
+				DefinitionRange.BeginByte,
+				OutRegion.BodyClause.OpeningPunctuationRange.BeginByte);
+		}
+		else if (OutRegion.BodyRange.IsSet())
+		{
+			OutRegion.HeaderRange = FVerseByteRange::FromBounds(
+				DefinitionRange.BeginByte,
+				OutRegion.BodyRange.BeginByte);
 		}
 		return true;
 	}

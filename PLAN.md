@@ -46,6 +46,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Nested-body range transition: complete; VST-derived clause descriptors retain
   complete definitions, exact interiors and punctuation, insertion anchors, and
   recursively lossless child coverage.
+- Modules: complete; module tiles render VST-derived nested definitions and raw
+  gaps recursively, display append specifiers, and retain independent source
+  ranges at every nesting level.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -387,15 +390,15 @@ This step delivers the first complete edit-and-save workflow.
   expression steps must replace portions with VST-derived children while
   preserving the remaining raw gaps.
 
-### 9. Modules
+### 9. Modules (complete)
 
 - Use the VST-derived module clause descriptor and recursively convert its VST
   children into nested definitions and exact raw gaps.
 - Display module names and effects.
-- Allow modules to contain all definition types already implemented.
-- Reuse single-tile selection, insertion, deletion, renaming, and reordering
-  behavior.
-- Allow definitions to move between valid module and global scopes.
+- Allow modules to contain all definition types already implemented. (and allowing for containing future ones)
+- Reuse the currently available single-tile selection and renaming behavior.
+- Defer nested insertion and deletion to Additional Step 4 and module/global
+  movement and reordering to Additional Step 5.
 - Support nested modules.
 - Preserve each nested module's independent complete, header, punctuation, and
   interior ranges so movement and insertion target the correct scope.
@@ -510,6 +513,8 @@ This step supplies compound editing only when later visual operations need it.
 ### 4. Insertion and deletion
 
 - Add insertion controls between global definitions.
+- Add the same insertion and deletion behavior inside module bodies, using the
+  module clause descriptor's interior and empty-body insertion anchor.
 - Offer every supported global definition type.
 - Create definitions with an automatically focused name field.
 - Generate the smallest required Verse fragment using the local line-ending and
@@ -527,6 +532,8 @@ regeneration.
 ### 5. Reordering
 
 - Allow one selected definition to be reordered by dragging.
+- Allow definitions to move within a module and between valid module and global
+  scopes.
 - Move that definition's current-source range through one atomic
   delete-and-insert
   transaction without regenerating its contents.

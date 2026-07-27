@@ -30,6 +30,8 @@ struct FVerseVisualTile
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
+	TArray<FVerseTextRange> SpecifierRanges;
+	FVerseTextRange HeaderRange;
 	FVerseTextRange BodyRange;
 	FVerseVisualClauseDescriptor BodyClause;
 	TArray<FVerseVisualTile> Children;

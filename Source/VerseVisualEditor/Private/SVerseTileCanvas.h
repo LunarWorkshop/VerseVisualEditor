@@ -57,10 +57,15 @@ public:
 
 private:
 	TSharedRef<SWidget> BuildTileRow();
+	TSharedRef<SWidget> BuildTileSequence(
+		TConstArrayView<struct FVerseVisualTile> TilesToBuild,
+		int32 SharedDiagnosticTileIndex,
+		bool bShowEmptyDocumentMessage);
 	TSharedRef<SWidget> BuildTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	FText Decode(FVerseByteRange Range) const;
+	FText FormatSpecifiers(const struct FVerseVisualTile& Tile) const;
 	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
 	FText FormatDiagnosticMessages(int32 TileIndex) const;
 	bool HasDiagnosticForTile(int32 TileIndex) const;

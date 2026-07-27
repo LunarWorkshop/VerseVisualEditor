@@ -54,6 +54,8 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestEqual(TEXT("Raw region has no syntax kind"), Region.SyntaxKind, NAME_None);
 				Test.TestFalse(TEXT("Raw region has no name range"), Region.NameRange.IsSet());
 				Test.TestFalse(TEXT("Raw region has no type range"), Region.TypeRange.IsSet());
+				Test.TestTrue(TEXT("Raw region has no specifier ranges"), Region.SpecifierRanges.IsEmpty());
+				Test.TestFalse(TEXT("Raw region has no header range"), Region.HeaderRange.IsSet());
 				Test.TestFalse(TEXT("Raw region has no body range"), Region.BodyRange.IsSet());
 				Test.TestTrue(TEXT("Raw region has no comment kind"), Region.CommentKind == EVerseCommentKind::None);
 			}
@@ -62,6 +64,8 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestEqual(TEXT("Comment region has no syntax kind"), Region.SyntaxKind, NAME_None);
 				Test.TestFalse(TEXT("Comment region has no name range"), Region.NameRange.IsSet());
 				Test.TestFalse(TEXT("Comment region has no type range"), Region.TypeRange.IsSet());
+				Test.TestTrue(TEXT("Comment region has no specifier ranges"), Region.SpecifierRanges.IsEmpty());
+				Test.TestFalse(TEXT("Comment region has no header range"), Region.HeaderRange.IsSet());
 				Test.TestEqual(TEXT("Comment body is its complete source"), Region.BodyRange, Region.Range);
 				Test.TestTrue(TEXT("Comment region retains its parser comment kind"), Region.CommentKind != EVerseCommentKind::None);
 			}
@@ -70,8 +74,14 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestTrue(TEXT("Typed region has a syntax kind"), !Region.SyntaxKind.IsNone());
 				Test.TestTrue(TEXT("Typed region has a name range"), Region.NameRange.IsSet());
 				Test.TestTrue(TEXT("Typed region has a body range"), Region.BodyRange.IsSet());
+				Test.TestTrue(TEXT("Typed region has a header range"), Region.HeaderRange.IsSet());
 				Test.TestTrue(TEXT("Name begins inside its typed region"), Region.NameRange.BeginByte >= Region.Range.BeginByte);
 				Test.TestTrue(TEXT("Name ends inside its typed region"), Region.NameRange.EndByte() <= Region.Range.EndByte());
+				for (const FVerseByteRange SpecifierRange : Region.SpecifierRanges)
+				{
+					Test.TestTrue(TEXT("Specifier begins inside its typed region"), SpecifierRange.BeginByte >= Region.Range.BeginByte);
+					Test.TestTrue(TEXT("Specifier ends inside its typed region"), SpecifierRange.EndByte() <= Region.Range.EndByte());
+				}
 			}
 			Cursor = Region.Range.EndByte();
 		}
