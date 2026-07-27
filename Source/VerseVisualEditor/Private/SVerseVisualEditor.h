@@ -70,7 +70,7 @@ private:
 	void OpenDetailsTab();
 	TSharedRef<SWidget> BuildDetailsPanel();
 	void RebuildProperties();
-	void CaptureActiveScrollOffset();
+	void CaptureActiveCanvasView();
 	void LoadSession();
 	void SaveSession();
 

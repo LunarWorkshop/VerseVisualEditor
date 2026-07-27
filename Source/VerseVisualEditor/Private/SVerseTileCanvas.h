@@ -13,6 +13,12 @@ class SScrollBox;
 
 DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
 
+struct FVerseCanvasViewState
+{
+	FVector2D ScrollOffset = FVector2D::ZeroVector;
+	float Zoom = 1.0f;
+};
+
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
 class SVerseTileCanvas final : public SCompoundWidget
 {
@@ -23,12 +29,12 @@ public:
 	void Construct(
 		const FArguments& InArgs,
 		FVerseParseSnapshot InSnapshot,
-		float InitialVerticalScrollOffset,
+		FVerseCanvasViewState InitialViewState,
 		TOptional<FVerseByteRange> InitialSelectedRange,
 		FOnVerseTileSelected InOnTileSelected,
 		FSimpleDelegate InOnSelectionCleared);
 
-	float GetVerticalScrollOffset() const;
+	FVerseCanvasViewState GetViewState() const;
 
 	virtual int32 OnPaint(
 		const FPaintArgs& Args,

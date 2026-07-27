@@ -43,7 +43,7 @@ struct FOpenVerseDocument
 	TOptional<FVerseParseSnapshot> ParseSnapshot;
 	FText LoadError;
 	bool bIsTemporary = false;
-	float ScrollOffset = 0.0f;
+	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
 };
@@ -370,7 +370,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 			return Candidate->FilePath.Equals(NormalizedPath, ESearchCase::IgnoreCase);
 		}))
 	{
-		CaptureActiveScrollOffset();
+		CaptureActiveCanvasView();
 		ActiveDocument = *Existing;
 		if (!bTemporary)
 		{
@@ -400,7 +400,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 			return Candidate.IsValid() && Candidate->bIsTemporary;
 		});
 	}
-	CaptureActiveScrollOffset();
+	CaptureActiveCanvasView();
 	OpenDocuments.Add(NewDocument);
 	ActiveDocument = MoveTemp(NewDocument);
 	RebuildDocumentTabs();
@@ -434,7 +434,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 
 FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
-	CaptureActiveScrollOffset();
+	CaptureActiveCanvasView();
 	ActiveDocument = MoveTemp(OpenDocument);
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
@@ -446,7 +446,7 @@ FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocu
 {
 	if (ActiveDocument == OpenDocument)
 	{
-		CaptureActiveScrollOffset();
+		CaptureActiveCanvasView();
 	}
 	const int32 RemovedIndex = OpenDocuments.IndexOfByKey(OpenDocument);
 	OpenDocuments.Remove(OpenDocument);
@@ -539,7 +539,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	{
 		return;
 	}
-	CaptureActiveScrollOffset();
+	CaptureActiveCanvasView();
 
 	if (!ActiveDocument.IsValid())
 	{
@@ -591,7 +591,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					ActiveDocument->TileCanvas,
 					SVerseTileCanvas,
 					ActiveDocument->ParseSnapshot.GetValue(),
-					ActiveDocument->ScrollOffset,
+					ActiveDocument->ViewState,
 					InitialSelectedRange,
 					FOnVerseTileSelected::CreateSP(
 						this,
@@ -784,11 +784,11 @@ void SVerseVisualEditor::RebuildProperties()
 	}
 }
 
-void SVerseVisualEditor::CaptureActiveScrollOffset()
+void SVerseVisualEditor::CaptureActiveCanvasView()
 {
 	if (ActiveDocument.IsValid() && ActiveDocument->TileCanvas.IsValid())
 	{
-		ActiveDocument->ScrollOffset = ActiveDocument->TileCanvas->GetVerticalScrollOffset();
+		ActiveDocument->ViewState = ActiveDocument->TileCanvas->GetViewState();
 		ActiveDocument->TileCanvas.Reset();
 	}
 }
@@ -830,12 +830,32 @@ void SVerseVisualEditor::LoadSession()
 			*(KeyPrefix + TEXT("Temporary")),
 			RestoredDocument->bIsTemporary,
 			GEditorPerProjectIni);
+		float VerticalScrollOffset = 0.0f;
+		if (!GConfig->GetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("VerticalScrollOffset")),
+			VerticalScrollOffset,
+			GEditorPerProjectIni))
+		{
+			GConfig->GetFloat(
+				SessionSection,
+				*(KeyPrefix + TEXT("ScrollOffset")),
+				VerticalScrollOffset,
+				GEditorPerProjectIni);
+		}
+		float HorizontalScrollOffset = 0.0f;
 		GConfig->GetFloat(
 			SessionSection,
-			*(KeyPrefix + TEXT("ScrollOffset")),
-			RestoredDocument->ScrollOffset,
+			*(KeyPrefix + TEXT("HorizontalScrollOffset")),
+			HorizontalScrollOffset,
 			GEditorPerProjectIni);
-		RestoredDocument->ScrollOffset = FMath::Max(0.0f, RestoredDocument->ScrollOffset);
+		GConfig->GetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("Zoom")),
+			RestoredDocument->ViewState.Zoom,
+			GEditorPerProjectIni);
+		RestoredDocument->ViewState.ScrollOffset.X = FMath::Max(0.0f, HorizontalScrollOffset);
+		RestoredDocument->ViewState.ScrollOffset.Y = FMath::Max(0.0f, VerticalScrollOffset);
 
 		if (!ReloadDocument(RestoredDocument))
 		{
@@ -857,7 +877,7 @@ void SVerseVisualEditor::LoadSession()
 
 void SVerseVisualEditor::SaveSession()
 {
-	CaptureActiveScrollOffset();
+	CaptureActiveCanvasView();
 	if (!GConfig)
 	{
 		return;
@@ -887,8 +907,18 @@ void SVerseVisualEditor::SaveSession()
 			GEditorPerProjectIni);
 		GConfig->SetFloat(
 			SessionSection,
-			*(KeyPrefix + TEXT("ScrollOffset")),
-			OpenDocument->ScrollOffset,
+			*(KeyPrefix + TEXT("HorizontalScrollOffset")),
+			static_cast<float>(OpenDocument->ViewState.ScrollOffset.X),
+			GEditorPerProjectIni);
+		GConfig->SetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("VerticalScrollOffset")),
+			static_cast<float>(OpenDocument->ViewState.ScrollOffset.Y),
+			GEditorPerProjectIni);
+		GConfig->SetFloat(
+			SessionSection,
+			*(KeyPrefix + TEXT("Zoom")),
+			OpenDocument->ViewState.Zoom,
 			GEditorPerProjectIni);
 	}
 
@@ -948,6 +978,7 @@ void SVerseVisualEditor::HandleDirectoryChanged(const TArray<FFileChangeData>& F
 void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileChanges)
 {
 	bool bRefreshTree = false;
+	bool bRefreshActiveDocument = false;
 	for (const FFileChangeData& Change : FileChanges)
 	{
 		if (Change.Action == FFileChangeData::FCA_RescanRequired)
@@ -988,14 +1019,17 @@ void SVerseVisualEditor::ProcessDirectoryChanges(TArray<FFileChangeData> FileCha
 		}
 
 		ReloadDocument(OpenDocument);
+		bRefreshActiveDocument |= OpenDocument == ActiveDocument;
 	}
 
 	if (bRefreshTree)
 	{
 		RefreshFileTree();
 	}
-	RebuildDocumentTabs();
-	RefreshActiveDocument();
+	if (bRefreshActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

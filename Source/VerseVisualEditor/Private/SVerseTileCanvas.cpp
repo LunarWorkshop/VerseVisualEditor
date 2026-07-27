@@ -164,12 +164,13 @@ namespace
 void SVerseTileCanvas::Construct(
 	const FArguments& InArgs,
 	FVerseParseSnapshot InSnapshot,
-	float InitialVerticalScrollOffset,
+	FVerseCanvasViewState InitialViewState,
 	TOptional<FVerseByteRange> InitialSelectedRange,
 	FOnVerseTileSelected InOnTileSelected,
 	FSimpleDelegate InOnSelectionCleared)
 {
 	Snapshot.Emplace(MoveTemp(InSnapshot));
+	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
 	if (InitialSelectedRange.IsSet())
@@ -237,12 +238,18 @@ void SVerseTileCanvas::Construct(
 		]
 	];
 
-	VerticalScrollBox->SetScrollOffset(FMath::Max(0.0f, InitialVerticalScrollOffset));
+	HorizontalScrollBox->SetScrollOffset(FMath::Max(0.0, InitialViewState.ScrollOffset.X));
+	VerticalScrollBox->SetScrollOffset(FMath::Max(0.0, InitialViewState.ScrollOffset.Y));
 }
 
-float SVerseTileCanvas::GetVerticalScrollOffset() const
+FVerseCanvasViewState SVerseTileCanvas::GetViewState() const
 {
-	return VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f;
+	FVerseCanvasViewState ViewState;
+	ViewState.ScrollOffset = FVector2D(
+		HorizontalScrollBox.IsValid() ? HorizontalScrollBox->GetScrollOffset() : 0.0f,
+		VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f);
+	ViewState.Zoom = Zoom;
+	return ViewState;
 }
 
 int32 SVerseTileCanvas::OnPaint(
