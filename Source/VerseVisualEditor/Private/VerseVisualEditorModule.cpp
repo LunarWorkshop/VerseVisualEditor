@@ -1,6 +1,7 @@
 #include "VerseVisualEditorModule.h"
 
 #include "Framework/Commands/Commands.h"
+#include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandList.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
@@ -37,19 +38,13 @@ public:
 
 	virtual void RegisterCommands() override
 	{
-		UI_COMMAND(Save, "Save", "Save the active Verse file.", EUserInterfaceActionType::Button,
-			FInputChord(EModifierKey::Control, EKeys::S));
-		UI_COMMAND(SaveAll, "Save All", "Save every modified Verse file.", EUserInterfaceActionType::Button,
-			FInputChord(EModifierKey::Control | EModifierKey::Shift, EKeys::S));
-		UI_COMMAND(Revert, "Revert", "Reload the active Verse file from disk and discard local changes.",
+		UI_COMMAND(Reload, "Reload", "Reload the active Verse file from disk and discard local changes.",
 			EUserInterfaceActionType::Button, FInputChord());
 		UI_COMMAND(Close, "Close", "Close the active Verse file.", EUserInterfaceActionType::Button,
 			FInputChord(EModifierKey::Control, EKeys::W));
 	}
 
-	TSharedPtr<FUICommandInfo> Save;
-	TSharedPtr<FUICommandInfo> SaveAll;
-	TSharedPtr<FUICommandInfo> Revert;
+	TSharedPtr<FUICommandInfo> Reload;
 	TSharedPtr<FUICommandInfo> Close;
 };
 
@@ -87,7 +82,7 @@ void FVerseVisualEditorModule::RegisterMenus()
 	UToolMenus* ToolMenus = UToolMenus::Get();
 	ToolMenus->RegisterMenu(
 		VerseVisualEditorModule::MainMenuName,
-		TEXT("MainFrame.NomadMainMenu"),
+		TEXT("MainFrame.MainMenu"),
 		EMultiBoxType::MenuBar,
 		false);
 
@@ -96,15 +91,13 @@ void FVerseVisualEditorModule::RegisterMenus()
 		TEXT("MainFrame.MainMenu.File"),
 		EMultiBoxType::Menu,
 		false);
+
 	FToolMenuSection& Section = FileMenu->AddSection(
 		TEXT("VerseVisualEditorFile"),
 		LOCTEXT("VerseVisualEditorFileSection", "Verse Visual Editor"),
-		FToolMenuInsert(NAME_None, EToolMenuInsertType::First));
+		FToolMenuInsert(TEXT("FileLoadAndSave"), EToolMenuInsertType::After));
 	const FVerseVisualEditorCommands& Commands = FVerseVisualEditorCommands::Get();
-	Section.AddMenuEntry(Commands.Save);
-	Section.AddMenuEntry(Commands.SaveAll);
-	Section.AddSeparator(TEXT("VerseVisualEditorSaveSeparator"));
-	Section.AddMenuEntry(Commands.Revert);
+	Section.AddMenuEntry(Commands.Reload);
 	Section.AddMenuEntry(Commands.Close);
 }
 
@@ -119,18 +112,57 @@ TSharedRef<SDockTab> FVerseVisualEditorModule::SpawnVerseVisualEditorTab(const F
 
 	const TSharedRef<FUICommandList> CommandList = MakeShared<FUICommandList>();
 	const FVerseVisualEditorCommands& Commands = FVerseVisualEditorCommands::Get();
+	const TSharedPtr<FUICommandInfo> AssetSave =
+		FInputBindingManager::Get().FindCommandInContext(TEXT("AssetEditor"), TEXT("SaveAsset"));
+	const TSharedPtr<FUICommandInfo> AssetSaveAs =
+		FInputBindingManager::Get().FindCommandInContext(TEXT("AssetEditor"), TEXT("SaveAssetAs"));
+	if (ensure(AssetSave.IsValid() && AssetSaveAs.IsValid()))
+	{
+		if (UToolMenu* FileMenu = UToolMenus::Get()->FindMenu(VerseVisualEditorModule::FileMenuName))
+		{
+			// Extend Unreal's inherited Save section, matching the standalone asset-editor
+			// host. This must not create a second section labelled "Save".
+			FToolMenuSection& SaveSection = FileMenu->FindOrAddSection(TEXT("FileLoadAndSave"));
+			if (!SaveSection.FindEntry(AssetSave->GetCommandName()))
+			{
+				SaveSection.AddMenuEntry(
+					AssetSave,
+					TAttribute<FText>(),
+					TAttribute<FText>(),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("AssetEditor.SaveAsset")));
+			}
+			if (!SaveSection.FindEntry(AssetSaveAs->GetCommandName()))
+			{
+				SaveSection.AddMenuEntry(
+					AssetSaveAs,
+					TAttribute<FText>(),
+					TAttribute<FText>(),
+					FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("AssetEditor.SaveAssetAs")));
+			}
+		}
+
+		CommandList->MapAction(
+			AssetSave,
+			FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::SaveActiveDocumentFromMenu),
+			FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanSaveActiveDocument));
+		CommandList->MapAction(
+			AssetSaveAs,
+			FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::SaveActiveDocumentAs),
+			FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::HasActiveDocument));
+	}
 	CommandList->MapAction(
-		Commands.Save,
-		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::SaveActiveDocumentFromMenu),
-		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanSaveActiveDocument));
-	CommandList->MapAction(
-		Commands.SaveAll,
-		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::SaveAllDocuments),
-		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanSaveAnyDocument));
-	CommandList->MapAction(
-		Commands.Revert,
+		Commands.Reload,
 		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::RevertActiveDocument),
 		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::HasActiveDocument));
+	const TSharedPtr<FUICommandInfo> MainFrameSaveAll =
+		FInputBindingManager::Get().FindCommandInContext(TEXT("MainFrame"), TEXT("SaveAll"));
+	if (ensure(MainFrameSaveAll.IsValid()))
+	{
+		CommandList->MapAction(
+			MainFrameSaveAll,
+			FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::SaveAllFromMainFrame),
+			FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanSaveAllFromMainFrame));
+	}
 	CommandList->MapAction(
 		Commands.Close,
 		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CloseActiveDocument),

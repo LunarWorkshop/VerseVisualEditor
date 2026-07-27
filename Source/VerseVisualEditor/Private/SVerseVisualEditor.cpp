@@ -4,11 +4,15 @@
 
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
+#include "DesktopPlatformModule.h"
+#include "Editor/UnrealEdEngine.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "FileHelpers.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "IDirectoryWatcher.h"
+#include "IDesktopPlatform.h"
 #include "ISourceControlModule.h"
 #include "ISourceControlProvider.h"
 #include "ISourceControlState.h"
@@ -19,6 +23,7 @@
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
+#include "UnrealEdGlobals.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
 #include "VerseExternalChange.h"
@@ -267,9 +272,14 @@ FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 {
 	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::S)
 	{
+		if (InKeyEvent.IsAltDown())
+		{
+			SaveActiveDocumentAs();
+			return FReply::Handled();
+		}
 		if (InKeyEvent.IsShiftDown())
 		{
-			SaveAllDocuments();
+			SaveAllFromMainFrame();
 			return FReply::Handled();
 		}
 		return SaveActiveDocument();
@@ -575,6 +585,84 @@ void SVerseVisualEditor::SaveActiveDocumentFromMenu()
 	SaveDocument(ActiveDocument);
 }
 
+void SVerseVisualEditor::SaveActiveDocumentAs()
+{
+	if (!HasActiveDocument())
+	{
+		return;
+	}
+
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		return;
+	}
+
+	TArray<FString> SelectedFiles;
+	if (!DesktopPlatform->SaveFileDialog(
+		FSlateApplication::Get().FindBestParentWindowHandleForDialogs(AsShared()),
+		LOCTEXT("SaveVerseFileAsTitle", "Save Verse File As").ToString(),
+		FPaths::GetPath(ActiveDocument->FilePath),
+		FPaths::GetCleanFilename(ActiveDocument->FilePath),
+		TEXT("Verse source files (*.verse)|*.verse"),
+		EFileDialogFlags::None,
+		SelectedFiles)
+		|| SelectedFiles.IsEmpty())
+	{
+		return;
+	}
+
+	FString NewFilePath = FPaths::ConvertRelativePathToFull(SelectedFiles[0]);
+	if (FPaths::GetExtension(NewFilePath).IsEmpty())
+	{
+		NewFilePath += TEXT(".verse");
+		if (FPaths::FileExists(NewFilePath)
+			&& FMessageDialog::Open(
+				EAppMsgType::YesNo,
+				FText::Format(
+					LOCTEXT("ConfirmSaveVerseFileAsOverwrite", "{0} already exists. Replace it?"),
+					FText::FromString(NewFilePath)),
+				LOCTEXT("ConfirmSaveVerseFileAsOverwriteTitle", "Confirm Save As")) != EAppReturnType::Yes)
+		{
+			return;
+		}
+	}
+	FPaths::NormalizeFilename(NewFilePath);
+
+	if (OpenDocuments.ContainsByPredicate([&](const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+		{
+			return OpenDocument.IsValid()
+				&& OpenDocument != ActiveDocument
+				&& OpenDocument->FilePath.Equals(NewFilePath, ESearchCase::IgnoreCase);
+		}))
+	{
+		FMessageDialog::Open(
+			EAppMsgType::Ok,
+			LOCTEXT("SaveVerseFileAsAlreadyOpen", "That Verse file is already open in another tab."),
+			LOCTEXT("SaveVerseFileAsAlreadyOpenTitle", "Unable to Save As"));
+		return;
+	}
+
+	FText Error;
+	if (!ActiveDocument->Session->SaveToFile(NewFilePath, Error))
+	{
+		ActiveDocument->LoadError = Error;
+		FMessageDialog::Open(
+			EAppMsgType::Ok,
+			Error,
+			LOCTEXT("SaveVerseFileAsFailedTitle", "Unable to Save Verse File As"));
+		return;
+	}
+
+	ActiveDocument->FilePath = MoveTemp(NewFilePath);
+	ActiveDocument->LastKnownDiskBytes = ActiveDocument->Session->BuildCurrentFileBytes();
+	ActiveDocument->LoadError = FText::GetEmpty();
+	ActiveDocument->bIsTemporary = false;
+	RefreshFileTree();
+	RebuildDocumentTabs();
+	RevealActiveDocumentInTree();
+}
+
 void SVerseVisualEditor::SaveAllDocuments()
 {
 	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
@@ -587,6 +675,24 @@ void SVerseVisualEditor::SaveAllDocuments()
 			break;
 		}
 	}
+}
+
+void SVerseVisualEditor::SaveAllFromMainFrame()
+{
+	FEditorFileUtils::SaveDirtyPackages(
+		false,
+		true,
+		true,
+		false,
+		false,
+		false);
+	SaveAllDocuments();
+}
+
+bool SVerseVisualEditor::CanSaveAllFromMainFrame() const
+{
+	return FSlateApplication::Get().IsNormalExecution()
+		&& (!GUnrealEd || !GUnrealEd->GetPackageAutoSaver().IsAutoSaving());
 }
 
 void SVerseVisualEditor::RevertActiveDocument()
@@ -624,16 +730,6 @@ bool SVerseVisualEditor::CanSaveActiveDocument() const
 	return ActiveDocument.IsValid()
 		&& ActiveDocument->Session.IsValid()
 		&& ActiveDocument->Session->IsDirty();
-}
-
-bool SVerseVisualEditor::CanSaveAnyDocument() const
-{
-	return OpenDocuments.ContainsByPredicate([](const TSharedPtr<FOpenVerseDocument>& OpenDocument)
-	{
-		return OpenDocument.IsValid()
-			&& OpenDocument->Session.IsValid()
-			&& OpenDocument->Session->IsDirty();
-	});
 }
 
 bool SVerseVisualEditor::HasActiveDocument() const

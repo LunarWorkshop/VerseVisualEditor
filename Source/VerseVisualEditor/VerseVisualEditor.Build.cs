@@ -13,6 +13,7 @@ public class VerseVisualEditor : ModuleRules
 			"Core",
 			"CoreUObject",
 			"DirectoryWatcher",
+			"DesktopPlatform",
 			"Engine",
 			"InputCore",
 			"MainFrame",

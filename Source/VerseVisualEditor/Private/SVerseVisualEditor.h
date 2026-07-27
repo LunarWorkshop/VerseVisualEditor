@@ -27,11 +27,13 @@ public:
 	virtual ~SVerseVisualEditor() override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	void SaveActiveDocumentFromMenu();
+	void SaveActiveDocumentAs();
 	void SaveAllDocuments();
+	void SaveAllFromMainFrame();
+	bool CanSaveAllFromMainFrame() const;
 	void RevertActiveDocument();
 	void CloseActiveDocument();
 	bool CanSaveActiveDocument() const;
-	bool CanSaveAnyDocument() const;
 	bool HasActiveDocument() const;
 
 private:
