@@ -11,11 +11,14 @@
 #include "FileHelpers.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "IDirectoryWatcher.h"
 #include "IDesktopPlatform.h"
 #include "ISourceControlModule.h"
 #include "ISourceControlProvider.h"
 #include "ISourceControlState.h"
+#include "ISolarisEditorModule.h"
+#include "SolarisLoadCompilerModule.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/MessageDialog.h"
@@ -30,8 +33,10 @@
 #include "VerseIdentifier.h"
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
+#include "VerseVisualEditorSettings.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -56,6 +61,12 @@ struct FOpenVerseDocument
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
+	FVerseCompilationResult CompilationResult;
+	bool bHasCompilationResult = false;
+	bool bCompilationPending = false;
+	bool bCompilationInFlight = false;
+	double CompileAfterSeconds = 0.0;
+	uint64 CompilationRequestId = 0;
 };
 
 namespace
@@ -82,6 +93,24 @@ namespace
 		return Left.Num() == Right.Num()
 			&& (Left.IsEmpty() || FMemory::Memcmp(Left.GetData(), Right.GetData(), Left.Num()) == 0);
 	}
+
+	bool DiagnosticMatchesFile(const FSolDiagnostic& Diagnostic, const FString& FilePath)
+	{
+		FString DiagnosticPath = Diagnostic.Location.FilePath;
+		FString DocumentPath = FilePath;
+		FPaths::NormalizeFilename(DiagnosticPath);
+		FPaths::NormalizeFilename(DocumentPath);
+		if (DiagnosticPath.Equals(DocumentPath, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+
+		DiagnosticPath.RemoveFromStart(TEXT("./"));
+		return !DiagnosticPath.IsEmpty()
+			&& DocumentPath.EndsWith(
+				TEXT("/") + DiagnosticPath,
+				ESearchCase::IgnoreCase);
+	}
 }
 
 void SVerseVisualEditor::Construct(const FArguments& InArgs)
@@ -94,30 +123,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(4.0f, 2.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				[
-					SNew(SButton)
-					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-					.ContentPadding(4.0f)
-					.ToolTipText(LOCTEXT("SaveActiveDocumentTooltip", "Save Active Verse File (Ctrl+S)"))
-					.IsEnabled_Lambda([this]()
-					{
-						return CanSaveActiveDocument();
-					})
-					.OnClicked(this, &SVerseVisualEditor::SaveActiveDocument)
-					[
-						SNew(SImage)
-						.Image(FAppStyle::GetBrush("Icons.Save"))
-					]
-				]
-			]
+			BuildToolbar()
 		]
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
@@ -201,10 +207,32 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 	RebuildProperties();
 	RevealActiveDocumentInTree();
 	RegisterDirectoryWatcher();
+	ISolarisLoadCompilerModule& CompilerModule = ISolarisLoadCompilerModule::Get();
+	ProjectBuildStartedHandle = CompilerModule.OnBuildStarted().AddSP(
+		this,
+		&SVerseVisualEditor::HandleProjectBuildStarted);
+	ProjectBuildCompleteHandle = CompilerModule.OnBuildComplete().AddSP(
+		this,
+		&SVerseVisualEditor::HandleProjectBuildComplete);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+		{
+			QueueCompilation(OpenDocument, true);
+		}
+	}
 }
 
 SVerseVisualEditor::~SVerseVisualEditor()
 {
+	if (ISolarisLoadCompilerModule::IsLoaded())
+	{
+		ISolarisLoadCompilerModule& CompilerModule = ISolarisLoadCompilerModule::Get();
+		CompilerModule.OnBuildStarted().Remove(ProjectBuildStartedHandle);
+		CompilerModule.OnBuildComplete().Remove(ProjectBuildCompleteHandle);
+		ProjectBuildStartedHandle.Reset();
+		ProjectBuildCompleteHandle.Reset();
+	}
 	SaveSession();
 	UnregisterDirectoryWatcher();
 }
@@ -266,6 +294,397 @@ void SVerseVisualEditor::HandleTreeSelectionChanged(
 	{
 		OpenDocument(Item->FullPath, true);
 	}
+}
+
+void SVerseVisualEditor::Tick(
+	const FGeometry& AllottedGeometry,
+	const double InCurrentTime,
+	const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	const EVerseCompilationMode PreferredMode =
+		GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
+	if (PreferredMode != CompilationMode)
+	{
+		SetCompilationMode(PreferredMode);
+	}
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (OpenDocument.IsValid()
+			&& OpenDocument->bCompilationPending
+			&& InCurrentTime >= OpenDocument->CompileAfterSeconds)
+		{
+			StartCompilation(OpenDocument);
+		}
+	}
+}
+
+TSharedRef<SWidget> SVerseVisualEditor::BuildToolbar()
+{
+	FSlimHorizontalToolBarBuilder ToolbarBuilder(nullptr, FMultiBoxCustomization::None);
+	ToolbarBuilder.SetStyle(&FAppStyle::Get(), "AssetEditorToolbar");
+	ToolbarBuilder.AddToolBarButton(
+		FUIAction(
+			FExecuteAction::CreateSP(this, &SVerseVisualEditor::SaveActiveDocumentFromMenu),
+			FCanExecuteAction::CreateSP(this, &SVerseVisualEditor::CanSaveActiveDocument)),
+		NAME_None,
+		FText::GetEmpty(),
+		LOCTEXT("SaveActiveDocumentTooltip", "Save Active Verse File (Ctrl+S)"),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Save"));
+
+	ToolbarBuilder.AddSeparator();
+	ToolbarBuilder.BeginStyleOverride("CalloutToolbar");
+	ToolbarBuilder.AddToolBarButton(
+		FUIAction(
+			FExecuteAction::CreateSP(this, &SVerseVisualEditor::CompileVerseProject),
+			FCanExecuteAction::CreateSP(this, &SVerseVisualEditor::CanCompileVerseProject)),
+		NAME_None,
+		LOCTEXT("CompileActiveDocument", "Compile Verse"),
+		TAttribute<FText>::Create(
+			TAttribute<FText>::FGetter::CreateSP(this, &SVerseVisualEditor::GetCompileVerseTooltip)),
+		TAttribute<FSlateIcon>::Create(
+			TAttribute<FSlateIcon>::FGetter::CreateSP(this, &SVerseVisualEditor::GetCompileVerseIcon)));
+	ToolbarBuilder.EndStyleOverride();
+
+	ToolbarBuilder.AddWidget(
+		SNew(SComboButton)
+		.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+		.OnGetMenuContent(this, &SVerseVisualEditor::BuildCompilationModeMenu)
+		.ButtonContent()
+		[
+			SNew(STextBlock)
+			.Text(this, &SVerseVisualEditor::GetCompilationModeText)
+		],
+		NAME_None,
+		false,
+		HAlign_Left);
+	return ToolbarBuilder.MakeWidget();
+}
+
+void SVerseVisualEditor::CompileVerseProject()
+{
+	if (ISolarisEditorModule::IsModuleLoaded())
+	{
+		ISolarisEditorModule::Get().BuildScripts(
+			ISolarisEditorModule::EBuildScriptsInstigator::User);
+	}
+}
+
+bool SVerseVisualEditor::CanCompileVerseProject() const
+{
+	return ISolarisEditorModule::IsModuleLoaded();
+}
+
+FSlateIcon SVerseVisualEditor::GetCompileVerseIcon() const
+{
+	const TCHAR* IconName = TEXT("SolarisEditor.BuildScripts");
+	switch (ProjectBuildState)
+	{
+	case EVerseProjectBuildState::Building:
+		IconName = TEXT("SolarisEditor.BuildScriptsLoading");
+		break;
+	case EVerseProjectBuildState::Success:
+		IconName = TEXT("SolarisEditor.BuildScriptsSuccess");
+		break;
+	case EVerseProjectBuildState::Warnings:
+		IconName = TEXT("SolarisEditor.BuildScriptsWarning");
+		break;
+	case EVerseProjectBuildState::Errors:
+		IconName = TEXT("SolarisEditor.BuildScriptsError");
+		break;
+	case EVerseProjectBuildState::Unbuilt:
+	default:
+		break;
+	}
+	return FSlateIcon("SolarisEditorStyle", IconName);
+}
+
+FText SVerseVisualEditor::GetCompileVerseTooltip() const
+{
+	switch (ProjectBuildState)
+	{
+	case EVerseProjectBuildState::Building:
+		return LOCTEXT("VerseBuildInProgress", "Build in progress...");
+	case EVerseProjectBuildState::Success:
+		return LOCTEXT("VerseBuildSucceeded", "Built successfully.");
+	case EVerseProjectBuildState::Warnings:
+		return FText::Format(
+			LOCTEXT("VerseBuildWarnings", "Built with {0} {0}|plural(one=warning,other=warnings)."),
+			ProjectBuildWarningCount);
+	case EVerseProjectBuildState::Errors:
+		return FText::Format(
+			LOCTEXT("VerseBuildErrors", "Built with {0} {0}|plural(one=error,other=errors)."),
+			ProjectBuildErrorCount);
+	case EVerseProjectBuildState::Unbuilt:
+	default:
+		return LOCTEXT("CompileVerseProjectTooltip", "Compile all Verse code in project");
+	}
+}
+
+void SVerseVisualEditor::HandleProjectBuildStarted(
+	const TSharedRef<FSolBuildResults>& BuildResults)
+{
+	ProjectBuildState = EVerseProjectBuildState::Building;
+	ProjectBuildWarningCount = 0;
+	ProjectBuildErrorCount = 0;
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (OpenDocument.IsValid()
+			&& OpenDocument->Session.IsValid()
+			&& OpenDocument->Session->IsDirty())
+		{
+			StartCompilation(OpenDocument);
+		}
+	}
+}
+
+void SVerseVisualEditor::HandleProjectBuildComplete(
+	const TSharedRef<FSolBuildResults>& BuildResults)
+{
+	ProjectBuildWarningCount = 0;
+	ProjectBuildErrorCount = 0;
+	auto CountDiagnostics = [this](TConstArrayView<FSolDiagnostic> Diagnostics)
+	{
+		for (const FSolDiagnostic& Diagnostic : Diagnostics)
+		{
+			ProjectBuildWarningCount += Diagnostic.Info.Severity == ELogVerbosity::Warning ? 1 : 0;
+			ProjectBuildErrorCount += Diagnostic.IsBuildFailure() ? 1 : 0;
+		}
+	};
+	CountDiagnostics(BuildResults->BuildDiagnostics);
+	CountDiagnostics(BuildResults->BuildAssetsDigestDiagnostics);
+	ProjectBuildState = ProjectBuildErrorCount > 0
+		? EVerseProjectBuildState::Errors
+		: ProjectBuildWarningCount > 0
+			? EVerseProjectBuildState::Warnings
+			: EVerseProjectBuildState::Success;
+
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		ApplyProjectDiagnostics(OpenDocument, BuildResults->BuildDiagnostics);
+	}
+}
+
+void SVerseVisualEditor::ApplyProjectDiagnostics(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+	TConstArrayView<FSolDiagnostic> ProjectDiagnostics)
+{
+	if (!OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid()
+		|| OpenDocument->Session->IsDirty())
+	{
+		return;
+	}
+
+	TArray<FSolDiagnostic> FileDiagnostics;
+	for (const FSolDiagnostic& Diagnostic : ProjectDiagnostics)
+	{
+		if (DiagnosticMatchesFile(Diagnostic, OpenDocument->FilePath))
+		{
+			FileDiagnostics.Add(Diagnostic);
+		}
+	}
+
+	FVerseCompilationResult ProjectResult = VerseCompilation::FromProjectBuildDiagnostics(
+		FUtf8StringView(OpenDocument->Session->GetCurrentUtf8()),
+		OpenDocument->Session->GetRevision(),
+		FileDiagnostics);
+	FVerseCompilationResult AcceptedResult;
+	if (!VerseCompilation::TryAcceptResult(
+		MoveTemp(ProjectResult),
+		OpenDocument->Session->GetRevision(),
+		OpenDocument->Session->GetTiles(),
+		AcceptedResult))
+	{
+		return;
+	}
+
+	OpenDocument->CompilationResult = MoveTemp(AcceptedResult);
+	OpenDocument->bHasCompilationResult = true;
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+TSharedRef<SWidget> SVerseVisualEditor::BuildCompilationModeMenu()
+{
+	FMenuBuilder MenuBuilder(true, nullptr);
+	auto AddMode = [this, &MenuBuilder](
+		EVerseCompilationMode Mode,
+		const FText& Label,
+		const FText& ToolTip)
+	{
+		MenuBuilder.AddMenuEntry(
+			Label,
+			ToolTip,
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateSP(this, &SVerseVisualEditor::SetCompilationMode, Mode),
+				FCanExecuteAction(),
+				FIsActionChecked::CreateLambda([this, Mode]()
+				{
+					return CompilationMode == Mode;
+				})),
+			NAME_None,
+			EUserInterfaceActionType::RadioButton);
+	};
+
+	AddMode(
+		EVerseCompilationMode::Continuous,
+		LOCTEXT("ContinuousCompilationMode", "Continuous"),
+		LOCTEXT("ContinuousCompilationModeTooltip", "Compile shortly after each source edit."));
+	AddMode(
+		EVerseCompilationMode::OnSave,
+		LOCTEXT("OnSaveCompilationMode", "Compile on Save"),
+		LOCTEXT("OnSaveCompilationModeTooltip", "Compile after a Verse file is saved."));
+	AddMode(
+		EVerseCompilationMode::Manual,
+		LOCTEXT("ManualCompilationMode", "Manual"),
+		LOCTEXT("ManualCompilationModeTooltip", "Compile only when the Compile button is pressed."));
+	return MenuBuilder.MakeWidget();
+}
+
+void SVerseVisualEditor::SetCompilationMode(EVerseCompilationMode Mode)
+{
+	if (CompilationMode == Mode)
+	{
+		return;
+	}
+
+	CompilationMode = Mode;
+	UVerseVisualEditorSettings* Settings = GetMutableDefault<UVerseVisualEditorSettings>();
+	Settings->CompilationMode = Mode;
+	Settings->SaveConfig();
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (OpenDocument.IsValid())
+		{
+			OpenDocument->bCompilationPending = false;
+			if (Mode == EVerseCompilationMode::Continuous)
+			{
+				QueueCompilation(OpenDocument, true);
+			}
+		}
+	}
+}
+
+FText SVerseVisualEditor::GetCompilationModeText() const
+{
+	switch (CompilationMode)
+	{
+	case EVerseCompilationMode::Continuous:
+		return LOCTEXT("ContinuousCompilationModeButton", "Continuous");
+	case EVerseCompilationMode::OnSave:
+		return LOCTEXT("OnSaveCompilationModeButton", "On Save");
+	case EVerseCompilationMode::Manual:
+	default:
+		return LOCTEXT("ManualCompilationModeButton", "Manual");
+	}
+}
+
+void SVerseVisualEditor::QueueCompilation(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+	bool bDebounce)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+	if (!bDebounce)
+	{
+		StartCompilation(OpenDocument);
+		return;
+	}
+
+	OpenDocument->bCompilationPending = true;
+	OpenDocument->CompileAfterSeconds = FPlatformTime::Seconds() + 0.35;
+}
+
+void SVerseVisualEditor::StartCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	OpenDocument->bCompilationPending = false;
+	OpenDocument->bCompilationInFlight = true;
+	const uint64 RequestId = ++OpenDocument->CompilationRequestId;
+	const FVerseDocumentRevision Revision = OpenDocument->Session->GetRevision();
+	FUtf8String Source = OpenDocument->Session->GetCurrentUtf8();
+	FString SourcePath = OpenDocument->FilePath;
+	const TWeakPtr<SVerseVisualEditor> WeakEditor = SharedThis(this);
+	const TWeakPtr<FOpenVerseDocument> WeakDocument = OpenDocument;
+
+	(void)Async(EAsyncExecution::ThreadPool,
+		[WeakEditor,
+		 WeakDocument,
+		 RequestId,
+		 Revision,
+		 Source = MoveTemp(Source),
+		 SourcePath = MoveTemp(SourcePath)]() mutable
+		{
+			FVerseCompilationResult Result = VerseCompilation::Compile(
+				MoveTemp(Source),
+				Revision,
+				MoveTemp(SourcePath));
+			AsyncTask(ENamedThreads::GameThread,
+				[WeakEditor, WeakDocument, RequestId, Result = MoveTemp(Result)]() mutable
+				{
+					const TSharedPtr<SVerseVisualEditor> Editor = WeakEditor.Pin();
+					const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
+					if (Editor.IsValid() && Document.IsValid())
+					{
+						Editor->ApplyCompilationResult(Document, RequestId, MoveTemp(Result));
+					}
+				});
+		});
+}
+
+void SVerseVisualEditor::ApplyCompilationResult(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+	uint64 RequestId,
+	FVerseCompilationResult Result)
+{
+	if (!OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid()
+		|| !OpenDocuments.Contains(OpenDocument)
+		|| OpenDocument->CompilationRequestId != RequestId)
+	{
+		return;
+	}
+
+	OpenDocument->bCompilationInFlight = false;
+	FVerseCompilationResult AcceptedResult;
+	if (!VerseCompilation::TryAcceptResult(
+		MoveTemp(Result),
+		OpenDocument->Session->GetRevision(),
+		OpenDocument->Session->GetTiles(),
+		AcceptedResult))
+	{
+		return;
+	}
+
+	OpenDocument->CompilationResult = MoveTemp(AcceptedResult);
+	OpenDocument->bHasCompilationResult = true;
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+void SVerseVisualEditor::InvalidateCompilationResult(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (!OpenDocument.IsValid())
+	{
+		return;
+	}
+	++OpenDocument->CompilationRequestId;
+	OpenDocument->CompilationResult = {};
+	OpenDocument->bHasCompilationResult = false;
+	OpenDocument->bCompilationInFlight = false;
 }
 
 FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
@@ -498,6 +917,11 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	OpenDocument->RenameValidationMessage = FText::GetEmpty();
 	OpenDocument->PendingRenameText.Reset();
 	OpenDocument->SelectedTile.Reset();
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
 	return true;
 }
 
@@ -560,6 +984,10 @@ bool SVerseVisualEditor::SaveDocument(const TSharedPtr<FOpenVerseDocument>& Open
 	}
 	if (!OpenDocument->Session->IsDirty())
 	{
+		if (CompilationMode == EVerseCompilationMode::OnSave)
+		{
+			QueueCompilation(OpenDocument, false);
+		}
 		return true;
 	}
 
@@ -577,6 +1005,10 @@ bool SVerseVisualEditor::SaveDocument(const TSharedPtr<FOpenVerseDocument>& Open
 	OpenDocument->LastKnownDiskBytes = OpenDocument->Session->BuildCurrentFileBytes();
 	OpenDocument->LoadError = FText::GetEmpty();
 	RebuildDocumentTabs();
+	if (CompilationMode == EVerseCompilationMode::OnSave)
+	{
+		QueueCompilation(OpenDocument, false);
+	}
 	return true;
 }
 
@@ -661,6 +1093,10 @@ void SVerseVisualEditor::SaveActiveDocumentAs()
 	RefreshFileTree();
 	RebuildDocumentTabs();
 	RevealActiveDocumentInTree();
+	if (CompilationMode == EVerseCompilationMode::OnSave)
+	{
+		QueueCompilation(ActiveDocument, false);
+	}
 }
 
 void SVerseVisualEditor::SaveAllDocuments()
@@ -888,6 +1324,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 						this,
 						&SVerseVisualEditor::HandleTileSelectionCleared,
 						ActiveDocument))
+				.Diagnostics(ActiveDocument->bHasCompilationResult
+					? ActiveDocument->CompilationResult.Diagnostics
+					: TArray<FVerseCompilationDiagnostic>())
 			]
 		]);
 	RebuildProperties();
@@ -987,6 +1426,11 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	}
 
 	OpenDocument->bIsTemporary = false;
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
 	OpenDocument->SelectedTile.Reset();
 	if (PreviousSelection.IsSet())
 	{
@@ -1201,6 +1645,30 @@ void SVerseVisualEditor::LoadSession()
 
 	int32 TabCount = 0;
 	GConfig->GetInt(SessionSection, TEXT("TabCount"), TabCount, GEditorPerProjectIni);
+	CompilationMode = GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
+	FString StoredPreference;
+	const FString SettingsSection = UVerseVisualEditorSettings::StaticClass()->GetPathName();
+	if (!GConfig->GetString(
+		*SettingsSection,
+		TEXT("CompilationMode"),
+		StoredPreference,
+		GEditorPerProjectIni))
+	{
+		int32 LegacyCompilationMode = INDEX_NONE;
+		if (GConfig->GetInt(
+			SessionSection,
+			TEXT("CompilationMode"),
+			LegacyCompilationMode,
+			GEditorPerProjectIni)
+			&& LegacyCompilationMode >= static_cast<int32>(EVerseCompilationMode::Continuous)
+			&& LegacyCompilationMode <= static_cast<int32>(EVerseCompilationMode::Manual))
+		{
+			CompilationMode = static_cast<EVerseCompilationMode>(LegacyCompilationMode);
+			UVerseVisualEditorSettings* Settings = GetMutableDefault<UVerseVisualEditorSettings>();
+			Settings->CompilationMode = CompilationMode;
+			Settings->SaveConfig();
+		}
+	}
 
 	FString ActiveFilePath;
 	GConfig->GetString(SessionSection, TEXT("ActiveFilePath"), ActiveFilePath, GEditorPerProjectIni);

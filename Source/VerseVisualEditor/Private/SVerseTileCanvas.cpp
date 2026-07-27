@@ -172,6 +172,7 @@ void SVerseTileCanvas::Construct(
 {
 	Snapshot.Emplace(InSession->GetParseSnapshot());
 	Tiles = InSession->GetTiles();
+	Diagnostics = InArgs._Diagnostics;
 	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
@@ -437,7 +438,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 	TSharedRef<SHorizontalBox> TileRow = SNew(SHorizontalBox);
 	for (int32 TileIndex = 0; TileIndex < Tiles.Num();)
 	{
-		TSharedRef<SWidget> Presentation = BuildTile(Tiles[TileIndex]);
+		TSharedRef<SWidget> Presentation = BuildTile(Tiles[TileIndex], TileIndex);
 		if (BelongsInCompactStack(Tiles[TileIndex]))
 		{
 			TSharedRef<SVerticalBox> CompactStack = SNew(SVerticalBox);
@@ -447,7 +448,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 				.AutoHeight()
 				.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 				[
-					BuildTile(Tiles[TileIndex])
+					BuildTile(Tiles[TileIndex], TileIndex)
 				];
 				++TileIndex;
 			}
@@ -483,15 +484,15 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
 	return TileRow;
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile)
+TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
 		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
 			|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias);
-	return bCompactDefinition ? BuildCompactTile(Tile) : BuildStructuralTile(Tile);
+	return bCompactDefinition ? BuildCompactTile(Tile, TileIndex) : BuildStructuralTile(Tile, TileIndex);
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile)
+TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
 	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
@@ -511,6 +512,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		: bComment
 			? FLinearColor(0.10f, 0.30f, 0.16f, 1.0f)
 			: FLinearColor(0.35f, 0.20f, 0.08f, 1.0f);
+	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
 	const FVerseByteRange ContentRange = Tile.Kind == EVerseVisualTileKind::Unknown
 		? Tile.Range
 		: Tile.BodyRange;
@@ -520,7 +522,9 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		[
 			SNew(SVerseTileContainer)
 			.TileColor(TileColor)
-			.UnselectedOutlineColor(TileColor)
+			.UnselectedOutlineColor(bHasDiagnostic
+				? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
+				: TileColor)
 			.HeaderPadding(FMargin(0.0f, 6.0f, 8.0f, 6.0f))
 			.ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
 			.IsSelected_Lambda([this, Range = Tile.Range]()
@@ -566,6 +570,17 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 						: FText::Format(LOCTEXT("TileDefinitionType", "Type: {0}"), TypeText))
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(-19.0f, 4.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Visibility(bHasDiagnostic ? EVisibility::Visible : EVisibility::Collapsed)
+					.Text(FormatDiagnosticMessages(TileIndex))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+					.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
+					.AutoWrapText(true)
+				]
 			]
 			.BodyContent()
 			[
@@ -582,17 +597,21 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		];
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& Tile)
+TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const FText KindText = FText::FromName(Tile.DefinitionKind);
 	const FText NameText = Decode(Tile.NameRange);
 	const FText TypeText = Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
+	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
 
 	return SNew(SBox)
 		.MinDesiredWidth(420.0f)
 		[
 		SNew(SVerseTileContainer)
 		.TileColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
+		.UnselectedOutlineColor(bHasDiagnostic
+			? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
+			: FLinearColor::Transparent)
 		.HeaderPadding(FMargin(0.0f, 2.0f, 4.0f, 2.0f))
 		.ArrowPadding(FMargin(4.0f, 3.0f, 3.0f, 0.0f))
 		.IsSelected_Lambda([this, Range = Tile.Range]()
@@ -643,6 +662,17 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 				.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
 			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(-19.0f, 4.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Visibility(bHasDiagnostic ? EVisibility::Visible : EVisibility::Collapsed)
+				.Text(FormatDiagnosticMessages(TileIndex))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+				.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
+				.AutoWrapText(true)
+			]
 		]
 		.BodyContent()
 		[
@@ -675,6 +705,35 @@ FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
 	return FText::FromString(Tile.FirstSourceLine == Tile.LastSourceLine
 		? FString::Printf(TEXT("L%d"), Tile.FirstSourceLine)
 		: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine));
+}
+
+FText SVerseTileCanvas::FormatDiagnosticMessages(int32 TileIndex) const
+{
+	FString Messages;
+	for (const FVerseCompilationDiagnostic& Diagnostic : Diagnostics)
+	{
+		if (!Diagnostic.AffectedTileIndices.Contains(TileIndex))
+		{
+			continue;
+		}
+		if (!Messages.IsEmpty())
+		{
+			Messages += TEXT("\n");
+		}
+		Messages += FString::Printf(
+			TEXT("V%u: %s"),
+			Diagnostic.ReferenceCode,
+			*Diagnostic.Message);
+	}
+	return FText::FromString(MoveTemp(Messages));
+}
+
+bool SVerseTileCanvas::HasDiagnosticForTile(int32 TileIndex) const
+{
+	return Diagnostics.ContainsByPredicate([TileIndex](const FVerseCompilationDiagnostic& Diagnostic)
+	{
+		return Diagnostic.AffectedTileIndices.Contains(TileIndex);
+	});
 }
 
 FReply SVerseTileCanvas::SelectTile(FVerseVisualTile Tile)

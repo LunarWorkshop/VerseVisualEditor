@@ -22,6 +22,10 @@
 		{
 			"Name": "Verse",
 			"Enabled": true
+		},
+		{
+			"Name": "Solaris",
+			"Enabled": true
 		}
 	]
 }

@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Input/Reply.h"
+#include "SolBuildResults.h"
+#include "VerseCompilation.h"
 #include "VerseDocumentRevision.h"
 #include "VerseEditorFileTree.h"
 #include "Widgets/SCompoundWidget.h"
@@ -9,6 +11,15 @@
 
 struct FFileChangeData;
 struct FOpenVerseDocument;
+
+enum class EVerseProjectBuildState : uint8
+{
+	Unbuilt,
+	Building,
+	Success,
+	Warnings,
+	Errors,
+};
 struct FVerseVisualTile;
 class SBorder;
 class SBox;
@@ -25,6 +36,10 @@ public:
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SVerseVisualEditor() override;
+	virtual void Tick(
+		const FGeometry& AllottedGeometry,
+		const double InCurrentTime,
+		const float InDeltaTime) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	void SaveActiveDocumentFromMenu();
 	void SaveActiveDocumentAs();
@@ -91,6 +106,26 @@ private:
 	void CaptureActiveCanvasView();
 	void LoadSession();
 	void SaveSession();
+	TSharedRef<SWidget> BuildToolbar();
+	void CompileVerseProject();
+	bool CanCompileVerseProject() const;
+	FSlateIcon GetCompileVerseIcon() const;
+	FText GetCompileVerseTooltip() const;
+	void HandleProjectBuildStarted(const TSharedRef<FSolBuildResults>& BuildResults);
+	void HandleProjectBuildComplete(const TSharedRef<FSolBuildResults>& BuildResults);
+	void ApplyProjectDiagnostics(
+		const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+		TConstArrayView<FSolDiagnostic> ProjectDiagnostics);
+	TSharedRef<SWidget> BuildCompilationModeMenu();
+	void SetCompilationMode(EVerseCompilationMode Mode);
+	FText GetCompilationModeText() const;
+	void QueueCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument, bool bDebounce);
+	void StartCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
+	void ApplyCompilationResult(
+		const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+		uint64 RequestId,
+		FVerseCompilationResult Result);
+	void InvalidateCompilationResult(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 
 	void RegisterDirectoryWatcher();
 	void UnregisterDirectoryWatcher();
@@ -113,4 +148,10 @@ private:
 
 	FString WatchedDirectory;
 	FDelegateHandle DirectoryWatcherHandle;
+	FDelegateHandle ProjectBuildStartedHandle;
+	FDelegateHandle ProjectBuildCompleteHandle;
+	EVerseProjectBuildState ProjectBuildState = EVerseProjectBuildState::Unbuilt;
+	int32 ProjectBuildWarningCount = 0;
+	int32 ProjectBuildErrorCount = 0;
+	EVerseCompilationMode CompilationMode = EVerseCompilationMode::Continuous;
 };

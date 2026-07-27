@@ -2,6 +2,7 @@
 
 #include "Input/CursorReply.h"
 #include "Input/Reply.h"
+#include "VerseCompilation.h"
 #include "VerseParseSnapshot.h"
 #include "VerseTileSelection.h"
 #include "VerseVisualTile.h"
@@ -25,6 +26,7 @@ class SVerseTileCanvas final : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SVerseTileCanvas) {}
+		SLATE_ARGUMENT(TArray<FVerseCompilationDiagnostic>, Diagnostics)
 	SLATE_END_ARGS()
 
 	void Construct(
@@ -55,15 +57,18 @@ public:
 
 private:
 	TSharedRef<SWidget> BuildTileRow();
-	TSharedRef<SWidget> BuildTile(const struct FVerseVisualTile& Tile);
-	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile);
-	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile);
+	TSharedRef<SWidget> BuildTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
+	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
+	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	FText Decode(FVerseByteRange Range) const;
 	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
+	FText FormatDiagnosticMessages(int32 TileIndex) const;
+	bool HasDiagnosticForTile(int32 TileIndex) const;
 	FReply SelectTile(FVerseVisualTile Tile);
 
 	TOptional<FVerseParseSnapshot> Snapshot;
 	TArray<FVerseVisualTile> Tiles;
+	TArray<FVerseCompilationDiagnostic> Diagnostics;
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
 	TSharedPtr<SScrollBar> VerticalScrollbar;
 	TSharedPtr<SScrollBox> HorizontalScrollBox;
