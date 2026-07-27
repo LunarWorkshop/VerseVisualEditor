@@ -11,6 +11,15 @@ enum class EVerseVisualTileKind : uint8
 	Unknown
 };
 
+struct FVerseVisualClauseDescriptor
+{
+	FVerseTextRange InteriorRange;
+	FVerseTextRange OpeningPunctuationRange;
+	FVerseTextRange ClosingPunctuationRange;
+	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	FVerseTextRange EmptyBodyInsertionAnchor;
+};
+
 /** Read-only presentation data. All text remains referenced by snapshot byte ranges. */
 struct FVerseVisualTile
 {
@@ -22,6 +31,8 @@ struct FVerseVisualTile
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
 	FVerseTextRange BodyRange;
+	FVerseVisualClauseDescriptor BodyClause;
+	TArray<FVerseVisualTile> Children;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 

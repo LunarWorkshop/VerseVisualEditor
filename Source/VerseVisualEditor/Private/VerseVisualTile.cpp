@@ -60,50 +60,85 @@ namespace
 			: Tile.Range.BeginByte;
 		Tile.LastSourceLine = Document.GetOriginalLineNumber(LastOccupiedByte);
 	}
+
+	FVerseTextRange MakeTextRange(FVerseDocumentRevision Revision, FVerseByteRange Range)
+	{
+		return Range.IsSet() ? FVerseTextRange(Revision, Range) : FVerseTextRange();
+	}
+
+	FVerseVisualClauseDescriptor MakeVisualClauseDescriptor(
+		const FVerseClauseDescriptor& Descriptor,
+		FVerseDocumentRevision Revision)
+	{
+		FVerseVisualClauseDescriptor Result;
+		Result.InteriorRange = MakeTextRange(Revision, Descriptor.InteriorRange);
+		Result.OpeningPunctuationRange = MakeTextRange(Revision, Descriptor.OpeningPunctuationRange);
+		Result.ClosingPunctuationRange = MakeTextRange(Revision, Descriptor.ClosingPunctuationRange);
+		Result.PunctuationStyle = Descriptor.PunctuationStyle;
+		if (Descriptor.EmptyBodyInsertionByte != INDEX_NONE)
+		{
+			Result.EmptyBodyInsertionAnchor = FVerseTextRange(
+				Revision,
+				FVerseByteRange::FromBounds(
+					Descriptor.EmptyBodyInsertionByte,
+					Descriptor.EmptyBodyInsertionByte));
+		}
+		return Result;
+	}
+
+	TArray<FVerseVisualTile> BuildTiles(
+		const FVerseParseSnapshot& Snapshot,
+		TConstArrayView<FVerseSourceRegion> Regions,
+		FVerseDocumentRevision Revision)
+	{
+		TArray<FVerseVisualTile> Tiles;
+		for (const FVerseSourceRegion& Region : Regions)
+		{
+			if (Region.Kind == EVerseSourceRegionKind::Raw && IsWhitespace(Snapshot.GetSourceView(Region)))
+			{
+				continue;
+			}
+			if (Region.Kind == EVerseSourceRegionKind::Comment
+				&& !Tiles.IsEmpty()
+				&& CanMergeLineComment(Snapshot, Tiles.Last(), Region))
+			{
+				Tiles.Last().Range = FVerseTextRange(
+					Revision,
+					FVerseByteRange::FromBounds(
+						Tiles.Last().Range.BeginByte,
+						Region.Range.EndByte()));
+				Tiles.Last().BodyRange = Tiles.Last().Range;
+				UpdateSourceLines(Tiles.Last(), *Snapshot.GetDocument());
+				continue;
+			}
+
+			FVerseVisualTile& Tile = Tiles.AddDefaulted_GetRef();
+			Tile.Range = FVerseTextRange(Revision, Region.Range);
+			UpdateSourceLines(Tile, *Snapshot.GetDocument());
+			if (Region.Kind == EVerseSourceRegionKind::Syntax)
+			{
+				Tile.Kind = EVerseVisualTileKind::Definition;
+				Tile.DefinitionKind = Region.SyntaxKind;
+				Tile.NameRange = MakeTextRange(Revision, Region.NameRange);
+				Tile.TypeRange = MakeTextRange(Revision, Region.TypeRange);
+				Tile.BodyRange = MakeTextRange(Revision, Region.BodyRange);
+				Tile.BodyClause = MakeVisualClauseDescriptor(Region.BodyClause, Revision);
+				Tile.Children = BuildTiles(Snapshot, Region.Children, Revision);
+			}
+			else if (Region.Kind == EVerseSourceRegionKind::Comment)
+			{
+				Tile.Kind = EVerseVisualTileKind::Comment;
+				Tile.BodyRange = FVerseTextRange(Revision, Region.BodyRange);
+				Tile.CommentKind = Region.CommentKind;
+			}
+		}
+		return Tiles;
+	}
 }
 
 TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(
 	const FVerseParseSnapshot& Snapshot,
 	FVerseDocumentRevision Revision)
 {
-	TArray<FVerseVisualTile> Tiles;
-	for (const FVerseSourceRegion& Region : Snapshot.GetSourceRegions())
-	{
-		if (Region.Kind == EVerseSourceRegionKind::Raw && IsWhitespace(Snapshot.GetSourceView(Region)))
-		{
-			continue;
-		}
-		if (Region.Kind == EVerseSourceRegionKind::Comment
-			&& !Tiles.IsEmpty()
-			&& CanMergeLineComment(Snapshot, Tiles.Last(), Region))
-		{
-			Tiles.Last().Range = FVerseTextRange(
-				Revision,
-				FVerseByteRange::FromBounds(
-					Tiles.Last().Range.BeginByte,
-					Region.Range.EndByte()));
-			Tiles.Last().BodyRange = Tiles.Last().Range;
-			UpdateSourceLines(Tiles.Last(), *Snapshot.GetDocument());
-			continue;
-		}
-
-		FVerseVisualTile& Tile = Tiles.AddDefaulted_GetRef();
-		Tile.Range = FVerseTextRange(Revision, Region.Range);
-		UpdateSourceLines(Tile, *Snapshot.GetDocument());
-		if (Region.Kind == EVerseSourceRegionKind::Syntax)
-		{
-			Tile.Kind = EVerseVisualTileKind::Definition;
-			Tile.DefinitionKind = Region.SyntaxKind;
-			Tile.NameRange = FVerseTextRange(Revision, Region.NameRange);
-			Tile.TypeRange = FVerseTextRange(Revision, Region.TypeRange);
-			Tile.BodyRange = FVerseTextRange(Revision, Region.BodyRange);
-		}
-		else if (Region.Kind == EVerseSourceRegionKind::Comment)
-		{
-			Tile.Kind = EVerseVisualTileKind::Comment;
-			Tile.BodyRange = FVerseTextRange(Revision, Region.BodyRange);
-			Tile.CommentKind = Region.CommentKind;
-		}
-	}
-	return Tiles;
+	return BuildTiles(Snapshot, Snapshot.GetSourceRegions(), Revision);
 }

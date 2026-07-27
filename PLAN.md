@@ -43,6 +43,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Rename and save vertical slice: complete; Details-driven localized renaming,
   content-state dirty tracking, atomic BOM-preserving saves, and dirty external
   change handling are implemented.
+- Nested-body range transition: complete; VST-derived clause descriptors retain
+  complete definitions, exact interiors and punctuation, insertion anchors, and
+  recursively lossless child coverage.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -347,18 +350,15 @@ This step delivers the first complete edit-and-save workflow.
 - Never mutate, undo, or discard source because compilation failed.
 - Test stale-result rejection and diagnostic mapping.
 
-### 7. Nested-body range transition
+### 7. Nested-body range transition (complete)
 
-- `FVerseSourceRegion::BodyRange` is a durable requirement, but the current
-  `FindBodyRange()` and `TrimClauseDelimiters()` implementation is transitional.
-  It uses the official VST to select a body clause, then performs a small
-  source-range trim for its enclosing braces or colon. Replace that specific
-  trimming path with the richer VST-derived clause model in these steps as soon
-  as nested contents are represented.
+- `FVerseSourceRegion::BodyRange` remains a durable requirement. The former
+  `FindBodyRange()` and `TrimClauseDelimiters()` transition has been replaced by
+  a richer VST-derived clause model now that nested contents are represented.
 - Retain both the complete definition range and the body/interior range. They
   serve different operations: whole-definition selection, copying, deletion,
   and movement versus child layout and insertion inside the definition.
-- Replace `FindBodyRange()`/`TrimClauseDelimiters()` with a VST-derived clause
+- Use a VST-derived clause
   descriptor containing the interior range, opening punctuation range, closing
   punctuation range, punctuation style (braces or colon/indentation), and an
   empty-body insertion anchor.
@@ -369,9 +369,8 @@ This step delivers the first complete edit-and-save workflow.
   step, invalid syntax, and unsupported constructs.
 - Preserve leading and trailing interior trivia even when no VST child owns it.
   Child loci alone are not a replacement for the parent interior range.
-- Add lossless brace-style, colon/indentation-style, empty-body, comment/trivia,
-  invalid-body, and nested-definition fixtures before removing the transitional
-  delimiter trimming.
+- Cover brace-style, colon/indentation-style, empty-body, comment/trivia,
+  invalid-body, and nested-definition cases with lossless fixtures.
 
 ### 8. Functions
 
@@ -549,8 +548,7 @@ introduced immediately beforehand.
 
 ### 7. Enum contents
 
-- Make enum bodies the first consumer of the VST-derived clause descriptor and
-  retire the transitional delimiter trim for enum definitions.
+- Consume the existing VST-derived clause descriptor for enum bodies.
 - Represent each enum label with an indented tile.
 - Add renaming and identifier validation.
 - Add drag handles for reordering.
@@ -562,8 +560,7 @@ introduced immediately beforehand.
 ### 8. Global constants
 
 - Model the initializer as its own VST-derived expression range rather than
-  treating it as a delimited definition body or using
-  `TrimClauseDelimiters()`.
+  treating it as a delimited definition body.
 - Display and edit the declared type.
 - Provide an appropriate editor for simple typed literal values.
 - Provide selection controls for enums, types, and other discoverable values.
@@ -572,8 +569,8 @@ introduced immediately beforehand.
 
 ### 9. Structs
 
-- Replace transitional struct body trimming with the shared VST clause
-  descriptor before presenting fields as child tiles.
+- Use the shared VST clause descriptor when presenting struct fields as child
+  tiles.
 - Add shared effect support suitable for structs, classes, and interfaces.
 - Enforce and explain effect availability and inheritance rules.
 - Extend definitions to represent mutable `var` fields.
@@ -585,8 +582,8 @@ introduced immediately beforehand.
 
 ### 10. Classes
 
-- Replace transitional class body trimming with the shared VST clause
-  descriptor before presenting members as child tiles.
+- Use the shared VST clause descriptor when presenting class members as child
+  tiles.
 - Add class fields and methods.
 - Add class-specific effects and constraints.
 - Add initializer and `let` blocks.
@@ -602,8 +599,8 @@ introduced immediately beforehand.
 
 ### 11. Interfaces
 
-- Replace transitional interface body trimming with the shared VST clause
-  descriptor before presenting members as child tiles.
+- Use the shared VST clause descriptor when presenting interface members as
+  child tiles.
 - Add interface tiles and interface-specific effects.
 - Add inherited-interface lists.
 - Support interface fields.

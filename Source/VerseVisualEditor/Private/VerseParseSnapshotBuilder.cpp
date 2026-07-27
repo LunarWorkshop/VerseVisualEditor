@@ -99,87 +99,196 @@ namespace VerseParseSnapshotBuilder
 		}
 	}
 
-	FVerseByteRange TrimClauseDelimiters(
-		const Verse::Vst::Clause& Clause,
-		FVerseByteRange Range,
-		FUtf8StringView Source)
-	{
-		if (!Range.IsSet() || Range.EndByte() > Source.Len())
-		{
-			return {};
-		}
+	bool TryMakeTypedRegion(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		FVerseSourceRegion& OutRegion);
 
-		FUtf8StringView Text = Source.Mid(Range.BeginByte, Range.NumBytes);
-		int32 RelativeBegin = 0;
-		int32 RelativeEnd = Text.Len();
-		if (Clause.GetPunctuation() == Verse::Vst::Clause::EPunctuation::Braces)
+	int32 FindLastByte(FUtf8StringView Source, UTF8CHAR Byte, int32 Begin, int32 End)
+	{
+		Begin = FMath::Clamp(Begin, 0, Source.Len());
+		End = FMath::Clamp(End, Begin, Source.Len());
+		for (int32 Offset = End - 1; Offset >= Begin; --Offset)
 		{
-			int32 OpenBrace = INDEX_NONE;
-			int32 CloseBrace = INDEX_NONE;
-			for (int32 Index = 0; Index < Text.Len(); ++Index)
+			if (Source[Offset] == Byte)
 			{
-				if (OpenBrace == INDEX_NONE && Text[Index] == static_cast<UTF8CHAR>('{'))
-				{
-					OpenBrace = Index;
-				}
-				if (Text[Index] == static_cast<UTF8CHAR>('}'))
-				{
-					CloseBrace = Index;
-				}
-			}
-			if (OpenBrace != INDEX_NONE && CloseBrace != INDEX_NONE && CloseBrace >= OpenBrace)
-			{
-				RelativeBegin = OpenBrace + 1;
-				RelativeEnd = CloseBrace;
+				return Offset;
 			}
 		}
-		else
-		{
-			while (RelativeBegin < RelativeEnd
-				&& (Text[RelativeBegin] == static_cast<UTF8CHAR>(' ')
-					|| Text[RelativeBegin] == static_cast<UTF8CHAR>('\t')))
-			{
-				++RelativeBegin;
-			}
-			if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>(':'))
-			{
-				++RelativeBegin;
-				if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>('\r'))
-				{
-					++RelativeBegin;
-				}
-				if (RelativeBegin < RelativeEnd && Text[RelativeBegin] == static_cast<UTF8CHAR>('\n'))
-				{
-					++RelativeBegin;
-				}
-			}
-		}
-		return FVerseByteRange::FromBounds(
-			Range.BeginByte + RelativeBegin,
-			Range.BeginByte + RelativeEnd);
+		return INDEX_NONE;
 	}
 
-	FVerseByteRange FindBodyRange(
-		const Verse::Vst::Node& RightOperand,
-		const FSourceIndex& SourceIndex)
+	void AccumulateOwnedSourceBounds(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		int32& InOutFirstByte,
+		int32& InOutLastByte,
+		TSet<const Verse::Vst::Node*>& VisitedNodes)
 	{
-		const Verse::Vst::Node* Unwrapped = UnwrapSingleClause(&RightOperand);
-		if (const Verse::Vst::Macro* Macro = Unwrapped != nullptr
-			? Unwrapped->AsNullable<Verse::Vst::Macro>()
-			: nullptr)
+		if (VisitedNodes.Contains(&Node))
 		{
-			if (Macro->GetChildCount() <= 1)
-			{
-				return {};
-			}
-			const Verse::Vst::Clause& BodyClause = *Macro->GetClause(Macro->GetChildCount() - 2);
-			return TrimClauseDelimiters(
-				BodyClause,
-				SourceIndex.ToRange(BodyClause.Whence()),
-				SourceIndex.GetSource());
+			return;
+		}
+		VisitedNodes.Add(&Node);
+
+		const FVerseByteRange Range = SourceIndex.ToRange(Node.Whence());
+		if (Range.IsSet())
+		{
+			InOutFirstByte = FMath::Min(InOutFirstByte, Range.BeginByte);
+			InOutLastByte = FMath::Max(InOutLastByte, Range.EndByte());
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPrefixComments())
+		{
+			AccumulateOwnedSourceBounds(*Comment, SourceIndex, InOutFirstByte, InOutLastByte, VisitedNodes);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPostfixComments())
+		{
+			AccumulateOwnedSourceBounds(*Comment, SourceIndex, InOutFirstByte, InOutLastByte, VisitedNodes);
+		}
+		if (Node.GetAux())
+		{
+			AccumulateOwnedSourceBounds(*Node.GetAux(), SourceIndex, InOutFirstByte, InOutLastByte, VisitedNodes);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			AccumulateOwnedSourceBounds(*Child, SourceIndex, InOutFirstByte, InOutLastByte, VisitedNodes);
+		}
+	}
+
+	void SortRegions(TArray<FVerseSourceRegion>& Regions)
+	{
+		Regions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
+		{
+			return Left.Range.BeginByte == Right.Range.BeginByte
+				? Left.Range.NumBytes < Right.Range.NumBytes
+				: Left.Range.BeginByte < Right.Range.BeginByte;
+		});
+	}
+
+	TArray<FVerseSourceRegion> PartitionRange(
+		FVerseByteRange ParentRange,
+		TArray<FVerseSourceRegion> RecognizedRegions)
+	{
+		TArray<FVerseSourceRegion> CompleteRegions;
+		if (!ParentRange.IsSet())
+		{
+			return CompleteRegions;
 		}
 
-		return Unwrapped != nullptr ? SourceIndex.ToRange(Unwrapped->Whence()) : FVerseByteRange();
+		SortRegions(RecognizedRegions);
+		int32 Cursor = ParentRange.BeginByte;
+		for (FVerseSourceRegion& RecognizedRegion : RecognizedRegions)
+		{
+			if (!RecognizedRegion.Range.IsSet()
+				|| RecognizedRegion.Range.BeginByte < Cursor
+				|| RecognizedRegion.Range.EndByte() > ParentRange.EndByte())
+			{
+				continue;
+			}
+			if (Cursor < RecognizedRegion.Range.BeginByte)
+			{
+				FVerseSourceRegion& Gap = CompleteRegions.AddDefaulted_GetRef();
+				Gap.Range = FVerseByteRange::FromBounds(Cursor, RecognizedRegion.Range.BeginByte);
+			}
+			CompleteRegions.Add(MoveTemp(RecognizedRegion));
+			Cursor = CompleteRegions.Last().Range.EndByte();
+		}
+		if (Cursor < ParentRange.EndByte())
+		{
+			FVerseSourceRegion& Gap = CompleteRegions.AddDefaulted_GetRef();
+			Gap.Range = FVerseByteRange::FromBounds(Cursor, ParentRange.EndByte());
+		}
+		return CompleteRegions;
+	}
+
+	FVerseClauseDescriptor MakeExpressionDescriptor(
+		const Verse::Vst::Node& Expression,
+		const FSourceIndex& SourceIndex)
+	{
+		FVerseClauseDescriptor Descriptor;
+		Descriptor.InteriorRange = SourceIndex.ToRange(Expression.Whence());
+		if (Descriptor.InteriorRange.IsSet())
+		{
+			Descriptor.EmptyBodyInsertionByte = Descriptor.InteriorRange.EndByte();
+		}
+		return Descriptor;
+	}
+
+	FVerseClauseDescriptor MakeClauseDescriptor(
+		const Verse::Vst::Clause& Clause,
+		FVerseByteRange DefinitionRange,
+		const FSourceIndex& SourceIndex)
+	{
+		FVerseClauseDescriptor Descriptor;
+		const FUtf8StringView Source = SourceIndex.GetSource();
+		if (!DefinitionRange.IsSet() || DefinitionRange.EndByte() > Source.Len())
+		{
+			return Descriptor;
+		}
+
+		int32 FirstChildByte = DefinitionRange.EndByte();
+		int32 LastChildByte = DefinitionRange.BeginByte;
+		TSet<const Verse::Vst::Node*> VisitedNodes;
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause.GetChildren())
+		{
+			AccumulateOwnedSourceBounds(
+				*Child,
+				SourceIndex,
+				FirstChildByte,
+				LastChildByte,
+				VisitedNodes);
+		}
+
+		const Verse::Vst::Clause::EPunctuation Punctuation = Clause.GetPunctuation();
+		if (Punctuation == Verse::Vst::Clause::EPunctuation::Braces)
+		{
+			const int32 OpenByte = FindLastByte(
+				Source,
+				static_cast<UTF8CHAR>('{'),
+				DefinitionRange.BeginByte,
+				FirstChildByte);
+			const int32 CloseByte = FindLastByte(
+				Source,
+				static_cast<UTF8CHAR>('}'),
+				FMath::Max(LastChildByte, OpenByte + 1),
+				DefinitionRange.EndByte());
+			if (OpenByte != INDEX_NONE && CloseByte != INDEX_NONE && OpenByte < CloseByte)
+			{
+				Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::Braces;
+				Descriptor.OpeningPunctuationRange = {OpenByte, 1};
+				Descriptor.ClosingPunctuationRange = {CloseByte, 1};
+				Descriptor.InteriorRange = FVerseByteRange::FromBounds(OpenByte + 1, CloseByte);
+				Descriptor.EmptyBodyInsertionByte = OpenByte + 1;
+				return Descriptor;
+			}
+		}
+		else if (Punctuation == Verse::Vst::Clause::EPunctuation::Colon)
+		{
+			const int32 ColonByte = FindLastByte(
+				Source,
+				static_cast<UTF8CHAR>(':'),
+				DefinitionRange.BeginByte,
+				FirstChildByte);
+			if (ColonByte != INDEX_NONE)
+			{
+				Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::ColonOrIndentation;
+				Descriptor.OpeningPunctuationRange = {ColonByte, 1};
+				Descriptor.InteriorRange = FVerseByteRange::FromBounds(ColonByte + 1, DefinitionRange.EndByte());
+				Descriptor.EmptyBodyInsertionByte = ColonByte + 1;
+				return Descriptor;
+			}
+		}
+		else if (Punctuation == Verse::Vst::Clause::EPunctuation::Indentation)
+		{
+			Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::ColonOrIndentation;
+		}
+
+		const FVerseByteRange ClauseRange = SourceIndex.ToRange(Clause.Whence());
+		Descriptor.InteriorRange = ClauseRange.IsSet()
+			? ClauseRange
+			: FVerseByteRange::FromBounds(DefinitionRange.EndByte(), DefinitionRange.EndByte());
+		Descriptor.EmptyBodyInsertionByte = Descriptor.InteriorRange.BeginByte;
+		return Descriptor;
 	}
 
 	const Verse::Vst::Identifier* FindFirstIdentifier(const Verse::Vst::Node& Node)
@@ -256,6 +365,27 @@ namespace VerseParseSnapshotBuilder
 		{
 			CollectCommentRegions(*Child, SourceIndex, VisitedNodes, OutRegions);
 		}
+	}
+
+	TArray<FVerseSourceRegion> BuildClauseChildren(
+		const Verse::Vst::Clause& Clause,
+		const FVerseClauseDescriptor& Descriptor,
+		const FSourceIndex& SourceIndex)
+	{
+		TArray<FVerseSourceRegion> RecognizedChildren;
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause.GetChildren())
+		{
+			const Verse::Vst::Node* Candidate = UnwrapSingleClause(Child.Get());
+			FVerseSourceRegion ChildRegion;
+			if (Candidate != nullptr && TryMakeTypedRegion(*Candidate, SourceIndex, ChildRegion))
+			{
+				RecognizedChildren.Add(MoveTemp(ChildRegion));
+			}
+		}
+
+		TSet<const Verse::Vst::Node*> VisitedComments;
+		CollectCommentRegions(Clause, SourceIndex, VisitedComments, RecognizedChildren);
+		return PartitionRange(Descriptor.InteriorRange, MoveTemp(RecognizedChildren));
 	}
 
 	FName ClassifyMacro(const Verse::Vst::Node& RightOperand)
@@ -370,7 +500,22 @@ namespace VerseParseSnapshotBuilder
 		OutRegion.TypeRange = TypeOperand != nullptr
 			? SourceIndex.ToRange(TypeOperand->Whence())
 			: FVerseByteRange();
-		OutRegion.BodyRange = FindBodyRange(RightOperand, SourceIndex);
+		const Verse::Vst::Node* UnwrappedRight = UnwrapSingleClause(&RightOperand);
+		if (const Verse::Vst::Macro* Macro = UnwrappedRight != nullptr
+			? UnwrappedRight->AsNullable<Verse::Vst::Macro>()
+			: nullptr;
+			Macro != nullptr && Macro->GetChildCount() > 1)
+		{
+			const Verse::Vst::Clause& BodyClause = *Macro->GetClause(Macro->GetChildCount() - 2);
+			OutRegion.BodyClause = MakeClauseDescriptor(BodyClause, DefinitionRange, SourceIndex);
+			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+			OutRegion.Children = BuildClauseChildren(BodyClause, OutRegion.BodyClause, SourceIndex);
+		}
+		else if (UnwrappedRight != nullptr)
+		{
+			OutRegion.BodyClause = MakeExpressionDescriptor(*UnwrappedRight, SourceIndex);
+			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+		}
 		return true;
 	}
 }
@@ -421,38 +566,9 @@ FVerseParseSnapshot FVerseParseSnapshotBuilder::Build(
 		return FVerseParseSnapshot::CreateRaw(MoveTemp(Document));
 	}
 
-	RecognizedRegions.Sort([](const FVerseSourceRegion& Left, const FVerseSourceRegion& Right)
-	{
-		return Left.Range.BeginByte == Right.Range.BeginByte
-			? Left.Range.NumBytes < Right.Range.NumBytes
-			: Left.Range.BeginByte < Right.Range.BeginByte;
-	});
-
-	TArray<FVerseSourceRegion> CompleteRegions;
-	int32 Cursor = 0;
-	for (FVerseSourceRegion& RecognizedRegion : RecognizedRegions)
-	{
-		if (RecognizedRegion.Range.BeginByte < Cursor || RecognizedRegion.Range.EndByte() > Source.Len())
-		{
-			continue;
-		}
-		if (Cursor < RecognizedRegion.Range.BeginByte)
-		{
-			CompleteRegions.Add({
-				FVerseByteRange::FromBounds(Cursor, RecognizedRegion.Range.BeginByte),
-				EVerseSourceRegionKind::Raw,
-				NAME_None});
-		}
-		CompleteRegions.Add(MoveTemp(RecognizedRegion));
-		Cursor = CompleteRegions.Last().Range.EndByte();
-	}
-	if (Cursor < Source.Len())
-	{
-		CompleteRegions.Add({
-			FVerseByteRange::FromBounds(Cursor, Source.Len()),
-			EVerseSourceRegionKind::Raw,
-			NAME_None});
-	}
+	TArray<FVerseSourceRegion> CompleteRegions = VerseParseSnapshotBuilder::PartitionRange(
+		Document->GetWholeOriginalRange(),
+		MoveTemp(RecognizedRegions));
 
 	return CompleteRegions.IsEmpty()
 		? FVerseParseSnapshot::CreateRaw(MoveTemp(Document))

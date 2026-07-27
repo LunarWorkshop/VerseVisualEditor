@@ -95,6 +95,50 @@ namespace VerseParseSnapshotBuilderTests
 		}
 		return Result;
 	}
+
+	const FVerseSourceRegion* FindTypedRegion(
+		const FVerseParseSnapshot& Snapshot,
+		TConstArrayView<FVerseSourceRegion> Regions,
+		FUtf8StringView Name)
+	{
+		for (const FVerseSourceRegion& Region : Regions)
+		{
+			if (Region.Kind == EVerseSourceRegionKind::Syntax
+				&& Snapshot.GetSourceView(Region.NameRange) == Name)
+			{
+				return &Region;
+			}
+			if (const FVerseSourceRegion* Nested = FindTypedRegion(Snapshot, Region.Children, Name))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
+	bool TestBodyCoverage(
+		FAutomationTestBase& Test,
+		const FVerseSourceRegion& Region,
+		const TCHAR* Label)
+	{
+		int32 Cursor = Region.BodyRange.BeginByte;
+		for (int32 Index = 0; Index < Region.Children.Num(); ++Index)
+		{
+			const FVerseSourceRegion& Child = Region.Children[Index];
+			Test.TestEqual(
+				*FString::Printf(TEXT("%s child %d begins at the coverage cursor"), Label, Index),
+				Child.Range.BeginByte,
+				Cursor);
+			Test.TestTrue(
+				*FString::Printf(TEXT("%s child %d is non-empty"), Label, Index),
+				Child.Range.NumBytes > 0);
+			Cursor = Child.Range.EndByte();
+		}
+		return Test.TestEqual(
+			*FString::Printf(TEXT("%s children cover the exact body interior"), Label),
+			Cursor,
+			Region.BodyRange.EndByte());
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -191,6 +235,94 @@ bool FVerseErrorTolerantTopLevelRecognitionTest::RunTest(const FString& Paramete
 	TestTrue(
 		TEXT("Invalid source remains exact raw text"),
 		Snapshot.GetSourceView(Snapshot.GetSourceRegions()[0]) == Document->GetOriginalUtf8View());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseNestedBodyRangeTest,
+	"VerseVisualEditor.Foundation.NestedBodies.ClauseDescriptorsAndCoverage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseNestedBodyRangeTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this,
+		TEXT("nested_body_ranges.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	VerseParseSnapshotBuilderTests::TestCompleteCoverage(*this, Snapshot);
+	const FVerseSourceRegion* Brace = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("BraceContainer"));
+	const FVerseSourceRegion* Colon = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("ColonContainer"));
+	const FVerseSourceRegion* NestedEmpty = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("NestedEmpty"));
+	const FVerseSourceRegion* NestedStruct = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("NestedStruct"));
+
+	if (TestNotNull(TEXT("Brace container is represented"), Brace))
+	{
+		TestEqual(TEXT("Brace punctuation style comes from VST"), Brace->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::Braces);
+		TestTrue(TEXT("Brace opening punctuation is exact"), Snapshot.GetSourceView(Brace->BodyClause.OpeningPunctuationRange) == UTF8TEXTVIEW("{"));
+		TestTrue(TEXT("Brace closing punctuation is exact"), Snapshot.GetSourceView(Brace->BodyClause.ClosingPunctuationRange) == UTF8TEXTVIEW("}"));
+		TestEqual(TEXT("Durable body range is the descriptor interior"), Brace->BodyRange, Brace->BodyClause.InteriorRange);
+		TestTrue(TEXT("Brace interior retains its leading comment"), Snapshot.GetSourceView(Brace->BodyRange).Find(UTF8TEXTVIEW("# Leading body comment.")) != INDEX_NONE);
+		VerseParseSnapshotBuilderTests::TestBodyCoverage(*this, *Brace, TEXT("Brace body"));
+	}
+	if (TestNotNull(TEXT("Colon container is represented"), Colon))
+	{
+		TestEqual(TEXT("Colon punctuation style comes from VST"), Colon->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::ColonOrIndentation);
+		TestTrue(TEXT("Colon opening punctuation is exact"), Snapshot.GetSourceView(Colon->BodyClause.OpeningPunctuationRange) == UTF8TEXTVIEW(":"));
+		TestFalse(TEXT("Colon body has no closing punctuation"), Colon->BodyClause.ClosingPunctuationRange.IsSet());
+		TestTrue(TEXT("Colon interior retains trivia immediately after the colon"), Snapshot.GetSourceView(Colon->BodyRange).StartsWith(UTF8TEXTVIEW("\n")));
+		VerseParseSnapshotBuilderTests::TestBodyCoverage(*this, *Colon, TEXT("Colon body"));
+	}
+	if (TestNotNull(TEXT("Empty nested class is represented recursively"), NestedEmpty))
+	{
+		TestTrue(TEXT("Empty brace body has an exact empty interior"), NestedEmpty->BodyRange.IsSet() && NestedEmpty->BodyRange.NumBytes == 0);
+		TestEqual(TEXT("Empty body insertion anchor is inside its opening brace"), NestedEmpty->BodyClause.EmptyBodyInsertionByte, NestedEmpty->BodyRange.BeginByte);
+		TestTrue(TEXT("Empty body has no child coverage regions"), NestedEmpty->Children.IsEmpty());
+	}
+	if (TestNotNull(TEXT("Colon-nested struct is represented recursively"), NestedStruct))
+	{
+		TestEqual(TEXT("Nested struct retains its own clause style"), NestedStruct->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::ColonOrIndentation);
+		VerseParseSnapshotBuilderTests::TestBodyCoverage(*this, *NestedStruct, TEXT("Nested struct body"));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseInvalidNestedBodyRetentionTest,
+	"VerseVisualEditor.Foundation.NestedBodies.InvalidSourceRetention",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseInvalidNestedBodyRetentionTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this,
+		TEXT("nested_body_invalid.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	VerseParseSnapshotBuilderTests::TestCompleteCoverage(*this, Snapshot);
+	TestTrue(
+		TEXT("Invalid nested source remains byte-for-byte recoverable"),
+		Snapshot.GetDocument()->GetOriginalUtf8View() == Document->GetOriginalUtf8View());
 	return true;
 }
 

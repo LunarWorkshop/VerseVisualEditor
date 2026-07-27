@@ -26,6 +26,25 @@ enum class EVerseCommentKind : uint8
 	Fragment,
 };
 
+enum class EVerseClausePunctuationStyle : uint8
+{
+	None,
+	Braces,
+	ColonOrIndentation,
+};
+
+/** Parser-derived structure for a definition body. All ranges are source-exact and half-open. */
+struct VERSEVISUALEDITOR_API FVerseClauseDescriptor
+{
+	FVerseByteRange InteriorRange;
+	FVerseByteRange OpeningPunctuationRange;
+	FVerseByteRange ClosingPunctuationRange;
+	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	int32 EmptyBodyInsertionByte = INDEX_NONE;
+
+	bool IsSet() const { return InteriorRange.IsSet(); }
+};
+
 /** A visual-model-facing description of a range in a particular source document. */
 struct VERSEVISUALEDITOR_API FVerseSourceRegion
 {
@@ -34,7 +53,11 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	FName SyntaxKind;
 	FVerseByteRange NameRange;
 	FVerseByteRange TypeRange;
+	/** Exact body interior, retained separately from the complete definition Range. */
 	FVerseByteRange BodyRange;
+	FVerseClauseDescriptor BodyClause;
+	/** Complete ordered coverage of BodyRange, recursively derived from VST clause children. */
+	TArray<FVerseSourceRegion> Children;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 };
 
