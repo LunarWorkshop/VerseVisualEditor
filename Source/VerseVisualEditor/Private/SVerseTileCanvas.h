@@ -38,6 +38,8 @@ public:
 		FSimpleDelegate InOnSelectionCleared);
 
 	FVerseCanvasViewState GetViewState() const;
+	/** Selects a tile and centers its widget, or its nearest rendered containing tile. */
+	bool FocusTile(const FVerseVisualTile& Tile);
 
 	virtual int32 OnPaint(
 		const FPaintArgs& Args,
@@ -71,9 +73,17 @@ private:
 	FText FormatDiagnosticMessages(int32 TileIndex) const;
 	bool HasDiagnosticForTile(int32 TileIndex) const;
 	FReply SelectTile(FVerseVisualTile Tile);
+	bool IsTileSelected(FVerseTextRange TileRange) const;
+
+	struct FTileWidgetEntry
+	{
+		FVerseTextRange Range;
+		TWeakPtr<SWidget> Widget;
+	};
 
 	TOptional<FVerseParseSnapshot> Snapshot;
 	TArray<FVerseVisualTile> Tiles;
+	TArray<FTileWidgetEntry> TileWidgets;
 	TArray<FVerseCompilationDiagnostic> Diagnostics;
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
 	TSharedPtr<SScrollBar> VerticalScrollbar;

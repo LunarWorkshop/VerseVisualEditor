@@ -29,6 +29,7 @@
 #include "UnrealEdGlobals.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
+#include "VerseDefinitionIcon.h"
 #include "VerseExternalChange.h"
 #include "VerseIdentifier.h"
 #include "VerseSpecifier.h"
@@ -134,6 +135,24 @@ namespace
 		}
 		return nullptr;
 	}
+
+	const FVerseVisualTile* FindTileByRange(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseTextRange Range)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Range == Range)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Nested = FindTileByRange(Tile.Children, Range))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
 }
 
 void SVerseVisualEditor::Construct(const FArguments& InArgs)
@@ -155,46 +174,101 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.22f)
 			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.Padding(6.0f)
+				SNew(SSplitter)
+				.Orientation(Orient_Vertical)
+				+ SSplitter::Slot()
+				.Value(0.55f)
+				.MinSize(100.0f)
 				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(2.0f, 2.0f, 2.0f, 6.0f)
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.Padding(6.0f)
 					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("VerseFilesHeading", "Verse Files"))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-					]
-					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
-					[
-						SNew(SOverlay)
-						+ SOverlay::Slot()
-						[
-							SAssignNew(FileTree, STreeView<TSharedPtr<FVerseFileTreeItem>>)
-							.TreeItemsSource(&RootItems)
-							.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
-							.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
-							.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
-							.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleTreeItemDoubleClicked)
-							.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
-							.SelectionMode(ESelectionMode::Single)
-						]
-						+ SOverlay::Slot()
-						.HAlign(HAlign_Center)
-						.VAlign(VAlign_Center)
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(2.0f, 2.0f, 2.0f, 6.0f)
 						[
 							SNew(STextBlock)
-							.Text(LOCTEXT("NoVerseRoots", "No project Verse source folders were found."))
-							.AutoWrapText(true)
-							.Justification(ETextJustify::Center)
-							.Visibility_Lambda([this]()
-							{
-								return RootItems.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
-							})
+							.Text(LOCTEXT("ExplorerHeading", "Explorer"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+						]
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
+							SNew(SOverlay)
+							+ SOverlay::Slot()
+							[
+								SAssignNew(FileTree, STreeView<TSharedPtr<FVerseFileTreeItem>>)
+								.TreeItemsSource(&RootItems)
+								.OnGenerateRow(this, &SVerseVisualEditor::GenerateTreeRow)
+								.OnGetChildren(this, &SVerseVisualEditor::GetTreeChildren)
+								.OnSelectionChanged(this, &SVerseVisualEditor::HandleTreeSelectionChanged)
+								.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleTreeItemDoubleClicked)
+								.OnContextMenuOpening(this, &SVerseVisualEditor::MakeTreeContextMenu)
+								.SelectionMode(ESelectionMode::Single)
+							]
+							+ SOverlay::Slot()
+							.HAlign(HAlign_Center)
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(LOCTEXT("NoVerseRoots", "No project Verse source folders were found."))
+								.AutoWrapText(true)
+								.Justification(ETextJustify::Center)
+								.Visibility_Lambda([this]()
+								{
+									return RootItems.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+								})
+							]
+						]
+					]
+				]
+				+ SSplitter::Slot()
+				.Value(0.45f)
+				.MinSize(100.0f)
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+					.Padding(6.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(2.0f, 2.0f, 2.0f, 6.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("OutlinerHeading", "Outliner"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+						]
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
+							SNew(SOverlay)
+							+ SOverlay::Slot()
+							[
+								SAssignNew(OutlinerTree, STreeView<TSharedPtr<FVerseOutlinerItem>>)
+								.TreeItemsSource(&OutlinerRootItems)
+								.OnGenerateRow(this, &SVerseVisualEditor::GenerateOutlinerRow)
+								.OnGetChildren(this, &SVerseVisualEditor::GetOutlinerChildren)
+								.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleOutlinerItemDoubleClicked)
+								.SelectionMode(ESelectionMode::Single)
+							]
+							+ SOverlay::Slot()
+							.HAlign(HAlign_Center)
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(LOCTEXT("EmptyOutliner", "No definitions in the active file."))
+								.AutoWrapText(true)
+								.Justification(ETextJustify::Center)
+								.Visibility_Lambda([this]()
+								{
+									return OutlinerRootItems.IsEmpty()
+										? EVisibility::Visible
+										: EVisibility::Collapsed;
+								})
+							]
 						]
 					]
 				]
@@ -275,6 +349,21 @@ void SVerseVisualEditor::RefreshFileTree()
 	}
 }
 
+void SVerseVisualEditor::RefreshOutliner()
+{
+	OutlinerRootItems.Reset();
+	if (ActiveDocument.IsValid() && ActiveDocument->Session.IsValid())
+	{
+		OutlinerRootItems = FVerseOutlinerBuilder::Build(
+			ActiveDocument->Session->GetTiles(),
+			ActiveDocument->Session->GetParseSnapshot());
+	}
+	if (OutlinerTree.IsValid())
+	{
+		OutlinerTree->RequestTreeRefresh();
+	}
+}
+
 TSharedRef<ITableRow> SVerseVisualEditor::GenerateTreeRow(
 	TSharedPtr<FVerseFileTreeItem> Item,
 	const TSharedRef<STableViewBase>& OwnerTable) const
@@ -307,6 +396,58 @@ void SVerseVisualEditor::GetTreeChildren(
 	TArray<TSharedPtr<FVerseFileTreeItem>>& OutChildren) const
 {
 	OutChildren = Item->Children;
+}
+
+TSharedRef<ITableRow> SVerseVisualEditor::GenerateOutlinerRow(
+	TSharedPtr<FVerseOutlinerItem> Item,
+	const TSharedRef<STableViewBase>& OwnerTable) const
+{
+	return SNew(STableRow<TSharedPtr<FVerseOutlinerItem>>, OwnerTable)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(0.0f, 0.0f, 5.0f, 0.0f)
+		[
+			SNew(SImage)
+			.Image(FAppStyle::GetBrush(GetVerseDefinitionIconName(Item->DefinitionKind)))
+			.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+		]
+		+ SHorizontalBox::Slot()
+		.FillWidth(1.0f)
+		.VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Item->Label))
+			.ToolTipText(FText::FromName(Item->DefinitionKind))
+		]
+	];
+}
+
+void SVerseVisualEditor::GetOutlinerChildren(
+	TSharedPtr<FVerseOutlinerItem> Item,
+	TArray<TSharedPtr<FVerseOutlinerItem>>& OutChildren) const
+{
+	OutChildren = Item->Children;
+}
+
+void SVerseVisualEditor::HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlinerItem> Item)
+{
+	if (!Item.IsValid()
+		|| !ActiveDocument.IsValid()
+		|| !ActiveDocument->Session.IsValid()
+		|| !ActiveDocument->TileCanvas.IsValid())
+	{
+		return;
+	}
+
+	if (const FVerseVisualTile* Tile = FindTileByRange(
+		ActiveDocument->Session->GetTiles(),
+		Item->TileRange))
+	{
+		ActiveDocument->TileCanvas->FocusTile(*Tile);
+	}
 }
 
 void SVerseVisualEditor::HandleTreeSelectionChanged(
@@ -1282,6 +1423,7 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 
 void SVerseVisualEditor::RefreshActiveDocument()
 {
+	RefreshOutliner();
 	if (!ActiveDocumentBox.IsValid())
 	{
 		return;

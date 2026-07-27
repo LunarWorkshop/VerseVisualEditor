@@ -1,6 +1,7 @@
 #include "SVerseTileCanvas.h"
 
 #include "VerseDocumentSession.h"
+#include "VerseDefinitionIcon.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
@@ -202,6 +203,7 @@ void SVerseTileCanvas::Construct(
 {
 	Snapshot.Emplace(InSession->GetParseSnapshot());
 	Tiles = InSession->GetTiles();
+	TileWidgets.Reset();
 	Diagnostics = InArgs._Diagnostics;
 	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
@@ -283,6 +285,51 @@ FVerseCanvasViewState SVerseTileCanvas::GetViewState() const
 		VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f);
 	ViewState.Zoom = Zoom;
 	return ViewState;
+}
+
+bool SVerseTileCanvas::FocusTile(const FVerseVisualTile& Tile)
+{
+	TSharedPtr<SWidget> WidgetToFocus;
+	int32 SmallestContainingRange = MAX_int32;
+	for (const FTileWidgetEntry& Entry : TileWidgets)
+	{
+		const bool bExact = Entry.Range == Tile.Range;
+		const bool bContains = Entry.Range.IsSet()
+			&& Tile.Range.IsSet()
+			&& Tile.Range.BeginByte >= Entry.Range.BeginByte
+			&& Tile.Range.EndByte() <= Entry.Range.EndByte();
+		if ((bExact || bContains) && Entry.Range.NumBytes < SmallestContainingRange)
+		{
+			if (const TSharedPtr<SWidget> Candidate = Entry.Widget.Pin())
+			{
+				WidgetToFocus = Candidate;
+				SmallestContainingRange = Entry.Range.NumBytes;
+				if (bExact)
+				{
+					break;
+				}
+			}
+		}
+	}
+	if (!WidgetToFocus.IsValid())
+	{
+		return false;
+	}
+
+	Selection.Select(Tile.Range);
+	OnTileSelected.ExecuteIfBound(Tile);
+	HorizontalScrollBox->ScrollDescendantIntoView(
+		WidgetToFocus,
+		true,
+		EDescendantScrollDestination::Center,
+		20.0f);
+	VerticalScrollBox->ScrollDescendantIntoView(
+		WidgetToFocus,
+		true,
+		EDescendantScrollDestination::Center,
+		20.0f);
+	Invalidate(EInvalidateWidgetReason::Paint);
+	return true;
 }
 
 int32 SVerseTileCanvas::OnPaint(
@@ -479,7 +526,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileSequence(
 		const int32 DiagnosticTileIndex = SharedDiagnosticTileIndex == INDEX_NONE
 			? TileIndex
 			: SharedDiagnosticTileIndex;
-		TSharedRef<SWidget> Presentation = BuildTile(TilesToBuild[TileIndex], DiagnosticTileIndex);
+		TSharedRef<SWidget> Presentation = SNullWidget::NullWidget;
 		if (BelongsInCompactStack(TilesToBuild[TileIndex]))
 		{
 			TSharedRef<SVerticalBox> CompactStack = SNew(SVerticalBox);
@@ -500,6 +547,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileSequence(
 		}
 		else
 		{
+			Presentation = BuildTile(TilesToBuild[TileIndex], DiagnosticTileIndex);
 			++TileIndex;
 		}
 
@@ -532,7 +580,11 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile, in
 	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
 		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
 			|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias);
-	return bCompactDefinition ? BuildCompactTile(Tile, TileIndex) : BuildStructuralTile(Tile, TileIndex);
+	TSharedRef<SWidget> Widget = bCompactDefinition
+		? BuildCompactTile(Tile, TileIndex)
+		: BuildStructuralTile(Tile, TileIndex);
+	TileWidgets.Add({Tile.Range, Widget});
+	return Widget;
 }
 
 TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
@@ -581,14 +633,8 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		TSharedRef<SVerticalBox> FunctionBody = SNew(SVerticalBox);
 		FunctionBody->AddSlot()
 		.AutoHeight()
-		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 		[
 			BuildFunctionSignature(Tile)
-		];
-		FunctionBody->AddSlot()
-		.AutoHeight()
-		[
-			BuildTileSequence(Tile.Children, TileIndex, false)
 		];
 		BodyContent = FunctionBody;
 	}
@@ -605,7 +651,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
 			.IsSelected_Lambda([this, Range = Tile.Range]()
 			{
-				return Selection.IsSelected(Range);
+				return IsTileSelected(Range);
 			})
 			.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
 			.HeaderContent()
@@ -614,10 +660,28 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
-					SNew(STextBlock)
-					.Text(KindText)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-					.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 5.0f, 0.0f)
+					[
+						SNew(SImage)
+						.Visibility(bDefinition ? EVisibility::Visible : EVisibility::Collapsed)
+						.Image(bDefinition
+							? FAppStyle::GetBrush(GetVerseDefinitionIconName(Tile.DefinitionKind))
+							: nullptr)
+						.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(KindText)
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+						.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
+					]
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -779,7 +843,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.ArrowPadding(FMargin(4.0f, 3.0f, 3.0f, 0.0f))
 		.IsSelected_Lambda([this, Range = Tile.Range]()
 		{
-			return Selection.IsSelected(Range);
+			return IsTileSelected(Range);
 		})
 		.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
 		.HeaderContent()
@@ -791,7 +855,17 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
-				.Padding(2.0f, 0.0f, 10.0f, 0.0f)
+				.VAlign(VAlign_Center)
+				.Padding(2.0f, 0.0f, 5.0f, 0.0f)
+				[
+					SNew(SImage)
+					.Image(FAppStyle::GetBrush(GetVerseDefinitionIconName(Tile.DefinitionKind)))
+					.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 10.0f, 0.0f)
 				[
 					SNew(STextBlock)
 					.Text(KindText)
@@ -909,6 +983,21 @@ bool SVerseTileCanvas::HasDiagnosticForTile(int32 TileIndex) const
 	{
 		return Diagnostic.AffectedTileIndices.Contains(TileIndex);
 	});
+}
+
+bool SVerseTileCanvas::IsTileSelected(FVerseTextRange TileRange) const
+{
+	const TOptional<FVerseTextRange>& Selected = Selection.GetSelectedRange();
+	if (!Selected.IsSet())
+	{
+		return false;
+	}
+	const FVerseTextRange& SelectedRange = Selected.GetValue();
+	return SelectedRange.IsSet()
+		&& TileRange.IsSet()
+		&& SelectedRange.Revision == TileRange.Revision
+		&& SelectedRange.BeginByte == TileRange.BeginByte
+		&& SelectedRange.NumBytes == TileRange.NumBytes;
 }
 
 FReply SVerseTileCanvas::SelectTile(FVerseVisualTile Tile)

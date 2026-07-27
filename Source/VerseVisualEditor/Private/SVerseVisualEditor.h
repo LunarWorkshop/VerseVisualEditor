@@ -6,6 +6,7 @@
 #include "VerseCompilation.h"
 #include "VerseDocumentRevision.h"
 #include "VerseEditorFileTree.h"
+#include "VerseOutliner.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/STreeView.h"
 
@@ -53,12 +54,20 @@ public:
 
 private:
 	void RefreshFileTree();
+	void RefreshOutliner();
 	TSharedRef<ITableRow> GenerateTreeRow(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		const TSharedRef<STableViewBase>& OwnerTable) const;
 	void GetTreeChildren(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		TArray<TSharedPtr<FVerseFileTreeItem>>& OutChildren) const;
+	TSharedRef<ITableRow> GenerateOutlinerRow(
+		TSharedPtr<FVerseOutlinerItem> Item,
+		const TSharedRef<STableViewBase>& OwnerTable) const;
+	void GetOutlinerChildren(
+		TSharedPtr<FVerseOutlinerItem> Item,
+		TArray<TSharedPtr<FVerseOutlinerItem>>& OutChildren) const;
+	void HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlinerItem> Item);
 	void HandleTreeSelectionChanged(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		ESelectInfo::Type SelectInfo);
@@ -141,6 +150,8 @@ private:
 	TArray<FVerseSourceRoot> SourceRoots;
 	TArray<TSharedPtr<FVerseFileTreeItem>> RootItems;
 	TSharedPtr<STreeView<TSharedPtr<FVerseFileTreeItem>>> FileTree;
+	TArray<TSharedPtr<FVerseOutlinerItem>> OutlinerRootItems;
+	TSharedPtr<STreeView<TSharedPtr<FVerseOutlinerItem>>> OutlinerTree;
 
 	TArray<TSharedPtr<FOpenVerseDocument>> OpenDocuments;
 	TSharedPtr<FOpenVerseDocument> ActiveDocument;
