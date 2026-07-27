@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseTileProperties.h"
+#include "VerseTileSelection.h"
 #include "VerseVisualTile.h"
 
 #include "Interfaces/IPluginManager.h"
@@ -171,6 +173,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	int32 ModuleOneLastLine = INDEX_NONE;
 	int32 ModuleTwoFirstLine = INDEX_NONE;
 	int32 ModuleTwoLastLine = INDEX_NONE;
+	const FVerseVisualTile* ModuleOneTile = nullptr;
 	TArray<const FVerseVisualTile*> Comments;
 	for (const FVerseVisualTile& Tile : Tiles)
 	{
@@ -180,6 +183,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 			const FString Name = Document->DecodeOriginalRange(Tile.NameRange);
 			if (Name == TEXT("CorpusModuleOne"))
 			{
+				ModuleOneTile = &Tile;
 				ModuleOneFirstLine = Tile.FirstSourceLine;
 				ModuleOneLastLine = Tile.LastSourceLine;
 			}
@@ -219,6 +223,40 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Single-line module ends on line 5"), ModuleOneLastLine, 5);
 	TestEqual(TEXT("Multi-line module starts on line 6"), ModuleTwoFirstLine, 6);
 	TestEqual(TEXT("Multi-line module ends on line 22"), ModuleTwoLastLine, 22);
+	if (TestNotNull(TEXT("Single-line module tile is available for selection and properties"), ModuleOneTile))
+	{
+		FVerseTileSelection Selection;
+		Selection.Select(ModuleOneTile->Range);
+		TestTrue(TEXT("Selected module is the only selected tile"), Selection.IsSelected(ModuleOneTile->Range));
+		Selection.Select(Tiles.Last().Range);
+		TestFalse(TEXT("Selecting another tile replaces the previous selection"), Selection.IsSelected(ModuleOneTile->Range));
+		TestTrue(TEXT("Replacement tile is selected"), Selection.IsSelected(Tiles.Last().Range));
+		Selection.Clear();
+		TestFalse(TEXT("Clearing selection leaves no tile selected"), Selection.GetSelectedRange().IsSet());
+
+		const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*ModuleOneTile, Snapshot);
+		auto FindProperty = [&Properties](const TCHAR* Name) -> const FVerseTileProperty*
+		{
+			return Properties.FindByPredicate([Name](const FVerseTileProperty& Property)
+			{
+				return Property.Name == Name;
+			});
+		};
+		const FVerseTileProperty* NameProperty = FindProperty(TEXT("Name"));
+		const FVerseTileProperty* LinesProperty = FindProperty(TEXT("Lines"));
+		TestTrue(
+			TEXT("Definition properties expose the original name"),
+			NameProperty && NameProperty->Value == TEXT("CorpusModuleOne"));
+		TestTrue(
+			TEXT("Definition properties expose its source lines"),
+			LinesProperty && LinesProperty->Value == TEXT("L5"));
+		TestTrue(
+			TEXT("Property filter matches values case-insensitively"),
+			NameProperty && FVerseTileProperties::MatchesFilter(*NameProperty, TEXT("moduleone")));
+		TestFalse(
+			TEXT("Property filter rejects unrelated text"),
+			NameProperty && FVerseTileProperties::MatchesFilter(*NameProperty, TEXT("not present")));
+	}
 	if (TestEqual(TEXT("Comment stack has a line group and a block comment"), Comments.Num(), 2))
 	{
 		const FUtf8StringView LineGroup = Snapshot.GetSourceView(Comments[0]->BodyRange);

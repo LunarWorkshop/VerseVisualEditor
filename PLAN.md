@@ -34,6 +34,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
   a scrollable, pannable, bounded-zoom graph.
 - Original-source line ranges: complete; every tile displays its one-based
   source line or inclusive line range beneath its expansion arrow.
+- Single-tile selection and properties: complete; selected tiles receive a
+  bright gold outline and expose filterable read-only properties in a persistent
+  panel.
 - Subsequent visual editing steps: pending.
 
 ## Architecture
@@ -242,10 +245,20 @@ This step delivers the first read-only visual representation of Verse source.
 - Defer updating line information after localized edits to Step 5.1, where
   current document revisions first exist.
 
-### 4. Selection and properties
+### 4. Selection and properties (complete)
 
-- Add single-tile selection.
-- Add the properties panel and property filter.
+- Add single-tile selection, retained independently for each open document.
+- Indicate the selected tile with a bright golden-yellow outline while
+  retaining the normal structural-tile outline when it is not selected.
+- Select from the tile header and restrict expansion and collapse to the
+  disclosure arrow itself.
+- Show the selected tile in a Blueprint-style, closable **Details** tab. Keep
+  an open tab empty when selection is cleared, and reopen it when a tile is
+  selected after the tab was closed.
+- Expose tile kind, definition metadata, comment style, and source lines as
+  read-only properties with a case-insensitive property filter.
+- Test replacement-style single selection, selection clearing, property
+  generation, and property filtering.
 
 Do not add edit transactions or selection-history snapshots until Step 5.
 

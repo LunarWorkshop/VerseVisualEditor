@@ -8,8 +8,13 @@
 
 struct FFileChangeData;
 struct FOpenVerseDocument;
+struct FVerseVisualTile;
+class SBorder;
 class SBox;
+class SDockTab;
 class SHorizontalBox;
+class SSearchBox;
+class SVerticalBox;
 
 class SVerseVisualEditor final : public SCompoundWidget
 {
@@ -56,6 +61,15 @@ private:
 	FReply CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	void RebuildDocumentTabs();
 	void RefreshActiveDocument();
+	void HandleTileSelected(
+		const FVerseVisualTile& Tile,
+		TSharedPtr<FOpenVerseDocument> OpenDocument);
+	void HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocument> OpenDocument);
+	void HandlePropertyFilterChanged(const FText& FilterText);
+	void HandleDetailsTabClosed(TSharedRef<SDockTab> ClosedTab);
+	void OpenDetailsTab();
+	TSharedRef<SWidget> BuildDetailsPanel();
+	void RebuildProperties();
 	void CaptureActiveScrollOffset();
 	void LoadSession();
 	void SaveSession();
@@ -73,6 +87,11 @@ private:
 	TSharedPtr<FOpenVerseDocument> ActiveDocument;
 	TSharedPtr<SHorizontalBox> DocumentTabBar;
 	TSharedPtr<SBox> ActiveDocumentBox;
+	TSharedPtr<SBox> DetailsPanelHost;
+	TSharedPtr<SDockTab> DetailsTab;
+	TSharedPtr<SSearchBox> PropertyFilter;
+	TSharedPtr<SVerticalBox> PropertyRows;
+	FString PropertyFilterText;
 
 	FString WatchedDirectory;
 	FDelegateHandle DirectoryWatcherHandle;

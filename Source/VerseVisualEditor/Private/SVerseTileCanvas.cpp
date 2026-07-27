@@ -6,9 +6,10 @@
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -31,14 +32,150 @@ namespace
 				&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
 					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias));
 	}
+
+	class SVerseTileContainer final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseTileContainer)
+			: _TileColor(FLinearColor::White)
+			, _UnselectedOutlineColor(FLinearColor::Transparent)
+			, _HeaderPadding(FMargin(0.0f))
+			, _ArrowPadding(FMargin(0.0f))
+			, _IsSelected(false)
+		{}
+			SLATE_ARGUMENT(FLinearColor, TileColor)
+			SLATE_ARGUMENT(FLinearColor, UnselectedOutlineColor)
+			SLATE_ARGUMENT(FMargin, HeaderPadding)
+			SLATE_ARGUMENT(FMargin, ArrowPadding)
+			SLATE_ATTRIBUTE(bool, IsSelected)
+			SLATE_EVENT(FOnClicked, OnSelected)
+			SLATE_NAMED_SLOT(FArguments, HeaderContent)
+			SLATE_NAMED_SLOT(FArguments, BodyContent)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			IsSelected = InArgs._IsSelected;
+			UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
+			ChildSlot
+			[
+				SNew(SBorder)
+				.OnMouseButtonDown(this, &SVerseTileContainer::HandleTileMouseButtonDown)
+				.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(this, &SVerseTileContainer::GetOutlineColor)
+				.Padding(2.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SBorder)
+						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+						.BorderBackgroundColor(InArgs._TileColor)
+						.Padding(0.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Top)
+							.Padding(InArgs._ArrowPadding)
+							[
+								SNew(SButton)
+								.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+								.ContentPadding(0.0f)
+								.OnClicked(this, &SVerseTileContainer::ToggleExpanded)
+								[
+									SNew(SImage)
+									.Image(this, &SVerseTileContainer::GetExpansionImage)
+								]
+							]
+							+ SHorizontalBox::Slot()
+							.FillWidth(1.0f)
+							[
+								SNew(SButton)
+								.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+								.ContentPadding(InArgs._HeaderPadding)
+								.OnClicked(InArgs._OnSelected)
+								.HAlign(HAlign_Fill)
+								[
+									InArgs._HeaderContent.Widget
+								]
+							]
+						]
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SBorder)
+						.Visibility(this, &SVerseTileContainer::GetBodyVisibility)
+						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+						.BorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
+						.Padding(0.0f)
+						[
+							InArgs._BodyContent.Widget
+						]
+					]
+				]
+			];
+		}
+
+	private:
+		FReply HandleTileMouseButtonDown(
+			const FGeometry& MyGeometry,
+			const FPointerEvent& MouseEvent)
+		{
+			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+				? FReply::Handled()
+				: FReply::Unhandled();
+		}
+
+		FReply ToggleExpanded()
+		{
+			bExpanded = !bExpanded;
+			Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
+			return FReply::Handled();
+		}
+
+		const FSlateBrush* GetExpansionImage() const
+		{
+			return FCoreStyle::Get().GetBrush(bExpanded
+				? "TreeArrow_Expanded"
+				: "TreeArrow_Collapsed");
+		}
+
+		EVisibility GetBodyVisibility() const
+		{
+			return bExpanded ? EVisibility::Visible : EVisibility::Collapsed;
+		}
+
+		FSlateColor GetOutlineColor() const
+		{
+			return IsSelected.Get(false)
+				? FLinearColor(1.0f, 0.82f, 0.05f, 1.0f)
+				: UnselectedOutlineColor;
+		}
+
+		TAttribute<bool> IsSelected;
+		FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
+		bool bExpanded = true;
+	};
 }
 
 void SVerseTileCanvas::Construct(
 	const FArguments& InArgs,
 	FVerseParseSnapshot InSnapshot,
-	float InitialVerticalScrollOffset)
+	float InitialVerticalScrollOffset,
+	TOptional<FVerseByteRange> InitialSelectedRange,
+	FOnVerseTileSelected InOnTileSelected,
+	FSimpleDelegate InOnSelectionCleared)
 {
 	Snapshot.Emplace(MoveTemp(InSnapshot));
+	OnTileSelected = MoveTemp(InOnTileSelected);
+	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
+	if (InitialSelectedRange.IsSet())
+	{
+		Selection.Select(InitialSelectedRange.GetValue());
+	}
 	HorizontalScrollbar = SNew(SScrollBar).Orientation(Orient_Horizontal);
 	VerticalScrollbar = SNew(SScrollBar).Orientation(Orient_Vertical);
 
@@ -173,6 +310,21 @@ FReply SVerseTileCanvas::OnPreviewMouseButtonDown(
 	return FReply::Handled()
 		.CaptureMouse(SharedThis(this))
 		.UseHighPrecisionMouseMovement(SharedThis(this));
+}
+
+FReply SVerseTileCanvas::OnMouseButtonDown(
+	const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+
+	Selection.Clear();
+	OnSelectionCleared.ExecuteIfBound();
+	Invalidate(EInvalidateWidgetReason::Paint);
+	return FReply::Handled();
 }
 
 FReply SVerseTileCanvas::OnMouseButtonUp(
@@ -358,19 +510,16 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 	return SNew(SBox)
 		.MaxDesiredWidth(720.0f)
 		[
-		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.BorderBackgroundColor(TileColor)
-		.Padding(2.0f)
-		[
-			SNew(SExpandableArea)
-			.InitiallyCollapsed(false)
-			.AllowAnimatedTransition(false)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.BorderBackgroundColor(TileColor)
-			.BodyBorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
-			.HeaderPadding(FMargin(8.0f, 6.0f))
-			.AreaTitlePadding(FMargin(0.0f, 0.0f, 3.0f, 12.0f))
+			SNew(SVerseTileContainer)
+			.TileColor(TileColor)
+			.UnselectedOutlineColor(TileColor)
+			.HeaderPadding(FMargin(0.0f, 6.0f, 8.0f, 6.0f))
+			.ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
+			.IsSelected_Lambda([this, Range = Tile.Range]()
+			{
+				return Selection.IsSelected(Range);
+			})
+			.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
 			.HeaderContent()
 			[
 				SNew(SVerticalBox)
@@ -422,7 +571,6 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 					.AutoWrapText(true)
 				]
 			]
-		]
 		];
 }
 
@@ -432,14 +580,18 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 	const FText NameText = Decode(Tile.NameRange);
 	const FText TypeText = Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
 
-	return SNew(SExpandableArea)
-		.InitiallyCollapsed(false)
-		.AllowAnimatedTransition(false)
-		.MinWidth(420.0f)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.BorderBackgroundColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
-		.BodyBorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
-		.AreaTitlePadding(FMargin(0.0f, 0.0f, 3.0f, 12.0f))
+	return SNew(SBox)
+		.MinDesiredWidth(420.0f)
+		[
+		SNew(SVerseTileContainer)
+		.TileColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
+		.HeaderPadding(FMargin(0.0f, 2.0f, 4.0f, 2.0f))
+		.ArrowPadding(FMargin(4.0f, 3.0f, 3.0f, 0.0f))
+		.IsSelected_Lambda([this, Range = Tile.Range]()
+		{
+			return Selection.IsSelected(Range);
+		})
+		.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
 		.HeaderContent()
 		[
 			SNew(SVerticalBox)
@@ -494,6 +646,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 				.Text(Decode(Tile.Range))
 				.IsReadOnly(true)
 			]
+		]
 		];
 }
 
@@ -514,6 +667,14 @@ FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
 	return FText::FromString(Tile.FirstSourceLine == Tile.LastSourceLine
 		? FString::Printf(TEXT("L%d"), Tile.FirstSourceLine)
 		: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine));
+}
+
+FReply SVerseTileCanvas::SelectTile(FVerseVisualTile Tile)
+{
+	Selection.Select(Tile.Range);
+	OnTileSelected.ExecuteIfBound(Tile);
+	Invalidate(EInvalidateWidgetReason::Paint);
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

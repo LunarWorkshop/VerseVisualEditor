@@ -21,12 +21,17 @@
 #include "Styling/CoreStyle.h"
 #include "VerseDocument.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseTileProperties.h"
+#include "VerseVisualTile.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
@@ -40,6 +45,7 @@ struct FOpenVerseDocument
 	bool bIsTemporary = false;
 	float ScrollOffset = 0.0f;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
+	TOptional<FVerseVisualTile> SelectedTile;
 };
 
 namespace
@@ -92,7 +98,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 	[
 		SNew(SSplitter)
 		+ SSplitter::Slot()
-		.Value(0.25f)
+		.Value(0.22f)
 		[
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -139,7 +145,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 			]
 		]
 		+ SSplitter::Slot()
-		.Value(0.75f)
+		.Value(0.58f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
@@ -153,11 +159,19 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 				SAssignNew(ActiveDocumentBox, SBox)
 			]
 		]
+		+ SSplitter::Slot()
+		.Value(0.20f)
+		[
+			SAssignNew(DetailsPanelHost, SBox)
+		]
 	];
+
+	OpenDetailsTab();
 
 	LoadSession();
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
+	RebuildProperties();
 	RevealActiveDocumentInTree();
 	RegisterDirectoryWatcher();
 }
@@ -414,6 +428,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	OpenDocument->ParseSnapshot = FVerseParseSnapshotBuilder::Build(LoadedDocument.ToSharedRef());
 	OpenDocument->Document = MoveTemp(LoadedDocument);
 	OpenDocument->LoadError = FText::GetEmpty();
+	OpenDocument->SelectedTile.Reset();
 	return true;
 }
 
@@ -528,6 +543,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 
 	if (!ActiveDocument.IsValid())
 	{
+		RebuildProperties();
 		ActiveDocumentBox->SetContent(
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -541,6 +557,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 
 	const TWeakPtr<FOpenVerseDocument> WeakDocument = ActiveDocument;
+	const TOptional<FVerseByteRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
+		? TOptional<FVerseByteRange>(ActiveDocument->SelectedTile->Range)
+		: TOptional<FVerseByteRange>();
 	ActiveDocumentBox->SetContent(
 		SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
@@ -572,9 +591,197 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					ActiveDocument->TileCanvas,
 					SVerseTileCanvas,
 					ActiveDocument->ParseSnapshot.GetValue(),
-					ActiveDocument->ScrollOffset)
+					ActiveDocument->ScrollOffset,
+					InitialSelectedRange,
+					FOnVerseTileSelected::CreateSP(
+						this,
+						&SVerseVisualEditor::HandleTileSelected,
+						ActiveDocument),
+					FSimpleDelegate::CreateSP(
+						this,
+						&SVerseVisualEditor::HandleTileSelectionCleared,
+						ActiveDocument))
 			]
 		]);
+	RebuildProperties();
+}
+
+void SVerseVisualEditor::HandleTileSelected(
+	const FVerseVisualTile& Tile,
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (!OpenDocument.IsValid())
+	{
+		return;
+	}
+
+	OpenDocument->SelectedTile = Tile;
+	if (OpenDocument == ActiveDocument)
+	{
+		OpenDetailsTab();
+		RebuildProperties();
+	}
+}
+
+void SVerseVisualEditor::HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (!OpenDocument.IsValid())
+	{
+		return;
+	}
+
+	OpenDocument->SelectedTile.Reset();
+	if (OpenDocument == ActiveDocument)
+	{
+		RebuildProperties();
+	}
+}
+
+void SVerseVisualEditor::HandlePropertyFilterChanged(const FText& FilterText)
+{
+	PropertyFilterText = FilterText.ToString();
+	RebuildProperties();
+}
+
+void SVerseVisualEditor::HandleDetailsTabClosed(TSharedRef<SDockTab> ClosedTab)
+{
+	if (DetailsTab == ClosedTab)
+	{
+		DetailsPanelHost->SetContent(SNullWidget::NullWidget);
+		DetailsPanelHost->SetVisibility(EVisibility::Collapsed);
+		DetailsTab.Reset();
+		PropertyFilter.Reset();
+		PropertyRows.Reset();
+	}
+}
+
+void SVerseVisualEditor::OpenDetailsTab()
+{
+	if (DetailsTab.IsValid() || !DetailsPanelHost.IsValid())
+	{
+		return;
+	}
+	DetailsPanelHost->SetVisibility(EVisibility::Visible);
+
+	TSharedRef<SDockTab> NewDetailsTab =
+		SAssignNew(DetailsTab, SDockTab)
+		.TabRole(ETabRole::PanelTab)
+		.Label(LOCTEXT("DetailsTabLabel", "Details"))
+		.CanEverClose(true)
+		.OnTabClosed(this, &SVerseVisualEditor::HandleDetailsTabClosed);
+	NewDetailsTab->SetTabIcon(FAppStyle::GetBrush("LevelEditor.Tabs.Details"));
+
+	DetailsPanelHost->SetContent(
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			NewDetailsTab
+		]
+		+ SVerticalBox::Slot()
+		.FillHeight(1.0f)
+		[
+			BuildDetailsPanel()
+		]);
+
+	RebuildProperties();
+}
+
+TSharedRef<SWidget> SVerseVisualEditor::BuildDetailsPanel()
+{
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(8.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SAssignNew(PropertyFilter, SSearchBox)
+				.InitialText(FText::FromString(PropertyFilterText))
+				.HintText(LOCTEXT("PropertyFilterHint", "Filter properties"))
+				.OnTextChanged(this, &SVerseVisualEditor::HandlePropertyFilterChanged)
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			[
+				SNew(SScrollBox)
+				+ SScrollBox::Slot()
+				[
+					SAssignNew(PropertyRows, SVerticalBox)
+				]
+			]
+		];
+}
+
+void SVerseVisualEditor::RebuildProperties()
+{
+	if (!PropertyRows.IsValid())
+	{
+		return;
+	}
+
+	PropertyRows->ClearChildren();
+	if (!ActiveDocument.IsValid()
+		|| !ActiveDocument->SelectedTile.IsSet()
+		|| !ActiveDocument->ParseSnapshot.IsSet())
+	{
+		return;
+	}
+
+	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(
+		ActiveDocument->SelectedTile.GetValue(),
+		ActiveDocument->ParseSnapshot.GetValue());
+	int32 VisiblePropertyCount = 0;
+	for (const FVerseTileProperty& Property : Properties)
+	{
+		if (!FVerseTileProperties::MatchesFilter(Property, PropertyFilterText))
+		{
+			continue;
+		}
+
+		++VisiblePropertyCount;
+		PropertyRows->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.Padding(6.0f, 4.0f)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Property.Name))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Property.Value))
+					.AutoWrapText(true)
+				]
+			]
+		];
+	}
+
+	if (VisiblePropertyCount == 0)
+	{
+		PropertyRows->AddSlot()
+		.AutoHeight()
+		.Padding(4.0f)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("NoMatchingProperties", "No matching properties."))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		];
+	}
 }
 
 void SVerseVisualEditor::CaptureActiveScrollOffset()

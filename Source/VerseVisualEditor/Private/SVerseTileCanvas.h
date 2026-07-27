@@ -3,11 +3,15 @@
 #include "Input/CursorReply.h"
 #include "Input/Reply.h"
 #include "VerseParseSnapshot.h"
+#include "VerseTileSelection.h"
+#include "VerseVisualTile.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SScaleBox;
 class SScrollBar;
 class SScrollBox;
+
+DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
 
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
 class SVerseTileCanvas final : public SCompoundWidget
@@ -19,7 +23,10 @@ public:
 	void Construct(
 		const FArguments& InArgs,
 		FVerseParseSnapshot InSnapshot,
-		float InitialVerticalScrollOffset);
+		float InitialVerticalScrollOffset,
+		TOptional<FVerseByteRange> InitialSelectedRange,
+		FOnVerseTileSelected InOnTileSelected,
+		FSimpleDelegate InOnSelectionCleared);
 
 	float GetVerticalScrollOffset() const;
 
@@ -32,6 +39,7 @@ public:
 		const FWidgetStyle& InWidgetStyle,
 		bool bParentEnabled) const override;
 	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
@@ -45,6 +53,7 @@ private:
 	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile);
 	FText Decode(FVerseByteRange Range) const;
 	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
+	FReply SelectTile(FVerseVisualTile Tile);
 
 	TOptional<FVerseParseSnapshot> Snapshot;
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
@@ -52,6 +61,9 @@ private:
 	TSharedPtr<SScrollBox> HorizontalScrollBox;
 	TSharedPtr<SScrollBox> VerticalScrollBox;
 	TSharedPtr<SScaleBox> ScaleBox;
+	FVerseTileSelection Selection;
+	FOnVerseTileSelected OnTileSelected;
+	FSimpleDelegate OnSelectionCleared;
 	float Zoom = 1.0f;
 	bool bIsPanning = false;
 	FVector2D SoftwareCursorPosition = FVector2D::ZeroVector;
