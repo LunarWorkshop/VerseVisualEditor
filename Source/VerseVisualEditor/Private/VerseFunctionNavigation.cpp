@@ -38,7 +38,23 @@ namespace
 					Item.ScopePath = ParentPath;
 					Item.ScopePath.Add(Name);
 					Item.FunctionRange = Tile.Range;
+					Item.DeclarationRange = Tile.HeaderRange;
 					Item.BodyRange = Tile.BodyRange;
+					Item.ReturnTypeRange = Tile.TypeRange;
+					for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
+					{
+						FVerseFunctionNavigationParameter& NavigationParameter =
+							Item.Parameters.AddDefaulted_GetRef();
+						NavigationParameter.NameRange = Parameter.NameRange;
+						NavigationParameter.TypeRange = Parameter.TypeRange;
+					}
+					if (Tile.HeaderRange.IsSet())
+					{
+						Item.FirstDeclarationLine = Snapshot.GetDocument()->GetOriginalLineNumber(
+							Tile.HeaderRange.BeginByte);
+						Item.LastDeclarationLine = Snapshot.GetDocument()->GetOriginalLineNumber(
+							FMath::Max(Tile.HeaderRange.BeginByte, Tile.HeaderRange.EndByte() - 1));
+					}
 				}
 			}
 

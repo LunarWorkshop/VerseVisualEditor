@@ -6,12 +6,23 @@
 class FVerseParseSnapshot;
 struct FVerseVisualTile;
 
+struct FVerseFunctionNavigationParameter
+{
+	FVerseTextRange NameRange;
+	FVerseTextRange TypeRange;
+};
+
 struct FVerseFunctionNavigationItem
 {
 	FString Name;
 	TArray<FString> ScopePath;
 	FVerseTextRange FunctionRange;
+	FVerseTextRange DeclarationRange;
 	FVerseTextRange BodyRange;
+	FVerseTextRange ReturnTypeRange;
+	TArray<FVerseFunctionNavigationParameter> Parameters;
+	int32 FirstDeclarationLine = INDEX_NONE;
+	int32 LastDeclarationLine = INDEX_NONE;
 };
 
 class FVerseFunctionNavigationBuilder

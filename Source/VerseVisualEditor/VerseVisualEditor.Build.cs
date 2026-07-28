@@ -16,6 +16,7 @@ public class VerseVisualEditor : ModuleRules
 			"DesktopPlatform",
 			"DeveloperSettings",
 			"Engine",
+			"GraphEditor",
 			"InputCore",
 			"MainFrame",
 			"Projects",

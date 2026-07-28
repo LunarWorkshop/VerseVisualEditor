@@ -113,6 +113,32 @@ bool FVerseOutlinerHierarchyTest::RunTest(const FString& Parameters)
 			TEXT("Function view range contains only its raw body"),
 			Snapshot.GetDocument()->DecodeOriginalRange(Functions[0].BodyRange).TrimStartAndEnd(),
 			FString(TEXT("Input + 1")));
+		TestTrue(
+			TEXT("Function entry retains its declaration range"),
+			Functions[0].DeclarationRange.IsSet());
+		TestEqual(
+			TEXT("One-line function declarations show one source line"),
+			Functions[0].FirstDeclarationLine,
+			Functions[0].LastDeclarationLine);
+		TestEqual(
+			TEXT("Return tile retains the function return type for its input socket"),
+			Snapshot.GetDocument()->DecodeOriginalRange(Functions[0].ReturnTypeRange),
+			FString(TEXT("int")));
+		TestEqual(
+			TEXT("Function navigation retains parameters for entry-tile output pins"),
+			Functions[0].Parameters.Num(),
+			1);
+		if (Functions[0].Parameters.Num() == 1)
+		{
+			TestEqual(
+				TEXT("Function output pin retains its parameter name"),
+				Snapshot.GetDocument()->DecodeOriginalRange(Functions[0].Parameters[0].NameRange),
+				FString(TEXT("Input")));
+			TestEqual(
+				TEXT("Function output pin retains its parameter type"),
+				Snapshot.GetDocument()->DecodeOriginalRange(Functions[0].Parameters[0].TypeRange),
+				FString(TEXT("int")));
+		}
 		TArray<FString> SelectedFunctionPath;
 		TestTrue(
 			TEXT("Selected definitions resolve their complete containing scope path"),
