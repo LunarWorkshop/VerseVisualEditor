@@ -3,6 +3,7 @@
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
+#include "VerseGraphBackground.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBar.h"
@@ -160,17 +161,37 @@ int32 SVerseGraphCanvas::OnPaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
+	const FGeometry& ScrollGeometry = VerticalScrollBox->GetCachedGeometry();
+	const FVector2D CanvasSize = ScrollGeometry.GetLocalSize();
+	const FPaintGeometry CanvasPaintGeometry = AllottedGeometry.ToPaintGeometry(
+		CanvasSize,
+		FSlateLayoutTransform(FVector2D::ZeroVector));
+	const FMargin PanPadding = GetPanPadding();
+	const FVector2D GraphOrigin(
+		PanPadding.Left - HorizontalScrollBox->GetScrollOffset(),
+		PanPadding.Top - VerticalScrollBox->GetScrollOffset());
+	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
+	PaintVerseGraphBackground(
+		CanvasPaintGeometry,
+		CanvasSize,
+		GraphOrigin,
+		Zoom,
+		OutDrawElements,
+		LayerId);
+	OutDrawElements.PopClip();
 	const int32 ContentLayer = SCompoundWidget::OnPaint(
-		Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+		Args,
+		AllottedGeometry,
+		MyCullingRect,
+		OutDrawElements,
+		LayerId + 2,
+		InWidgetStyle,
+		bParentEnabled);
 	if (!bIsPanning)
 	{
 		return ContentLayer;
 	}
 
-	const FVector2D CanvasSize = VerticalScrollBox->GetCachedGeometry().GetLocalSize();
-	const FPaintGeometry CanvasPaintGeometry = AllottedGeometry.ToPaintGeometry(
-		CanvasSize,
-		FSlateLayoutTransform(FVector2D::ZeroVector));
 	const FSlateBrush* CursorBrush = FAppStyle::GetBrush(TEXT("SoftwareCursor_Grab"));
 	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
 	FSlateDrawElement::MakeBox(

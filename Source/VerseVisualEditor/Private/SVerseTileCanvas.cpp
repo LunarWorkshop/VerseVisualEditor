@@ -2,6 +2,7 @@
 
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
+#include "VerseGraphBackground.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
@@ -396,12 +397,28 @@ int32 SVerseTileCanvas::OnPaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
+	const FGeometry& ScrollGeometry = VerticalScrollBox->GetCachedGeometry();
+	const FVector2D CanvasSize = ScrollGeometry.GetLocalSize();
+	const FPaintGeometry CanvasPaintGeometry = AllottedGeometry.ToPaintGeometry(
+		CanvasSize,
+		FSlateLayoutTransform(FVector2D::ZeroVector));
+	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
+	PaintVerseGraphBackground(
+		CanvasPaintGeometry,
+		CanvasSize,
+		FVector2D(
+			-HorizontalScrollBox->GetScrollOffset(),
+			-VerticalScrollBox->GetScrollOffset()),
+		Zoom,
+		OutDrawElements,
+		LayerId);
+	OutDrawElements.PopClip();
 	const int32 ContentLayer = SCompoundWidget::OnPaint(
 		Args,
 		AllottedGeometry,
 		MyCullingRect,
 		OutDrawElements,
-		LayerId,
+		LayerId + 2,
 		InWidgetStyle,
 		bParentEnabled);
 	if (!bIsPanning)
@@ -409,10 +426,6 @@ int32 SVerseTileCanvas::OnPaint(
 		return ContentLayer;
 	}
 
-	const FVector2D CanvasSize = VerticalScrollBox->GetCachedGeometry().GetLocalSize();
-	const FPaintGeometry CanvasPaintGeometry = AllottedGeometry.ToPaintGeometry(
-		CanvasSize,
-		FSlateLayoutTransform(FVector2D::ZeroVector));
 	const FSlateBrush* CursorBrush = FAppStyle::GetBrush(TEXT("SoftwareCursor_Grab"));
 	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
 	FSlateDrawElement::MakeBox(
