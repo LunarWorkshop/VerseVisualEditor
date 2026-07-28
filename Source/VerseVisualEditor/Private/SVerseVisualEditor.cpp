@@ -283,28 +283,6 @@ namespace
 				: "Graph.Pin.Disconnected");
 	}
 
-	FString GetExpressionSourceLine(
-		const FVerseDocument& Document,
-		const FVerseTextRange& ExpressionRange)
-	{
-		const FUtf8StringView Source = Document.GetOriginalUtf8View();
-		int32 Begin = FMath::Clamp(ExpressionRange.BeginByte, 0, Source.Len());
-		int32 End = FMath::Clamp(ExpressionRange.EndByte(), Begin, Source.Len());
-		while (Begin > 0
-			&& Source[Begin - 1] != static_cast<UTF8CHAR>('\n')
-			&& Source[Begin - 1] != static_cast<UTF8CHAR>('\r'))
-		{
-			--Begin;
-		}
-		while (End < Source.Len()
-			&& Source[End] != static_cast<UTF8CHAR>('\n')
-			&& Source[End] != static_cast<UTF8CHAR>('\r'))
-		{
-			++End;
-		}
-		return Document.DecodeOriginalRange(FVerseByteRange::FromBounds(Begin, End)).TrimStartAndEnd();
-	}
-
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
@@ -328,7 +306,7 @@ namespace
 				.Padding(FMargin(10.0f, 7.0f))
 				[
 					SNew(STextBlock)
-					.Text(FText::FromString(GetExpressionSourceLine(*Document, Tile.Range)))
+					.Text(FText::FromString(Document->DecodeOriginalRange(Tile.Range)))
 					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
 				];
 		}
