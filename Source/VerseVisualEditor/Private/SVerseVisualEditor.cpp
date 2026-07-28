@@ -1,5 +1,6 @@
 #include "SVerseVisualEditor.h"
 
+#include "SVerseGraphCanvas.h"
 #include "SVerseTileCanvas.h"
 
 #include "Async/Async.h"
@@ -67,6 +68,9 @@ struct FOpenVerseFunctionTab
 	TArray<FVerseFunctionNavigationParameter> Parameters;
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
+	FVerseCanvasViewState ViewState;
+	TSharedPtr<SVerseGraphCanvas> Canvas;
+	bool bHasViewState = false;
 };
 
 struct FOpenVerseDocument
@@ -1051,6 +1055,10 @@ void SVerseVisualEditor::OpenFunctionView(
 	{
 		return;
 	}
+	if (OpenDocument == ActiveDocument)
+	{
+		CaptureActiveCanvasView();
+	}
 
 	const int32 ExistingIndex = OpenDocument->FunctionTabs.IndexOfByPredicate(
 		[Item](const FOpenVerseFunctionTab& Tab)
@@ -1085,6 +1093,10 @@ FReply SVerseVisualEditor::ActivateGlobalView(TSharedPtr<FOpenVerseDocument> Ope
 {
 	if (OpenDocument.IsValid())
 	{
+		if (OpenDocument == ActiveDocument)
+		{
+			CaptureActiveCanvasView();
+		}
 		OpenDocument->ActiveFunctionTabIndex = INDEX_NONE;
 		if (OpenDocument == ActiveDocument)
 		{
@@ -1100,6 +1112,10 @@ FReply SVerseVisualEditor::ActivateFunctionView(
 {
 	if (OpenDocument.IsValid() && OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
 	{
+		if (OpenDocument == ActiveDocument)
+		{
+			CaptureActiveCanvasView();
+		}
 		OpenDocument->ActiveFunctionTabIndex = FunctionTabIndex;
 		if (OpenDocument == ActiveDocument)
 		{
@@ -1116,6 +1132,10 @@ FReply SVerseVisualEditor::CloseFunctionView(
 	if (!OpenDocument.IsValid() || !OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
 	{
 		return FReply::Handled();
+	}
+	if (OpenDocument == ActiveDocument)
+	{
+		CaptureActiveCanvasView();
 	}
 
 	OpenDocument->FunctionTabs.RemoveAt(FunctionTabIndex);
@@ -2297,57 +2317,63 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	TSharedRef<SWidget> ActiveView = SNullWidget::NullWidget;
 	if (ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
 	{
-		const FOpenVerseFunctionTab& FunctionTab =
+		FOpenVerseFunctionTab& FunctionTab =
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
 		ActiveDocument->TileCanvas.Reset();
-		ActiveView = SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(10.0f)
+		TSharedPtr<SWidget> FunctionEntryAnchor;
+		TSharedRef<SWidget> FunctionContent =
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
 			[
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
+				SAssignNew(FunctionEntryAnchor, SBox)
 				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.HAlign(HAlign_Left)
-					[
-						BuildFunctionEntryTile(
-							FunctionTab,
-							*ActiveDocument->Session->GetParseSnapshot().GetDocument())
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Fill)
-						[
-							SNew(SVerseExecutionWire)
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Top)
-						.Padding(8.0f, 8.0f, 0.0f, 8.0f)
-						[
-							SNew(SMultiLineEditableText)
-							.Text(FunctionTab.BodyRange.IsSet()
-								? FText::FromString(ActiveDocument->Session->GetParseSnapshot()
-									.GetDocument()->DecodeOriginalRange(FunctionTab.BodyRange))
-								: FText::GetEmpty())
-							.IsReadOnly(true)
-						]
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.HAlign(HAlign_Left)
-					[
-						BuildReturnTile(
-							FunctionTab,
-							*ActiveDocument->Session->GetParseSnapshot().GetDocument())
-					]
+					BuildFunctionEntryTile(
+						FunctionTab,
+						*ActiveDocument->Session->GetParseSnapshot().GetDocument())
 				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Fill)
+				[
+					SNew(SVerseExecutionWire)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Top)
+				.Padding(8.0f, 8.0f, 0.0f, 8.0f)
+				[
+					SNew(SMultiLineEditableText)
+					.Text(FunctionTab.BodyRange.IsSet()
+						? FText::FromString(ActiveDocument->Session->GetParseSnapshot()
+							.GetDocument()->DecodeOriginalRange(FunctionTab.BodyRange))
+						: FText::GetEmpty())
+					.IsReadOnly(true)
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			[
+				BuildReturnTile(
+					FunctionTab,
+					*ActiveDocument->Session->GetParseSnapshot().GetDocument())
+			];
+
+		ActiveView = SAssignNew(
+			FunctionTab.Canvas,
+			SVerseGraphCanvas,
+			FunctionTab.ViewState,
+			!FunctionTab.bHasViewState)
+			.InitialAnchor(FunctionEntryAnchor)
+			[
+				FunctionContent
 			];
 	}
 	else
@@ -2835,7 +2861,22 @@ void SVerseVisualEditor::RebuildProperties()
 
 void SVerseVisualEditor::CaptureActiveCanvasView()
 {
-	if (ActiveDocument.IsValid() && ActiveDocument->TileCanvas.IsValid())
+	if (!ActiveDocument.IsValid())
+	{
+		return;
+	}
+	if (ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
+	{
+		FOpenVerseFunctionTab& FunctionTab =
+			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+		if (FunctionTab.Canvas.IsValid())
+		{
+			FunctionTab.ViewState = FunctionTab.Canvas->GetViewState();
+			FunctionTab.bHasViewState = true;
+			FunctionTab.Canvas.Reset();
+		}
+	}
+	else if (ActiveDocument->TileCanvas.IsValid())
 	{
 		ActiveDocument->ViewState = ActiveDocument->TileCanvas->GetViewState();
 		ActiveDocument->TileCanvas.Reset();

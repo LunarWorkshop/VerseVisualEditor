@@ -2,6 +2,7 @@
 
 #include "Input/CursorReply.h"
 #include "Input/Reply.h"
+#include "VerseCanvasViewState.h"
 #include "VerseCompilation.h"
 #include "VerseParseSnapshot.h"
 #include "VerseTileSelection.h"
@@ -15,12 +16,6 @@ class FVerseDocumentSession;
 
 DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
 DECLARE_DELEGATE_OneParam(FOnVerseFunctionOpened, const FVerseVisualTile&);
-
-struct FVerseCanvasViewState
-{
-	FVector2D ScrollOffset = FVector2D::ZeroVector;
-	float Zoom = 1.0f;
-};
 
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
 class SVerseTileCanvas final : public SCompoundWidget
