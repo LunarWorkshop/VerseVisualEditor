@@ -9,6 +9,9 @@ void SVerseGraphWire::Construct(const FArguments& InArgs)
 	TargetAnchor = InArgs._TargetAnchor;
 	WireColor = InArgs._WireColor;
 	WireThickness = InArgs._WireThickness;
+	// Overlay wires paint above graph content, but must never replace the
+	// sockets and tiles beneath them as the hit-test target.
+	SetVisibility(EVisibility::HitTestInvisible);
 	SetCanTick(false);
 }
 

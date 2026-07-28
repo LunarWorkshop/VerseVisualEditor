@@ -131,6 +131,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	IsSelected = InArgs._IsSelected;
 	OnSelected = InArgs._OnSelected;
 	OnOpened = InArgs._OnOpened;
+	OnSocketDragStarted = InArgs._OnSocketDragStarted;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
 	bShowBody = InArgs._ShowBody;
 
@@ -344,8 +345,9 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	bool bOutput)
 {
 	TSharedRef<SVerticalBox> Column = SNew(SVerticalBox);
-	for (const FVerseVisualSocket& Socket : Sockets)
+	for (int32 SocketIndex = 0; SocketIndex < Sockets.Num(); ++SocketIndex)
 	{
+		const FVerseVisualSocket& Socket = Sockets[SocketIndex];
 		const FString Type = Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
@@ -357,6 +359,7 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			SAssignNew(PinImage, SImage)
 				.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
 				.ColorAndOpacity(GetVerseTilePinColor(Type))
+				.Visibility(EVisibility::HitTestInvisible)
 				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
 			if (bOutput)
 			{
@@ -368,7 +371,14 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			}
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
-				PinImage.ToSharedRef()
+				SNew(SBorder)
+				.BorderImage(nullptr)
+				.Padding(0.0f)
+				.OnMouseButtonDown(this, &SVerseTile::HandleSocketMouseButtonDown,
+					TSharedPtr<SWidget>(PinImage), Socket, bOutput, SocketIndex)
+				[
+					PinImage.ToSharedRef()
+				]
 			];
 		};
 		auto AddName = [&]()
@@ -386,6 +396,26 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 		Column->AddSlot().AutoHeight().HAlign(bOutput ? HAlign_Right : HAlign_Left).Padding(0.0f, 1.0f)[Row];
 	}
 	return Column;
+}
+
+FReply SVerseTile::HandleSocketMouseButtonDown(
+	const FGeometry& Geometry,
+	const FPointerEvent& MouseEvent,
+	TSharedPtr<SWidget> Anchor,
+	FVerseVisualSocket Socket,
+	bool bOutput,
+	int32 SocketIndex)
+{
+	const bool bDraggableStatementOutput = bOutput
+		&& Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.bHasExecutionInput;
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
+		|| !bDraggableStatementOutput
+		|| !OnSocketDragStarted.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	return OnSocketDragStarted.Execute({Anchor, Tile, Socket, bOutput, SocketIndex});
 }
 
 FText SVerseTile::Decode(FVerseByteRange Range) const

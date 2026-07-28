@@ -6,6 +6,17 @@
 class FVerseDocument;
 struct FSlateRoundedBoxBrush;
 
+struct FVerseSocketDragStart
+{
+	TSharedPtr<SWidget> Anchor;
+	FVerseVisualTile Tile;
+	FVerseVisualSocket Socket;
+	bool bOutput = false;
+	int32 SocketIndex = INDEX_NONE;
+};
+
+DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnVerseSocketDragStarted, const FVerseSocketDragStart&);
+
 /** Canvas-independent rendering of every Verse visual tile kind. */
 class SVerseTile final : public SCompoundWidget
 {
@@ -31,6 +42,7 @@ public:
 		SLATE_ATTRIBUTE(bool, IsSelected)
 		SLATE_EVENT(FOnClicked, OnSelected)
 		SLATE_EVENT(FOnClicked, OnOpened)
+		SLATE_EVENT(FOnVerseSocketDragStarted, OnSocketDragStarted)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
 
@@ -53,6 +65,13 @@ public:
 private:
 	TSharedRef<SWidget> BuildHeader(bool bCompact, const FText& DiagnosticText) const;
 	TSharedRef<SWidget> BuildSocketColumn(TConstArrayView<FVerseVisualSocket> Sockets, bool bOutput);
+	FReply HandleSocketMouseButtonDown(
+		const FGeometry& Geometry,
+		const FPointerEvent& MouseEvent,
+		TSharedPtr<SWidget> Anchor,
+		FVerseVisualSocket Socket,
+		bool bOutput,
+		int32 SocketIndex);
 	FText Decode(FVerseByteRange Range) const;
 	FText GetKindText() const;
 	FText GetNameText() const;
@@ -73,6 +92,7 @@ private:
 	TAttribute<bool> IsSelected;
 	FOnClicked OnSelected;
 	FOnClicked OnOpened;
+	FOnVerseSocketDragStarted OnSocketDragStarted;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;

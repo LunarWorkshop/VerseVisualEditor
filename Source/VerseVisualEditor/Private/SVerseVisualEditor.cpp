@@ -3,6 +3,7 @@
 #include "SVerseFunctionCanvas.h"
 #include "SVerseFileCanvas.h"
 #include "SVerseGraphWire.h"
+#include "SVerseGraphPreviewWire.h"
 #include "SVerseTile.h"
 
 #include "Async/Async.h"
@@ -52,6 +53,8 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STableRow.h"
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
@@ -101,6 +104,120 @@ struct FOpenVerseDocument
 namespace
 {
 	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
+
+	DECLARE_DELEGATE_OneParam(FOnVerseExpressionChosen, TSharedPtr<FVerseExpressionAction>);
+
+	class SVerseExpressionSearch final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseExpressionSearch) {}
+			SLATE_ARGUMENT(TArray<TSharedPtr<FVerseExpressionAction>>, Actions)
+			SLATE_EVENT(FOnVerseExpressionChosen, OnChosen)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			AllActions = InArgs._Actions;
+			FilteredActions = AllActions;
+			OnChosen = InArgs._OnChosen;
+			ChildSlot
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+				.Padding(6.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(330.0f)
+					.HeightOverride(360.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
+						[
+							SAssignNew(SearchBox, SSearchBox)
+							.HintText(LOCTEXT("ExpressionSearchHint", "Search expressions"))
+							.OnTextChanged(this, &SVerseExpressionSearch::HandleFilterChanged)
+							.OnTextCommitted(this, &SVerseExpressionSearch::HandleFilterCommitted)
+						]
+						+ SVerticalBox::Slot().FillHeight(1.0f)
+						[
+							SAssignNew(ListView, SListView<TSharedPtr<FVerseExpressionAction>>)
+							.ListItemsSource(&FilteredActions)
+							.OnGenerateRow(this, &SVerseExpressionSearch::GenerateRow)
+							.OnMouseButtonDoubleClick(this, &SVerseExpressionSearch::Choose)
+						]
+					]
+				]
+			];
+			if (!FilteredActions.IsEmpty())
+			{
+				ListView->SetSelection(FilteredActions[0]);
+			}
+		}
+
+		TSharedPtr<SWidget> GetWidgetToFocus() const { return SearchBox; }
+
+	private:
+		TSharedRef<ITableRow> GenerateRow(
+			TSharedPtr<FVerseExpressionAction> Action,
+			const TSharedRef<STableViewBase>& Owner)
+		{
+			return SNew(STableRow<TSharedPtr<FVerseExpressionAction>>, Owner)
+			.Padding(FMargin(5.0f, 3.0f))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[
+					SNew(STextBlock).Text(Action->DisplayName)
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(STextBlock)
+					.Text(Action->Category)
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+			];
+		}
+
+		void HandleFilterChanged(const FText& Text)
+		{
+			const FString Filter = Text.ToString();
+			FilteredActions.Reset();
+			for (const TSharedPtr<FVerseExpressionAction>& Action : AllActions)
+			{
+				if (Filter.IsEmpty() || Action->DisplayName.ToString().Contains(Filter, ESearchCase::IgnoreCase))
+				{
+					FilteredActions.Add(Action);
+				}
+			}
+			ListView->RequestListRefresh();
+			if (!FilteredActions.IsEmpty())
+			{
+				ListView->SetSelection(FilteredActions[0]);
+			}
+		}
+
+		void HandleFilterCommitted(const FText&, ETextCommit::Type CommitType)
+		{
+			if (CommitType == ETextCommit::OnEnter)
+			{
+				Choose(ListView->GetSelectedItems().IsEmpty() ? nullptr : ListView->GetSelectedItems()[0]);
+			}
+		}
+
+		void Choose(TSharedPtr<FVerseExpressionAction> Action)
+		{
+			if (Action.IsValid() && OnChosen.IsBound())
+			{
+				OnChosen.Execute(Action);
+			}
+		}
+
+		TArray<TSharedPtr<FVerseExpressionAction>> AllActions;
+		TArray<TSharedPtr<FVerseExpressionAction>> FilteredActions;
+		TSharedPtr<SSearchBox> SearchBox;
+		TSharedPtr<SListView<TSharedPtr<FVerseExpressionAction>>> ListView;
+		FOnVerseExpressionChosen OnChosen;
+	};
 
 	class SVerseExecutionOutput final : public SLeafWidget
 	{
@@ -360,7 +477,8 @@ namespace
 
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
-		TSharedRef<const FVerseDocument> Document)
+		TSharedRef<const FVerseDocument> Document,
+		FOnVerseSocketDragStarted OnSocketDragStarted)
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
@@ -393,6 +511,7 @@ namespace
 				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
 			.ShowBody(bExpression && !bIdentifier)
+			.OnSocketDragStarted(OnSocketDragStarted)
 			.BodyContent()
 			[
 				Body
@@ -417,11 +536,12 @@ namespace
 
 	FBuiltFunctionGraphRow BuildFunctionGraphRow(
 		const FVerseVisualTile& Tile,
-		TSharedRef<const FVerseDocument> Document)
+		TSharedRef<const FVerseDocument> Document,
+		FOnVerseSocketDragStarted OnSocketDragStarted)
 	{
 		constexpr float OperandColumnWidth = 190.0f;
 		constexpr float OperandWireSpace = 72.0f;
-		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(Tile, Document);
+		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(Tile, Document, OnSocketDragStarted);
 		if (Tile.ExpressionKind != EVerseExpressionKind::Addition || Tile.Children.Num() != 2)
 		{
 			return {
@@ -437,8 +557,8 @@ namespace
 				RootTile};
 		}
 
-		const TSharedRef<SVerseTile> LeftOperand = BuildFunctionGraphTile(Tile.Children[0], Document);
-		const TSharedRef<SVerseTile> RightOperand = BuildFunctionGraphTile(Tile.Children[1], Document);
+		const TSharedRef<SVerseTile> LeftOperand = BuildFunctionGraphTile(Tile.Children[0], Document, OnSocketDragStarted);
+		const TSharedRef<SVerseTile> RightOperand = BuildFunctionGraphTile(Tile.Children[1], Document, OnSocketDragStarted);
 		TSharedRef<SOverlay> Subtree = SNew(SOverlay);
 		Subtree->AddSlot()
 		[
@@ -1915,6 +2035,153 @@ FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
+FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStart)
+{
+	if (!DragStart.Anchor.IsValid() || !ActiveDocument.IsValid())
+	{
+		return FReply::Unhandled();
+	}
+	FinishExpressionSearch();
+	SocketDrag = DragStart;
+	SocketDragScreenPosition = FSlateApplication::Get().GetCursorPos();
+	if (const TSharedPtr<SOverlay> Overlay = FunctionGraphOverlay.Pin())
+	{
+		SocketDragPreviewWire = SNew(SVerseGraphPreviewWire)
+			.FixedAnchor(DragStart.Anchor)
+			.FreeEnd_Lambda([this]() { return SocketDragScreenPosition; })
+			.FreeEndIsSource(!DragStart.bOutput)
+			.WireColor(GetBlueprintPinColor(GetVisualTypeName(
+				DragStart.Socket.TypeRange,
+				DragStart.Socket.IntrinsicTypeName,
+				*ActiveDocument->Session->GetParseSnapshot().GetDocument())));
+		Overlay->AddSlot()[SocketDragPreviewWire.ToSharedRef()];
+	}
+	return FReply::Handled().CaptureMouse(SharedThis(this));
+}
+
+FReply SVerseVisualEditor::OnMouseMove(
+	const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (SocketDrag.IsSet() && HasMouseCapture())
+	{
+		SocketDragScreenPosition = MouseEvent.GetScreenSpacePosition();
+		Invalidate(EInvalidateWidgetReason::Paint);
+		return FReply::Handled();
+	}
+	return SCompoundWidget::OnMouseMove(MyGeometry, MouseEvent);
+}
+
+FReply SVerseVisualEditor::OnMouseButtonUp(
+	const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (SocketDrag.IsSet() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		SocketDragScreenPosition = MouseEvent.GetScreenSpacePosition();
+		OpenExpressionSearch(SocketDragScreenPosition);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return SCompoundWidget::OnMouseButtonUp(MyGeometry, MouseEvent);
+}
+
+void SVerseVisualEditor::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	SCompoundWidget::OnMouseCaptureLost(CaptureLostEvent);
+	if (!ExpressionMenu.IsValid())
+	{
+		FinishExpressionSearch();
+	}
+}
+
+void SVerseVisualEditor::OpenExpressionSearch(FVector2D ScreenPosition)
+{
+	if (!SocketDrag.IsSet()
+		|| !ActiveDocument.IsValid()
+		|| !ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
+	{
+		FinishExpressionSearch();
+		return;
+	}
+	const FOpenVerseFunctionTab& Tab =
+		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+	ExpressionActions = FVerseExpressionActionQuery::Build(
+		Tab.Parameters,
+		SocketDrag->Tile,
+		*ActiveDocument->Session->GetParseSnapshot().GetDocument());
+	TSharedRef<SVerseExpressionSearch> Search = SNew(SVerseExpressionSearch)
+		.Actions(ExpressionActions)
+		.OnChosen(FOnVerseExpressionChosen::CreateSP(this, &SVerseVisualEditor::ApplyExpressionAction));
+	ExpressionMenu = FSlateApplication::Get().PushMenu(
+		AsShared(), FWidgetPath(), Search, ScreenPosition,
+		FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
+	if (!ExpressionMenu.IsValid())
+	{
+		FinishExpressionSearch();
+		return;
+	}
+	if (ExpressionMenu->GetOwnedWindow().IsValid())
+	{
+		ExpressionMenu->GetOwnedWindow()->SetWidgetToFocusOnActivate(Search->GetWidgetToFocus());
+	}
+	ExpressionMenu->GetOnMenuDismissed().AddLambda(
+		[WeakThis = TWeakPtr<SVerseVisualEditor>(SharedThis(this))](TSharedRef<IMenu>)
+		{
+			if (const TSharedPtr<SVerseVisualEditor> Pinned = WeakThis.Pin())
+			{
+				Pinned->FinishExpressionSearch();
+			}
+		});
+}
+
+void SVerseVisualEditor::FinishExpressionSearch(bool bKeepPreview)
+{
+	if (!bKeepPreview)
+	{
+		if (const TSharedPtr<SOverlay> Overlay = FunctionGraphOverlay.Pin();
+			Overlay.IsValid() && SocketDragPreviewWire.IsValid())
+		{
+			Overlay->RemoveSlot(SocketDragPreviewWire.ToSharedRef());
+		}
+		SocketDragPreviewWire.Reset();
+		SocketDrag.Reset();
+	}
+	ExpressionActions.Reset();
+	ExpressionMenu.Reset();
+}
+
+void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction> Action)
+{
+	if (!Action.IsValid() || !SocketDrag.IsSet() || !ActiveDocument.IsValid())
+	{
+		return;
+	}
+	FText Error;
+	if (!TryApplyVerseExpressionAction(
+		*ActiveDocument->Session,
+		SocketDrag->Tile.Range,
+		*Action,
+		Error))
+	{
+		ActiveDocument->LoadError = Error;
+		return;
+	}
+	ActiveDocument->LoadError = FText::GetEmpty();
+	ActiveDocument->bIsTemporary = false;
+	InvalidateCompilationResult(ActiveDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(ActiveDocument, true);
+	}
+	if (ExpressionMenu.IsValid())
+	{
+		ExpressionMenu->Dismiss();
+	}
+	ReconcileFunctionTabs(*ActiveDocument);
+	RebuildDocumentTabs();
+	RefreshActiveDocument();
+}
+
 void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item)
 {
 	if (Item.IsValid() && !Item->bIsDirectory)
@@ -2524,7 +2791,10 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					]
 				];
 			}
-			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(Tile, SourceDocument);
+			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(
+				Tile,
+				SourceDocument,
+				FOnVerseSocketDragStarted::CreateSP(this, &SVerseVisualEditor::BeginSocketDrag));
 			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)
@@ -2546,6 +2816,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		}
 
 		TSharedRef<SOverlay> FunctionGraph = SNew(SOverlay);
+		FunctionGraphOverlay = FunctionGraph;
 		FunctionGraph->AddSlot()
 		[
 			FunctionContent
@@ -2577,6 +2848,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 	else
 	{
+		FunctionGraphOverlay.Reset();
 		ActiveView = SAssignNew(
 			ActiveDocument->FileCanvas,
 			SVerseFileCanvas,
