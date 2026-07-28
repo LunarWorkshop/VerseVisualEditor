@@ -2,6 +2,7 @@
 
 #include "SVerseFunctionCanvas.h"
 #include "SVerseFileCanvas.h"
+#include "SVerseGraphWire.h"
 #include "SVerseTile.h"
 
 #include "Async/Async.h"
@@ -185,12 +186,12 @@ namespace
 			const FWidgetStyle& InWidgetStyle,
 			bool bParentEnabled) const override
 		{
-			const FVector2D Start = AllottedGeometry.LocalToAbsolute(FVector2D(24.0f, 0.0f));
-			const FVector2D End = AllottedGeometry.LocalToAbsolute(
-				FVector2D(24.0f, AllottedGeometry.GetLocalSize().Y));
-			FSlateDrawElement::MakeDrawSpaceSpline(
+			const FVector2D Start(24.0f, 0.0f);
+			const FVector2D End(24.0f, AllottedGeometry.GetLocalSize().Y);
+			FSlateDrawElement::MakeSpline(
 				OutDrawElements,
 				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
 				Start,
 				FVector2D(0.0f, 24.0f),
 				End,
@@ -202,12 +203,12 @@ namespace
 			{
 				const float MarkerY = (Index + 0.5f) * 24.0f;
 				TArray<FVector2D> MarkerPoints;
-				MarkerPoints.Add(AllottedGeometry.LocalToAbsolute(FVector2D(18.0f, MarkerY)));
-				MarkerPoints.Add(AllottedGeometry.LocalToAbsolute(FVector2D(30.0f, MarkerY)));
+				MarkerPoints.Add(FVector2D(18.0f, MarkerY));
+				MarkerPoints.Add(FVector2D(30.0f, MarkerY));
 				FSlateDrawElement::MakeLines(
 					OutDrawElements,
 					LayerId + 1,
-					FPaintGeometry(),
+					AllottedGeometry.ToPaintGeometry(),
 					MarkerPoints,
 					ESlateDrawEffect::None,
 					FLinearColor::White,
@@ -357,7 +358,7 @@ namespace
 		return Document.DecodeOriginalRange(FVerseByteRange::FromBounds(Begin, End)).TrimStartAndEnd();
 	}
 
-	TSharedRef<SWidget> BuildFunctionGraphTile(
+	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document)
 	{
@@ -2511,6 +2512,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		const TSharedRef<const FVerseDocument> SourceDocument =
 			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
+		TSharedPtr<SVerseTile> ImplicitReturnSourceTile;
+		TSharedPtr<SVerseTile> ReturnTile;
 		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
 		{
 			const FVerseVisualTile& Tile = FunctionTab.GraphTiles[Index];
@@ -2524,6 +2527,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					.ExtraBlankLines(FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount)
 				];
 			}
+			const TSharedRef<SVerseTile> GraphTile = BuildFunctionGraphTile(Tile, SourceDocument);
 			TSharedPtr<SBox> TileAnchor;
 			FunctionContent->AddSlot()
 			.AutoHeight()
@@ -2531,13 +2535,39 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			[
 				SAssignNew(TileAnchor, SBox)
 				[
-					BuildFunctionGraphTile(Tile, SourceDocument)
+					GraphTile
 				]
 			];
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
 				FunctionEntryAnchor = TileAnchor;
 			}
+			if (Tile.bImplicitReturnValue)
+			{
+				ImplicitReturnSourceTile = GraphTile;
+			}
+			else if (Tile.Kind == EVerseVisualTileKind::FunctionReturn)
+			{
+				ReturnTile = GraphTile;
+			}
+		}
+
+		TSharedRef<SOverlay> FunctionGraph = SNew(SOverlay);
+		FunctionGraph->AddSlot()
+		[
+			FunctionContent
+		];
+		if (ImplicitReturnSourceTile.IsValid() && ReturnTile.IsValid())
+		{
+			const FString ReturnType = SourceDocument->DecodeOriginalRange(
+				FunctionTab.GraphTiles.Last().TypeRange).TrimStartAndEnd();
+			FunctionGraph->AddSlot()
+			[
+				SNew(SVerseGraphWire)
+				.SourceAnchor(ImplicitReturnSourceTile->GetFirstValueOutputAnchor())
+				.TargetAnchor(ReturnTile->GetFirstValueInputAnchor())
+				.WireColor(GetBlueprintPinColor(ReturnType))
+			];
 		}
 
 		ActiveView = SAssignNew(
@@ -2547,7 +2577,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			!FunctionTab.bHasViewState)
 			.InitialAnchor(FunctionEntryAnchor)
 			[
-				FunctionContent
+				FunctionGraph
 			];
 	}
 	else

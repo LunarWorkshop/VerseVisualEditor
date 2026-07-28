@@ -18,6 +18,7 @@ struct FVerseVisualSocket
 {
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
+	bool bConnected = false;
 };
 
 struct FVerseVisualClauseItemDescriptor
@@ -79,6 +80,7 @@ struct FVerseVisualTile
 	bool bHasExecutionOutput = false;
 	bool bExecutionInputConnected = false;
 	bool bExecutionOutputConnected = false;
+	bool bImplicitReturnValue = false;
 };
 
 class FVerseVisualTileBuilder

@@ -35,12 +35,12 @@ namespace
 		return Settings->ObjectPinTypeColor;
 	}
 
-	const FSlateBrush* GetVerseTilePinBrush(const FString& VerseType)
+	const FSlateBrush* GetVerseTilePinBrush(const FString& VerseType, bool bConnected)
 	{
-		return FAppStyle::GetBrush(
-			VerseType.TrimStartAndEnd().StartsWith(TEXT("[]"))
-				? "Graph.ArrayPin.Disconnected"
-				: "Graph.Pin.Disconnected");
+		const bool bArray = VerseType.TrimStartAndEnd().StartsWith(TEXT("[]"));
+		return FAppStyle::GetBrush(bArray
+			? (bConnected ? "Graph.ArrayPin.Connected" : "Graph.ArrayPin.Disconnected")
+			: (bConnected ? "Graph.Pin.Connected" : "Graph.Pin.Disconnected"));
 	}
 
 	class SVerseTileExecutionPin final : public SLeafWidget
@@ -73,13 +73,14 @@ namespace
 			bool bParentEnabled) const override
 		{
 			const FVector2D PinCenter = bInput ? FVector2D(24.0f, 24.0f) : FVector2D(12.0f, 8.0f);
-			const FVector2D WireStart = AllottedGeometry.LocalToAbsolute(
-				bInput ? FVector2D(PinCenter.X, 0.0f) : PinCenter + FVector2D(0.0f, 5.0f));
-			const FVector2D WireEnd = AllottedGeometry.LocalToAbsolute(
-				bInput ? PinCenter - FVector2D(0.0f, 5.0f) : FVector2D(PinCenter.X, 48.0f));
-			FSlateDrawElement::MakeDrawSpaceSpline(
+			const FVector2D WireStart =
+				bInput ? FVector2D(PinCenter.X, 0.0f) : PinCenter + FVector2D(0.0f, 5.0f);
+			const FVector2D WireEnd =
+				bInput ? PinCenter - FVector2D(0.0f, 5.0f) : FVector2D(PinCenter.X, 48.0f);
+			FSlateDrawElement::MakeSpline(
 				OutDrawElements,
 				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
 				WireStart,
 				FVector2D(0.0f, 24.0f),
 				WireEnd,
@@ -329,7 +330,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 
 TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	TConstArrayView<FVerseVisualSocket> Sockets,
-	bool bOutput) const
+	bool bOutput)
 {
 	TSharedRef<SVerticalBox> Column = SNew(SVerticalBox);
 	for (const FVerseVisualSocket& Socket : Sockets)
@@ -339,12 +340,22 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
 		auto AddPin = [&]()
 		{
+			TSharedPtr<SImage> PinImage;
+			SAssignNew(PinImage, SImage)
+				.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
+				.ColorAndOpacity(GetVerseTilePinColor(Type))
+				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
+			if (bOutput && !FirstValueOutputAnchor.IsValid())
+			{
+				FirstValueOutputAnchor = PinImage;
+			}
+			else if (!bOutput && !FirstValueInputAnchor.IsValid())
+			{
+				FirstValueInputAnchor = PinImage;
+			}
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
-				SNew(SImage)
-				.Image(GetVerseTilePinBrush(Type))
-				.ColorAndOpacity(GetVerseTilePinColor(Type))
-				.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
+				PinImage.ToSharedRef()
 			];
 		};
 		auto AddName = [&]()

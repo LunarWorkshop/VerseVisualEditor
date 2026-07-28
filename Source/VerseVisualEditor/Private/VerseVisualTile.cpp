@@ -218,6 +218,11 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		Socket.TypeRange = Parameter.TypeRange;
 	}
 
+	const FString ReturnType = FunctionTile.TypeRange.IsSet()
+		? Snapshot.GetDocument()->DecodeOriginalRange(FunctionTile.TypeRange).TrimStartAndEnd()
+		: FString();
+	const bool bHasReturnValue = !ReturnType.IsEmpty()
+		&& !ReturnType.Equals(TEXT("void"), ESearchCase::IgnoreCase);
 	for (const FVerseVisualClauseItemDescriptor& Item : FunctionTile.BodyClause.Items)
 	{
 		FVerseVisualTile& Expression = GraphTiles.AddDefaulted_GetRef();
@@ -235,10 +240,19 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		Expression.bHasExecutionOutput = true;
 		Expression.bExecutionInputConnected = true;
 		Expression.bExecutionOutputConnected = true;
+		Expression.bImplicitReturnValue = Item.bIsFinalValuePosition && bHasReturnValue;
 		if (Item.ExpressionKind == EVerseExpressionKind::Identifier)
 		{
-			Expression.ValueInputs.Add({{}, Item.TypeRange});
-			Expression.ValueOutputs.Add({{}, Item.TypeRange});
+			Expression.ValueInputs.Add({{}, Item.TypeRange, false});
+			Expression.ValueOutputs.Add(
+				{{}, Item.TypeRange.IsSet() ? Item.TypeRange : FunctionTile.TypeRange,
+					Expression.bImplicitReturnValue});
+		}
+		else if (Expression.bImplicitReturnValue)
+		{
+			Expression.ValueOutputs.Add({{},
+				Item.TypeRange.IsSet() ? Item.TypeRange : FunctionTile.TypeRange,
+				true});
 		}
 	}
 
@@ -254,12 +268,14 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		: FVerseTextRange();
 	Return.bHasExecutionInput = true;
 	Return.bExecutionInputConnected = true;
-	const FString ReturnType = FunctionTile.TypeRange.IsSet()
-		? Snapshot.GetDocument()->DecodeOriginalRange(FunctionTile.TypeRange).TrimStartAndEnd()
-		: FString();
-	if (!ReturnType.IsEmpty() && !ReturnType.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+	if (bHasReturnValue)
 	{
-		Return.ValueInputs.Add({{}, FunctionTile.TypeRange});
+		Return.ValueInputs.Add({{}, FunctionTile.TypeRange,
+			FunctionTile.BodyClause.Items.ContainsByPredicate(
+				[](const FVerseVisualClauseItemDescriptor& Item)
+				{
+					return Item.bIsFinalValuePosition;
+				})});
 	}
 	return GraphTiles;
 }

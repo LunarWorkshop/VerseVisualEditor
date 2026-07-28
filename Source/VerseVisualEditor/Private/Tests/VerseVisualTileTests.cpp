@@ -437,12 +437,16 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& GraphTiles[1].bHasExecutionOutput
 			&& GraphTiles[1].bExecutionInputConnected
 			&& GraphTiles[1].bExecutionOutputConnected
+			&& GraphTiles[1].bImplicitReturnValue
+			&& GraphTiles[1].ValueOutputs.Num() == 1
+			&& GraphTiles[1].ValueOutputs[0].bConnected
 			&& GraphTiles[1].Range.Revision == Revision);
 		TestTrue(TEXT("Function return uses the shared visual tile model"),
 			GraphTiles[2].Kind == EVerseVisualTileKind::FunctionReturn
 			&& GraphTiles[2].bHasExecutionInput
 			&& GraphTiles[2].bExecutionInputConnected
-			&& GraphTiles[2].ValueInputs.Num() == 1);
+			&& GraphTiles[2].ValueInputs.Num() == 1
+			&& GraphTiles[2].ValueInputs[0].bConnected);
 	}
 
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Function, Snapshot);

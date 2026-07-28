@@ -34,6 +34,8 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return FirstValueInputAnchor; }
+	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return FirstValueOutputAnchor; }
 
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
@@ -41,7 +43,7 @@ public:
 
 private:
 	TSharedRef<SWidget> BuildHeader(bool bCompact, const FText& DiagnosticText) const;
-	TSharedRef<SWidget> BuildSocketColumn(TConstArrayView<FVerseVisualSocket> Sockets, bool bOutput) const;
+	TSharedRef<SWidget> BuildSocketColumn(TConstArrayView<FVerseVisualSocket> Sockets, bool bOutput);
 	FText Decode(FVerseByteRange Range) const;
 	FText GetKindText() const;
 	FText GetNameText() const;
@@ -62,6 +64,8 @@ private:
 	FOnClicked OnSelected;
 	FOnClicked OnOpened;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
+	TSharedPtr<SWidget> FirstValueInputAnchor;
+	TSharedPtr<SWidget> FirstValueOutputAnchor;
 	bool bExpanded = true;
 	bool bShowBody = true;
 };
