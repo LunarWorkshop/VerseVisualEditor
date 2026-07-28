@@ -21,6 +21,8 @@ struct FVerseExpressionAction
 	FText DisplayName;
 	FText Category;
 	FVerseTextRange IdentifierNameRange;
+	/** Source-safe defaults for required inputs not supplied by the initiating wire. */
+	TArray<FString> RemainingInputDefaultSources;
 };
 
 /** Discovers expression actions from the current lexical scope and the expression registry. */
@@ -29,7 +31,8 @@ class FVerseExpressionActionQuery
 public:
 	static TArray<TSharedPtr<FVerseExpressionAction>> Build(
 		TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
-		const FVerseVisualTile& DraggedExpression,
+		const FVerseVisualSocket& DraggedSocket,
+		bool bDraggingFromOutput,
 		const FVerseDocument& Document);
 };
 

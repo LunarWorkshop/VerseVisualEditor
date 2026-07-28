@@ -108,6 +108,7 @@ namespace
 	public:
 		SLATE_BEGIN_ARGS(SVerseExpressionSearch) {}
 			SLATE_ARGUMENT(TArray<TSharedPtr<FVerseExpressionAction>>, Actions)
+			SLATE_ARGUMENT(FText, DebugFilterText)
 			SLATE_EVENT(FOnVerseExpressionChosen, OnChosen)
 		SLATE_END_ARGS()
 
@@ -127,6 +128,16 @@ namespace
 					.HeightOverride(360.0f)
 					[
 						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
+						[
+							SNew(STextBlock)
+							.Visibility(InArgs._DebugFilterText.IsEmpty()
+								? EVisibility::Collapsed
+								: EVisibility::HitTestInvisible)
+							.Text(InArgs._DebugFilterText)
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+							.ColorAndOpacity(FLinearColor(1.0f, 0.65f, 0.15f, 1.0f))
+						]
 						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
 						[
 							SAssignNew(SearchBox, SSearchBox)
@@ -1723,12 +1734,31 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 	}
 	const FOpenVerseFunctionTab& Tab =
 		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+	const FVerseDocument& Document =
+		*ActiveDocument->Session->GetParseSnapshot().GetDocument();
 	ExpressionActions = FVerseExpressionActionQuery::Build(
 		Tab.Parameters,
-		SocketDrag->Tile,
-		*ActiveDocument->Session->GetParseSnapshot().GetDocument());
+		SocketDrag->Socket,
+		SocketDrag->bOutput,
+		Document);
+	FText DebugFilterText;
+	if (GetDefault<UVerseVisualEditorSettings>()->bShowExpressionSearchTypeDiagnostics)
+	{
+		const FString SocketType = GetVisualTypeName(
+			SocketDrag->Socket.TypeRange,
+			SocketDrag->Socket.IntrinsicTypeName,
+			Document);
+		DebugFilterText = SocketDrag->bOutput
+			? FText::Format(
+				LOCTEXT("ExpressionConsumerTypeDiagnostic", "Developer: required operand type = {0}"),
+				FText::FromString(SocketType))
+			: FText::Format(
+				LOCTEXT("ExpressionProducerTypeDiagnostic", "Developer: required result type = {0}"),
+				FText::FromString(SocketType));
+	}
 	TSharedRef<SVerseExpressionSearch> Search = SNew(SVerseExpressionSearch)
 		.Actions(ExpressionActions)
+		.DebugFilterText(DebugFilterText)
 		.OnChosen(FOnVerseExpressionChosen::CreateSP(this, &SVerseVisualEditor::ApplyExpressionAction));
 	ExpressionMenu = FSlateApplication::Get().PushMenu(
 		AsShared(), FWidgetPath(), Search, DesktopPosition.Value,

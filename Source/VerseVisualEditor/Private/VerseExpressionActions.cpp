@@ -19,9 +19,20 @@ namespace
 		return Type.ToLower();
 	}
 
-	FString GetTypeName(const FVerseTextRange& Range, FName Intrinsic, const FVerseDocument& Document)
+	FString GetTypeName(const FVerseExpressionType& Type, FUtf8StringView Source)
 	{
-		return NormalizeActionType(Range.IsSet() ? Document.DecodeOriginalRange(Range) : Intrinsic.ToString());
+		if (!Type.SourceRange.IsSet())
+		{
+			return NormalizeActionType(Type.IntrinsicName.ToString());
+		}
+		if (Type.SourceRange.BeginByte < 0 || Type.SourceRange.EndByte() > Source.Len())
+		{
+			return FString();
+		}
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Source.GetData() + Type.SourceRange.BeginByte),
+			Type.SourceRange.NumBytes);
+		return NormalizeActionType(FString(Converted.Length(), Converted.Get()));
 	}
 
 	bool ContainsExpressionAt(
@@ -44,54 +55,149 @@ namespace
 		}
 		return false;
 	}
+
+	/** A searchable expression and the type signatures it exposes to graph wiring. */
+	struct FExpressionCandidate
+	{
+		TSharedPtr<FVerseExpressionAction> Action;
+		TArray<FVerseExpressionType> InputTypes;
+		FVerseExpressionType OutputType;
+		TOptional<EVerseOperatorKind> PolymorphicOperator;
+		int32 RequiredInputCount = 0;
+		bool bHomogeneousInputs = false;
+	};
+
+	FString GetDefaultLiteralSource(const FVerseExpressionType& Type, FUtf8StringView Source)
+	{
+		const FString TypeName = GetTypeName(Type, Source);
+		if (TypeName == TEXT("int"))
+		{
+			return TEXT("0");
+		}
+		if (TypeName == TEXT("float"))
+		{
+			return TEXT("0.0");
+		}
+		if (TypeName == TEXT("string"))
+		{
+			return TEXT("\"\"");
+		}
+		if (TypeName.StartsWith(TEXT("[]")))
+		{
+			return TEXT("array{}");
+		}
+		return FString();
+	}
+
+	bool TypesMatch(
+		const FVerseExpressionType& Left,
+		const FVerseExpressionType& Right,
+		FUtf8StringView Source)
+	{
+		const FString LeftName = GetTypeName(Left, Source);
+		const FString RightName = GetTypeName(Right, Source);
+		return !LeftName.IsEmpty() && LeftName == RightName;
+	}
+
+	bool CandidateAcceptsInput(
+		const FExpressionCandidate& Candidate,
+		const FVerseExpressionType& SourceType,
+		FUtf8StringView Source)
+	{
+		if (Candidate.PolymorphicOperator.IsSet())
+		{
+			return FVerseOperatorTyping::CanAcceptOperand(
+				Candidate.PolymorphicOperator.GetValue(), SourceType, Source);
+		}
+		return Candidate.InputTypes.ContainsByPredicate(
+			[&](const FVerseExpressionType& InputType)
+			{
+				return TypesMatch(InputType, SourceType, Source);
+			});
+	}
+
+	bool CandidateProducesOutput(
+		const FExpressionCandidate& Candidate,
+		const FVerseExpressionType& RequiredType,
+		FUtf8StringView Source)
+	{
+		if (Candidate.PolymorphicOperator.IsSet())
+		{
+			return FVerseOperatorTyping::CanProduceResult(
+				Candidate.PolymorphicOperator.GetValue(), RequiredType, Source);
+		}
+		return Candidate.OutputType.IsResolved()
+			&& TypesMatch(Candidate.OutputType, RequiredType, Source);
+	}
+
+	TArray<FExpressionCandidate> BuildCandidateRegistry(
+		TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
+		const FVerseDocument& Document)
+	{
+		TArray<FExpressionCandidate> Candidates;
+		for (const FVerseFunctionNavigationParameter& Parameter : Parameters)
+		{
+			FExpressionCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+			Candidate.Action = MakeShared<FVerseExpressionAction>();
+			Candidate.Action->Kind = EVerseExpressionActionKind::Identifier;
+			Candidate.Action->DisplayName = FText::FromString(
+				Document.DecodeOriginalRange(Parameter.NameRange));
+			Candidate.Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
+			Candidate.Action->IdentifierNameRange = Parameter.NameRange;
+			Candidate.OutputType = {
+				Parameter.TypeRange,
+				NAME_None,
+				EVerseTypeResolutionProvenance::LocallyInferred};
+		}
+
+		FExpressionCandidate& Addition = Candidates.AddDefaulted_GetRef();
+		Addition.Action = MakeShared<FVerseExpressionAction>();
+		Addition.Action->Kind = EVerseExpressionActionKind::Addition;
+		Addition.Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
+		Addition.Action->Category = LOCTEXT("OperatorsCategory", "Operators");
+		Addition.PolymorphicOperator = EVerseOperatorKind::Addition;
+		Addition.RequiredInputCount = 2;
+		Addition.bHomogeneousInputs = true;
+		return Candidates;
+	}
 }
 
 TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 	TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
-	const FVerseVisualTile& DraggedExpression,
+	const FVerseVisualSocket& DraggedSocket,
+	bool bDraggingFromOutput,
 	const FVerseDocument& Document)
 {
 	TArray<TSharedPtr<FVerseExpressionAction>> Result;
-	const FString ExpectedType = GetTypeName(
-		DraggedExpression.TypeRange,
-		DraggedExpression.IntrinsicTypeName,
-		Document);
-	for (const FVerseFunctionNavigationParameter& Parameter : Parameters)
+	const FVerseExpressionType SocketType{
+		DraggedSocket.TypeRange,
+		DraggedSocket.IntrinsicTypeName,
+		EVerseTypeResolutionProvenance::LocallyInferred};
+	const FUtf8StringView Source = Document.GetOriginalUtf8View();
+	for (FExpressionCandidate& Candidate : BuildCandidateRegistry(Parameters, Document))
 	{
-		if (ExpectedType.IsEmpty()
-			|| GetTypeName(Parameter.TypeRange, NAME_None, Document) != ExpectedType)
+		const bool bCompatible = bDraggingFromOutput
+			? CandidateAcceptsInput(Candidate, SocketType, Source)
+			: CandidateProducesOutput(Candidate, SocketType, Source);
+		if (bCompatible)
 		{
-			continue;
-		}
-		TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
-		Action->Kind = EVerseExpressionActionKind::Identifier;
-		Action->DisplayName = FText::FromString(Document.DecodeOriginalRange(Parameter.NameRange));
-		Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
-		Action->IdentifierNameRange = Parameter.NameRange;
-		Result.Add(MoveTemp(Action));
-	}
-
-	// The expression registry currently has one operator. It is offered only when
-	// duplicating the dragged terminal is a locally provable, valid addition.
-	if (DraggedExpression.ExpressionKind == EVerseExpressionKind::Identifier
-		&& !ExpectedType.IsEmpty())
-	{
-		FVerseExpressionType Evidence;
-		Evidence.SourceRange = DraggedExpression.TypeRange;
-		Evidence.IntrinsicName = DraggedExpression.IntrinsicTypeName;
-		const FVerseExpressionType Operands[] = {Evidence, Evidence};
-		const FVerseExpressionType Resolved = FVerseOperatorTyping::Resolve(
-			EVerseOperatorKind::Addition,
-			Operands,
-			FVerseExpressionType(),
-			Document.GetOriginalUtf8View());
-		if (Resolved.IsResolved())
-		{
-			TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
-			Action->Kind = EVerseExpressionActionKind::Addition;
-			Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
-			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
-			Result.Add(MoveTemp(Action));
+			if (bDraggingFromOutput && Candidate.RequiredInputCount > 1)
+			{
+				if (!Candidate.bHomogeneousInputs)
+				{
+					continue;
+				}
+				const FString DefaultSource = GetDefaultLiteralSource(SocketType, Source);
+				if (DefaultSource.IsEmpty())
+				{
+					continue;
+				}
+				for (int32 Index = 1; Index < Candidate.RequiredInputCount; ++Index)
+				{
+					Candidate.Action->RemainingInputDefaultSources.Add(DefaultSource);
+				}
+			}
+			Result.Add(MoveTemp(Candidate.Action));
 		}
 	}
 	return Result;
@@ -123,7 +229,18 @@ bool TryApplyVerseExpressionAction(
 			OutError = LOCTEXT("EmptyAddOperand", "Add requires a valid source expression.");
 			return false;
 		}
-		Replacement = FString::Printf(TEXT("%s + %s"), *Existing, *Existing);
+		if (Action.RemainingInputDefaultSources.Num() != 1
+			|| Action.RemainingInputDefaultSources[0].IsEmpty())
+		{
+			OutError = LOCTEXT(
+				"MissingAddOperandDefault",
+				"Add requires a safe default for its unconnected operand.");
+			return false;
+		}
+		Replacement = FString::Printf(
+			TEXT("%s + %s"),
+			*Existing,
+			*Action.RemainingInputDefaultSources[0]);
 		RequiredKind = EVerseExpressionKind::Addition;
 	}
 

@@ -19,4 +19,16 @@ public:
 		FUtf8StringView Source);
 
 	static bool SupportsOperandCount(EVerseOperatorKind Operator, int32 OperandCount);
+
+	/** True when at least one declared operand position accepts the supplied type evidence. */
+	static bool CanAcceptOperand(
+		EVerseOperatorKind Operator,
+		const FVerseExpressionType& OperandType,
+		FUtf8StringView Source);
+
+	/** True when at least one overload can produce the supplied result type. */
+	static bool CanProduceResult(
+		EVerseOperatorKind Operator,
+		const FVerseExpressionType& ResultType,
+		FUtf8StringView Source);
 };

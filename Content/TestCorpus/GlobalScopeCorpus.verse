@@ -34,7 +34,7 @@ CorpusEnumOne := enum { First, Second }
 CorpusEnumTwo := enum { Alpha, Beta }
 
 CorpusFunctionOne(Input : int)<computes> : int =
-    Input
+    Input + 0
 
 CorpusFunctionTwo(Input : int)<computes> : int =
     Input + 1

@@ -72,6 +72,7 @@ namespace
 		};
 		AddConcrete(TEXT("int"));
 		AddConcrete(TEXT("float"));
+		AddConcrete(TEXT("string"));
 
 		FOperatorSignature& Array = Result.AddDefaulted_GetRef();
 		Array.Operator = Operator;
@@ -204,6 +205,59 @@ bool FVerseOperatorTyping::SupportsOperandCount(
 	{
 		if (OperandCount >= Signature.MinimumOperands
 			&& (Signature.VariadicOperand.IsSet() || OperandCount == Signature.FixedOperands.Num()))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FVerseOperatorTyping::CanAcceptOperand(
+	EVerseOperatorKind Operator,
+	const FVerseExpressionType& OperandType,
+	FUtf8StringView Source)
+{
+	const FString Evidence = GetEvidenceName(OperandType, Source);
+	if (Evidence.IsEmpty())
+	{
+		return false;
+	}
+	for (const FOperatorSignature& Signature : GetSignatures(Operator))
+	{
+		for (const FTypePattern& Pattern : Signature.FixedOperands)
+		{
+			TMap<int32, FString> Variables;
+			if (MatchPattern(Pattern, Evidence, Variables))
+			{
+				return true;
+			}
+		}
+		if (Signature.VariadicOperand.IsSet())
+		{
+			TMap<int32, FString> Variables;
+			if (MatchPattern(Signature.VariadicOperand.GetValue(), Evidence, Variables))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool FVerseOperatorTyping::CanProduceResult(
+	EVerseOperatorKind Operator,
+	const FVerseExpressionType& ResultType,
+	FUtf8StringView Source)
+{
+	const FString Evidence = GetEvidenceName(ResultType, Source);
+	if (Evidence.IsEmpty())
+	{
+		return false;
+	}
+	for (const FOperatorSignature& Signature : GetSignatures(Operator))
+	{
+		TMap<int32, FString> Variables;
+		if (MatchPattern(Signature.Result, Evidence, Variables))
 		{
 			return true;
 		}
