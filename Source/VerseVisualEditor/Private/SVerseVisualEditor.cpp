@@ -1,7 +1,7 @@
 #include "SVerseVisualEditor.h"
 
-#include "SVerseGraphCanvas.h"
-#include "SVerseTileCanvas.h"
+#include "SVerseFunctionCanvas.h"
+#include "SVerseFileCanvas.h"
 
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
@@ -69,7 +69,7 @@ struct FOpenVerseFunctionTab
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
 	FVerseCanvasViewState ViewState;
-	TSharedPtr<SVerseGraphCanvas> Canvas;
+	TSharedPtr<SVerseFunctionCanvas> FunctionCanvas;
 	bool bHasViewState = false;
 };
 
@@ -84,7 +84,7 @@ struct FOpenVerseDocument
 	TOptional<FString> PendingSpecifierText;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
-	TSharedPtr<SVerseTileCanvas> TileCanvas;
+	TSharedPtr<SVerseFileCanvas> FileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
 	TArray<FOpenVerseFunctionTab> FunctionTabs;
 	int32 ActiveFunctionTabIndex = INDEX_NONE;
@@ -933,9 +933,9 @@ void SVerseVisualEditor::HandleOutlinerSelectionChanged(
 	TGuardValue<bool> SynchronizingGuard(bSynchronizingOutlinerSelection, true);
 	if (!Item.IsValid())
 	{
-		if (ActiveDocument->TileCanvas.IsValid())
+		if (ActiveDocument->FileCanvas.IsValid())
 		{
-			ActiveDocument->TileCanvas->ClearTileSelection();
+			ActiveDocument->FileCanvas->ClearTileSelection();
 		}
 		else
 		{
@@ -944,7 +944,7 @@ void SVerseVisualEditor::HandleOutlinerSelectionChanged(
 		return;
 	}
 
-	if (!ActiveDocument->TileCanvas.IsValid())
+	if (!ActiveDocument->FileCanvas.IsValid())
 	{
 		ActiveDocument->ActiveFunctionTabIndex = INDEX_NONE;
 		RefreshActiveDocument();
@@ -953,9 +953,9 @@ void SVerseVisualEditor::HandleOutlinerSelectionChanged(
 		ActiveDocument->Session->GetTiles(),
 		Item->TileRange))
 	{
-		if (ActiveDocument->TileCanvas.IsValid())
+		if (ActiveDocument->FileCanvas.IsValid())
 		{
-			ActiveDocument->TileCanvas->SelectTile(*Tile);
+			ActiveDocument->FileCanvas->SelectTile(*Tile);
 		}
 		else
 		{
@@ -1008,9 +1008,9 @@ void SVerseVisualEditor::HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlin
 	{
 		if (Tile->DefinitionKind == VerseSyntaxKind::Function)
 		{
-			if (ActiveDocument->TileCanvas.IsValid())
+			if (ActiveDocument->FileCanvas.IsValid())
 			{
-				ActiveDocument->TileCanvas->FocusTile(*Tile);
+				ActiveDocument->FileCanvas->FocusTile(*Tile);
 			}
 			else
 			{
@@ -1020,14 +1020,14 @@ void SVerseVisualEditor::HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlin
 			return;
 		}
 
-		if (!ActiveDocument->TileCanvas.IsValid())
+		if (!ActiveDocument->FileCanvas.IsValid())
 		{
 			ActiveDocument->ActiveFunctionTabIndex = INDEX_NONE;
 			RefreshActiveDocument();
 		}
-		if (ActiveDocument->TileCanvas.IsValid())
+		if (ActiveDocument->FileCanvas.IsValid())
 		{
-			ActiveDocument->TileCanvas->FocusTile(*Tile);
+			ActiveDocument->FileCanvas->FocusTile(*Tile);
 		}
 	}
 }
@@ -2319,7 +2319,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	{
 		FOpenVerseFunctionTab& FunctionTab =
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
-		ActiveDocument->TileCanvas.Reset();
+		ActiveDocument->FileCanvas.Reset();
 		TSharedPtr<SWidget> FunctionEntryAnchor;
 		TSharedRef<SWidget> FunctionContent =
 			SNew(SVerticalBox)
@@ -2367,8 +2367,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			];
 
 		ActiveView = SAssignNew(
-			FunctionTab.Canvas,
-			SVerseGraphCanvas,
+			FunctionTab.FunctionCanvas,
+			SVerseFunctionCanvas,
 			FunctionTab.ViewState,
 			!FunctionTab.bHasViewState)
 			.InitialAnchor(FunctionEntryAnchor)
@@ -2379,8 +2379,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	else
 	{
 		ActiveView = SAssignNew(
-			ActiveDocument->TileCanvas,
-			SVerseTileCanvas,
+			ActiveDocument->FileCanvas,
+			SVerseFileCanvas,
 			ActiveDocument->Session.ToSharedRef(),
 			ActiveDocument->ViewState,
 			InitialSelectedRange,
@@ -2869,17 +2869,17 @@ void SVerseVisualEditor::CaptureActiveCanvasView()
 	{
 		FOpenVerseFunctionTab& FunctionTab =
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
-		if (FunctionTab.Canvas.IsValid())
+		if (FunctionTab.FunctionCanvas.IsValid())
 		{
-			FunctionTab.ViewState = FunctionTab.Canvas->GetViewState();
+			FunctionTab.ViewState = FunctionTab.FunctionCanvas->GetViewState();
 			FunctionTab.bHasViewState = true;
-			FunctionTab.Canvas.Reset();
+			FunctionTab.FunctionCanvas.Reset();
 		}
 	}
-	else if (ActiveDocument->TileCanvas.IsValid())
+	else if (ActiveDocument->FileCanvas.IsValid())
 	{
-		ActiveDocument->ViewState = ActiveDocument->TileCanvas->GetViewState();
-		ActiveDocument->TileCanvas.Reset();
+		ActiveDocument->ViewState = ActiveDocument->FileCanvas->GetViewState();
+		ActiveDocument->FileCanvas.Reset();
 	}
 }
 

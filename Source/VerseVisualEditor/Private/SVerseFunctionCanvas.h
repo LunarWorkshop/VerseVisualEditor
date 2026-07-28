@@ -11,10 +11,10 @@ class SScrollBar;
 class SScrollBox;
 
 /** Shared pan/zoom viewport for non-global Verse graphs. */
-class SVerseGraphCanvas final : public SCompoundWidget
+class SVerseFunctionCanvas final : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseGraphCanvas) {}
+	SLATE_BEGIN_ARGS(SVerseFunctionCanvas) {}
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()

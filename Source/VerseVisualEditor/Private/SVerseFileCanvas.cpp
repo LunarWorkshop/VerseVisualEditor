@@ -1,4 +1,4 @@
-#include "SVerseTileCanvas.h"
+#include "SVerseFileCanvas.h"
 
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
@@ -20,7 +20,7 @@
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
-#define LOCTEXT_NAMESPACE "SVerseTileCanvas"
+#define LOCTEXT_NAMESPACE "SVerseFileCanvas"
 
 namespace
 {
@@ -248,7 +248,7 @@ namespace
 	};
 }
 
-void SVerseTileCanvas::Construct(
+void SVerseFileCanvas::Construct(
 	const FArguments& InArgs,
 	TSharedRef<const FVerseDocumentSession> InSession,
 	FVerseCanvasViewState InitialViewState,
@@ -333,7 +333,7 @@ void SVerseTileCanvas::Construct(
 	VerticalScrollBox->SetScrollOffset(FMath::Max(0.0, InitialViewState.ScrollOffset.Y));
 }
 
-FVerseCanvasViewState SVerseTileCanvas::GetViewState() const
+FVerseCanvasViewState SVerseFileCanvas::GetViewState() const
 {
 	FVerseCanvasViewState ViewState;
 	ViewState.ScrollOffset = FVector2D(
@@ -343,7 +343,7 @@ FVerseCanvasViewState SVerseTileCanvas::GetViewState() const
 	return ViewState;
 }
 
-bool SVerseTileCanvas::FocusTile(const FVerseVisualTile& Tile)
+bool SVerseFileCanvas::FocusTile(const FVerseVisualTile& Tile)
 {
 	TSharedPtr<SWidget> WidgetToFocus;
 	int32 SmallestContainingRange = MAX_int32;
@@ -388,7 +388,7 @@ bool SVerseTileCanvas::FocusTile(const FVerseVisualTile& Tile)
 	return true;
 }
 
-int32 SVerseTileCanvas::OnPaint(
+int32 SVerseFileCanvas::OnPaint(
 	const FPaintArgs& Args,
 	const FGeometry& AllottedGeometry,
 	const FSlateRect& MyCullingRect,
@@ -439,7 +439,7 @@ int32 SVerseTileCanvas::OnPaint(
 	return ContentLayer + 1;
 }
 
-FReply SVerseTileCanvas::OnPreviewMouseButtonDown(
+FReply SVerseFileCanvas::OnPreviewMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -467,7 +467,7 @@ FReply SVerseTileCanvas::OnPreviewMouseButtonDown(
 		.UseHighPrecisionMouseMovement(SharedThis(this));
 }
 
-FReply SVerseTileCanvas::OnMouseButtonDown(
+FReply SVerseFileCanvas::OnMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -482,7 +482,7 @@ FReply SVerseTileCanvas::OnMouseButtonDown(
 	return FReply::Handled();
 }
 
-FReply SVerseTileCanvas::OnMouseButtonUp(
+FReply SVerseFileCanvas::OnMouseButtonUp(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -513,7 +513,7 @@ FReply SVerseTileCanvas::OnMouseButtonUp(
 			FMath::RoundToInt(ScreenSpaceCursorPosition.Y)));
 }
 
-FReply SVerseTileCanvas::OnMouseMove(
+FReply SVerseFileCanvas::OnMouseMove(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -548,7 +548,7 @@ FReply SVerseTileCanvas::OnMouseMove(
 	return FReply::Handled();
 }
 
-FReply SVerseTileCanvas::OnMouseWheel(
+FReply SVerseFileCanvas::OnMouseWheel(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -564,26 +564,26 @@ FReply SVerseTileCanvas::OnMouseWheel(
 	return FReply::Handled();
 }
 
-FCursorReply SVerseTileCanvas::OnCursorQuery(
+FCursorReply SVerseFileCanvas::OnCursorQuery(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& CursorEvent) const
 {
 	return FCursorReply::Cursor(bIsPanning ? EMouseCursor::None : EMouseCursor::Default);
 }
 
-void SVerseTileCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+void SVerseFileCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 {
 	bIsPanning = false;
 	Invalidate(EInvalidateWidgetReason::Paint);
 	SCompoundWidget::OnMouseCaptureLost(CaptureLostEvent);
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildTileRow()
+TSharedRef<SWidget> SVerseFileCanvas::BuildTileRow()
 {
 	return BuildTileSequence(Tiles, INDEX_NONE, true);
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildTileSequence(
+TSharedRef<SWidget> SVerseFileCanvas::BuildTileSequence(
 	TConstArrayView<FVerseVisualTile> TilesToBuild,
 	int32 SharedDiagnosticTileIndex,
 	bool bShowEmptyDocumentMessage)
@@ -643,7 +643,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTileSequence(
 	return TileRow;
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile, int32 TileIndex)
+TSharedRef<SWidget> SVerseFileCanvas::BuildTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
 		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
@@ -655,7 +655,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildTile(const FVerseVisualTile& Tile, in
 	return Widget;
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
+TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
 	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
@@ -721,9 +721,9 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			{
 				return IsTileSelected(Range);
 			})
-			.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTileFromClick, Tile))
+			.OnSelected(FOnClicked::CreateSP(this, &SVerseFileCanvas::SelectTileFromClick, Tile))
 			.OnOpened(Tile.DefinitionKind == VerseSyntaxKind::Function
-				? FOnClicked::CreateSP(this, &SVerseTileCanvas::OpenFunctionTile, Tile)
+				? FOnClicked::CreateSP(this, &SVerseFileCanvas::OpenFunctionTile, Tile)
 				: FOnClicked())
 			.HeaderContent()
 			[
@@ -805,7 +805,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 		];
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildFunctionSignature(const FVerseVisualTile& Tile) const
+TSharedRef<SWidget> SVerseFileCanvas::BuildFunctionSignature(const FVerseVisualTile& Tile) const
 {
 	TSharedRef<SVerticalBox> Signature = SNew(SVerticalBox);
 	for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
@@ -895,7 +895,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildFunctionSignature(const FVerseVisualT
 	return Signature;
 }
 
-TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& Tile, int32 TileIndex)
+TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const FText KindText = FText::FromName(Tile.DefinitionKind);
 	const FText NameText = Decode(Tile.NameRange);
@@ -916,7 +916,7 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		{
 			return IsTileSelected(Range);
 		})
-		.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTileFromClick, Tile))
+		.OnSelected(FOnClicked::CreateSP(this, &SVerseFileCanvas::SelectTileFromClick, Tile))
 		.OnOpened(FOnClicked())
 		.HeaderContent()
 		[
@@ -997,14 +997,14 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		];
 }
 
-FText SVerseTileCanvas::Decode(FVerseByteRange Range) const
+FText SVerseFileCanvas::Decode(FVerseByteRange Range) const
 {
 	return Range.IsSet()
 		? FText::FromString(Snapshot->GetDocument()->DecodeOriginalRange(Range))
 		: FText::GetEmpty();
 }
 
-FText SVerseTileCanvas::FormatSpecifiers(const FVerseVisualTile& Tile) const
+FText SVerseFileCanvas::FormatSpecifiers(const FVerseVisualTile& Tile) const
 {
 	FString Result;
 	for (const FVerseTextRange& Range : Tile.SpecifierRanges)
@@ -1016,7 +1016,7 @@ FText SVerseTileCanvas::FormatSpecifiers(const FVerseVisualTile& Tile) const
 	return FText::FromString(MoveTemp(Result));
 }
 
-FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
+FText SVerseFileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
 {
 	if (Tile.FirstSourceLine == INDEX_NONE || Tile.LastSourceLine == INDEX_NONE)
 	{
@@ -1028,7 +1028,7 @@ FText SVerseTileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
 		: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine));
 }
 
-FText SVerseTileCanvas::FormatDiagnosticMessages(int32 TileIndex) const
+FText SVerseFileCanvas::FormatDiagnosticMessages(int32 TileIndex) const
 {
 	FString Messages;
 	for (const FVerseCompilationDiagnostic& Diagnostic : Diagnostics)
@@ -1049,7 +1049,7 @@ FText SVerseTileCanvas::FormatDiagnosticMessages(int32 TileIndex) const
 	return FText::FromString(MoveTemp(Messages));
 }
 
-bool SVerseTileCanvas::HasDiagnosticForTile(int32 TileIndex) const
+bool SVerseFileCanvas::HasDiagnosticForTile(int32 TileIndex) const
 {
 	return Diagnostics.ContainsByPredicate([TileIndex](const FVerseCompilationDiagnostic& Diagnostic)
 	{
@@ -1057,7 +1057,7 @@ bool SVerseTileCanvas::HasDiagnosticForTile(int32 TileIndex) const
 	});
 }
 
-bool SVerseTileCanvas::IsTileSelected(FVerseTextRange TileRange) const
+bool SVerseFileCanvas::IsTileSelected(FVerseTextRange TileRange) const
 {
 	const TOptional<FVerseTextRange>& Selected = Selection.GetSelectedRange();
 	if (!Selected.IsSet())
@@ -1072,7 +1072,7 @@ bool SVerseTileCanvas::IsTileSelected(FVerseTextRange TileRange) const
 		&& SelectedRange.NumBytes == TileRange.NumBytes;
 }
 
-void SVerseTileCanvas::SelectTile(const FVerseVisualTile& Tile)
+void SVerseFileCanvas::SelectTile(const FVerseVisualTile& Tile)
 {
 	Selection.Select(Tile.Range);
 	OnTileSelected.ExecuteIfBound(Tile);
@@ -1080,20 +1080,20 @@ void SVerseTileCanvas::SelectTile(const FVerseVisualTile& Tile)
 	return;
 }
 
-void SVerseTileCanvas::ClearTileSelection()
+void SVerseFileCanvas::ClearTileSelection()
 {
 	Selection.Clear();
 	OnSelectionCleared.ExecuteIfBound();
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
-FReply SVerseTileCanvas::SelectTileFromClick(FVerseVisualTile Tile)
+FReply SVerseFileCanvas::SelectTileFromClick(FVerseVisualTile Tile)
 {
 	SelectTile(Tile);
 	return FReply::Handled();
 }
 
-FReply SVerseTileCanvas::OpenFunctionTile(FVerseVisualTile Tile)
+FReply SVerseFileCanvas::OpenFunctionTile(FVerseVisualTile Tile)
 {
 	SelectTile(Tile);
 	OnFunctionOpened.ExecuteIfBound(Tile);

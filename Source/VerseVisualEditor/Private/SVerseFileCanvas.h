@@ -18,10 +18,10 @@ DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
 DECLARE_DELEGATE_OneParam(FOnVerseFunctionOpened, const FVerseVisualTile&);
 
 /** Zoomable, pannable, read-only presentation of a Verse parse snapshot. */
-class SVerseTileCanvas final : public SCompoundWidget
+class SVerseFileCanvas final : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseTileCanvas) {}
+	SLATE_BEGIN_ARGS(SVerseFileCanvas) {}
 		SLATE_ARGUMENT(TArray<FVerseCompilationDiagnostic>, Diagnostics)
 		SLATE_EVENT(FOnVerseFunctionOpened, OnFunctionOpened)
 	SLATE_END_ARGS()

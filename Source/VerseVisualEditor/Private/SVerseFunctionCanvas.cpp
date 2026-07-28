@@ -1,4 +1,4 @@
-#include "SVerseGraphCanvas.h"
+#include "SVerseFunctionCanvas.h"
 
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
@@ -18,7 +18,7 @@ namespace
 	constexpr float GraphEdgePeek = 48.0f;
 }
 
-void SVerseGraphCanvas::Construct(
+void SVerseFunctionCanvas::Construct(
 	const FArguments& InArgs,
 	FVerseCanvasViewState InitialViewState,
 	bool bCenterInitially)
@@ -53,7 +53,7 @@ void SVerseGraphCanvas::Construct(
 					[
 						SNew(SBorder)
 						.BorderImage(nullptr)
-						.Padding(this, &SVerseGraphCanvas::GetPanPadding)
+						.Padding(this, &SVerseFunctionCanvas::GetPanPadding)
 						[
 							SAssignNew(ScaleBox, SScaleBox)
 							.Stretch(EStretch::UserSpecified)
@@ -98,7 +98,7 @@ void SVerseGraphCanvas::Construct(
 	}
 }
 
-FVerseCanvasViewState SVerseGraphCanvas::GetViewState() const
+FVerseCanvasViewState SVerseFunctionCanvas::GetViewState() const
 {
 	FVerseCanvasViewState State;
 	State.ScrollOffset = FVector2D(
@@ -108,7 +108,7 @@ FVerseCanvasViewState SVerseGraphCanvas::GetViewState() const
 	return State;
 }
 
-void SVerseGraphCanvas::Tick(
+void SVerseFunctionCanvas::Tick(
 	const FGeometry& AllottedGeometry,
 	const double InCurrentTime,
 	const float InDeltaTime)
@@ -142,7 +142,7 @@ void SVerseGraphCanvas::Tick(
 	}
 }
 
-FMargin SVerseGraphCanvas::GetPanPadding() const
+FMargin SVerseFunctionCanvas::GetPanPadding() const
 {
 	const FVector2D ViewSize = VerticalScrollBox.IsValid()
 		? VerticalScrollBox->GetCachedGeometry().GetLocalSize()
@@ -152,7 +152,7 @@ FMargin SVerseGraphCanvas::GetPanPadding() const
 		FMath::Max(GraphEdgePeek, ViewSize.Y - GraphEdgePeek));
 }
 
-int32 SVerseGraphCanvas::OnPaint(
+int32 SVerseFunctionCanvas::OnPaint(
 	const FPaintArgs& Args,
 	const FGeometry& AllottedGeometry,
 	const FSlateRect& MyCullingRect,
@@ -205,7 +205,7 @@ int32 SVerseGraphCanvas::OnPaint(
 	return ContentLayer + 1;
 }
 
-FReply SVerseGraphCanvas::OnPreviewMouseButtonDown(
+FReply SVerseFunctionCanvas::OnPreviewMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -230,7 +230,7 @@ FReply SVerseGraphCanvas::OnPreviewMouseButtonDown(
 		.UseHighPrecisionMouseMovement(SharedThis(this));
 }
 
-FReply SVerseGraphCanvas::OnMouseButtonUp(
+FReply SVerseFunctionCanvas::OnMouseButtonUp(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -255,7 +255,7 @@ FReply SVerseGraphCanvas::OnMouseButtonUp(
 			FMath::RoundToInt(CursorPosition.Y)));
 }
 
-FReply SVerseGraphCanvas::OnMouseMove(
+FReply SVerseFunctionCanvas::OnMouseMove(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -281,7 +281,7 @@ FReply SVerseGraphCanvas::OnMouseMove(
 	return FReply::Handled();
 }
 
-FReply SVerseGraphCanvas::OnMouseWheel(
+FReply SVerseFunctionCanvas::OnMouseWheel(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -297,14 +297,14 @@ FReply SVerseGraphCanvas::OnMouseWheel(
 	return FReply::Handled();
 }
 
-FCursorReply SVerseGraphCanvas::OnCursorQuery(
+FCursorReply SVerseFunctionCanvas::OnCursorQuery(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& CursorEvent) const
 {
 	return FCursorReply::Cursor(bIsPanning ? EMouseCursor::None : EMouseCursor::Default);
 }
 
-void SVerseGraphCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+void SVerseFunctionCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 {
 	bIsPanning = false;
 	Invalidate(EInvalidateWidgetReason::Paint);
