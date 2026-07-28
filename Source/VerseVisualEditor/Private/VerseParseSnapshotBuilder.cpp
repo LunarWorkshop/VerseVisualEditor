@@ -498,6 +498,150 @@ namespace VerseParseSnapshotBuilder
 		}
 	}
 
+	int32 CountLineBreaks(FUtf8StringView Text)
+	{
+		int32 Count = 0;
+		for (int32 Index = 0; Index < Text.Len(); ++Index)
+		{
+			if (Text[Index] == static_cast<UTF8CHAR>('\r'))
+			{
+				++Count;
+				if (Index + 1 < Text.Len() && Text[Index + 1] == static_cast<UTF8CHAR>('\n'))
+				{
+					++Index;
+				}
+			}
+			else if (Text[Index] == static_cast<UTF8CHAR>('\n'))
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+
+	EVerseClauseItemSeparator ClassifySeparator(FUtf8StringView Trivia, bool bIsFinal)
+	{
+		if (bIsFinal)
+		{
+			return EVerseClauseItemSeparator::EndOfClause;
+		}
+		const bool bHasSemicolon = Trivia.Find(UTF8TEXTVIEW(";")) != INDEX_NONE;
+		const bool bHasNewline = CountLineBreaks(Trivia) > 0;
+		if (bHasSemicolon && bHasNewline)
+		{
+			return EVerseClauseItemSeparator::Mixed;
+		}
+		if (bHasSemicolon)
+		{
+			return EVerseClauseItemSeparator::Semicolon;
+		}
+		return bHasNewline
+			? EVerseClauseItemSeparator::Newline
+			: EVerseClauseItemSeparator::None;
+	}
+
+	void BuildFunctionClauseItems(
+		const Verse::Vst::Node& Body,
+		const FSourceIndex& SourceIndex,
+		FVerseSourceRegion& OutRegion)
+	{
+		TArray<const Verse::Vst::Node*> RootExpressions;
+		if (const Verse::Vst::Clause* Clause = Body.AsNullable<Verse::Vst::Clause>())
+		{
+			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause->GetChildren())
+			{
+				const Verse::Vst::Node* Candidate = UnwrapSingleClause(Child.Get());
+				if (Candidate != nullptr && !Candidate->IsA<Verse::Vst::Comment>())
+				{
+					RootExpressions.Add(Candidate);
+				}
+			}
+		}
+		else if (!Body.IsA<Verse::Vst::Comment>())
+		{
+			RootExpressions.Add(&Body);
+		}
+
+		RootExpressions.Sort([&SourceIndex](const Verse::Vst::Node& Left, const Verse::Vst::Node& Right)
+		{
+			return SourceIndex.ToRange(Left.Whence()).BeginByte
+				< SourceIndex.ToRange(Right.Whence()).BeginByte;
+		});
+
+		for (const Verse::Vst::Node* Expression : RootExpressions)
+		{
+			const FVerseByteRange ExpressionRange = SourceIndex.ToRange(Expression->Whence());
+			if (!ExpressionRange.IsSet()
+				|| ExpressionRange.NumBytes <= 0
+				|| ExpressionRange.BeginByte < OutRegion.BodyRange.BeginByte
+				|| ExpressionRange.EndByte() > OutRegion.BodyRange.EndByte())
+			{
+				continue;
+			}
+
+			FVerseClauseItemDescriptor& Item = OutRegion.BodyClause.Items.AddDefaulted_GetRef();
+			Item.ExpressionRange = ExpressionRange;
+			if (const Verse::Vst::Identifier* Identifier = Expression->AsNullable<Verse::Vst::Identifier>())
+			{
+				Item.ExpressionKind = EVerseExpressionKind::Identifier;
+				const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
+				if (IdentifierLength > 0 && Item.ExpressionRange.NumBytes >= IdentifierLength)
+				{
+					Item.ExpressionRange = {
+						Item.ExpressionRange.EndByte() - IdentifierLength,
+						IdentifierLength};
+				}
+			}
+		}
+
+		TArray<FVerseClauseItemDescriptor>& Items = OutRegion.BodyClause.Items;
+		for (int32 Index = 0; Index < Items.Num(); ++Index)
+		{
+			FVerseClauseItemDescriptor& Item = Items[Index];
+			if (Index == 0 && OutRegion.BodyRange.BeginByte < Item.ExpressionRange.BeginByte)
+			{
+				Item.LeadingTriviaRange = FVerseByteRange::FromBounds(
+					OutRegion.BodyRange.BeginByte,
+					Item.ExpressionRange.BeginByte);
+			}
+			const int32 TrailingEnd = Index + 1 < Items.Num()
+				? Items[Index + 1].ExpressionRange.BeginByte
+				: OutRegion.BodyRange.EndByte();
+			if (Item.ExpressionRange.EndByte() < TrailingEnd)
+			{
+				Item.TrailingTriviaRange = FVerseByteRange::FromBounds(
+					Item.ExpressionRange.EndByte(),
+					TrailingEnd);
+			}
+			const FUtf8StringView Trivia = Item.TrailingTriviaRange.IsSet()
+				? SourceIndex.GetSource().Mid(
+					Item.TrailingTriviaRange.BeginByte,
+					Item.TrailingTriviaRange.NumBytes)
+				: FUtf8StringView();
+			Item.bIsFinalValuePosition = Index == Items.Num() - 1;
+			Item.Separator = ClassifySeparator(Trivia, Item.bIsFinalValuePosition);
+			Item.ExtraBlankLineCount = FMath::Max(0, CountLineBreaks(Trivia) - 1);
+
+			if (Item.ExpressionKind == EVerseExpressionKind::Identifier)
+			{
+				const FUtf8StringView IdentifierText = SourceIndex.GetSource().Mid(
+					Item.ExpressionRange.BeginByte,
+					Item.ExpressionRange.NumBytes);
+				for (const FVerseFunctionParameter& Parameter : OutRegion.FunctionParameters)
+				{
+					const FUtf8StringView ParameterName = SourceIndex.GetSource().Mid(
+						Parameter.NameRange.BeginByte,
+						Parameter.NameRange.NumBytes);
+					if (IdentifierText == ParameterName)
+					{
+						Item.TypeRange = Parameter.TypeRange;
+						break;
+					}
+				}
+			}
+		}
+	}
+
 	bool ContainsNodeType(const Verse::Vst::Node& Node, Verse::Vst::NodeType Type)
 	{
 		if (Node.GetElementType() == Type)
@@ -742,6 +886,10 @@ namespace VerseParseSnapshotBuilder
 		if (SyntaxKind == VerseSyntaxKind::Function && OutRegion.BodyRange.IsSet())
 		{
 			PopulateFunctionMetadata(*NameOperand, RightOperand, SourceIndex, OutRegion);
+			if (UnwrappedRight != nullptr)
+			{
+				BuildFunctionClauseItems(*UnwrappedRight, SourceIndex, OutRegion);
+			}
 			FVerseSourceRegion& RawBody = OutRegion.Children.AddDefaulted_GetRef();
 			RawBody.Range = OutRegion.BodyRange;
 		}

@@ -33,6 +33,34 @@ enum class EVerseClausePunctuationStyle : uint8
 	ColonOrIndentation,
 };
 
+enum class EVerseExpressionKind : uint8
+{
+	Unsupported,
+	Identifier,
+};
+
+enum class EVerseClauseItemSeparator : uint8
+{
+	None,
+	Newline,
+	Semicolon,
+	Mixed,
+	EndOfClause,
+};
+
+/** A root expression's occurrence within an executable clause. */
+struct VERSEVISUALEDITOR_API FVerseClauseItemDescriptor
+{
+	FVerseByteRange ExpressionRange;
+	FVerseByteRange LeadingTriviaRange;
+	FVerseByteRange TrailingTriviaRange;
+	FVerseByteRange TypeRange;
+	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
+	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+	int32 ExtraBlankLineCount = 0;
+	bool bIsFinalValuePosition = false;
+};
+
 /** Parser-derived structure for a definition body. All ranges are source-exact and half-open. */
 struct VERSEVISUALEDITOR_API FVerseClauseDescriptor
 {
@@ -41,6 +69,7 @@ struct VERSEVISUALEDITOR_API FVerseClauseDescriptor
 	FVerseByteRange ClosingPunctuationRange;
 	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
 	int32 EmptyBodyInsertionByte = INDEX_NONE;
+	TArray<FVerseClauseItemDescriptor> Items;
 
 	bool IsSet() const { return InteriorRange.IsSet(); }
 };

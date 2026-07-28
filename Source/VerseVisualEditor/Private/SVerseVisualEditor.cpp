@@ -53,7 +53,6 @@
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Widgets/Text/SMultiLineEditableText.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
 
@@ -66,6 +65,7 @@ struct FOpenVerseFunctionTab
 	FVerseTextRange BodyRange;
 	FVerseTextRange ReturnTypeRange;
 	TArray<FVerseFunctionNavigationParameter> Parameters;
+	TArray<FVerseVisualClauseItemDescriptor> BodyItems;
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
 	FVerseCanvasViewState ViewState;
@@ -161,16 +161,18 @@ namespace
 	{
 	public:
 		SLATE_BEGIN_ARGS(SVerseExecutionWire) {}
+			SLATE_ARGUMENT(int32, ExtraBlankLines)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
+			ExtraBlankLines = FMath::Max(0, InArgs._ExtraBlankLines);
 			SetCanTick(false);
 		}
 
 		virtual FVector2D ComputeDesiredSize(float) const override
 		{
-			return FVector2D(48.0f, 1.0f);
+			return FVector2D(48.0f, ExtraBlankLines * 24.0f);
 		}
 
 		virtual int32 OnPaint(
@@ -195,8 +197,27 @@ namespace
 				2.5f,
 				ESlateDrawEffect::None,
 				FLinearColor::White);
-			return LayerId;
+			for (int32 Index = 0; Index < ExtraBlankLines; ++Index)
+			{
+				const float MarkerY = (Index + 0.5f) * 24.0f;
+				TArray<FVector2D> MarkerPoints;
+				MarkerPoints.Add(AllottedGeometry.LocalToAbsolute(FVector2D(18.0f, MarkerY)));
+				MarkerPoints.Add(AllottedGeometry.LocalToAbsolute(FVector2D(30.0f, MarkerY)));
+				FSlateDrawElement::MakeLines(
+					OutDrawElements,
+					LayerId + 1,
+					FPaintGeometry(),
+					MarkerPoints,
+					ESlateDrawEffect::None,
+					FLinearColor::White,
+					true,
+					2.0f);
+			}
+			return LayerId + 1;
 		}
+
+	private:
+		int32 ExtraBlankLines = 0;
 	};
 
 	class SVerseExecutionInput final : public SLeafWidget
@@ -311,6 +332,132 @@ namespace
 			VerseType.TrimStartAndEnd().StartsWith(TEXT("[]"))
 				? "Graph.ArrayPin.Disconnected"
 				: "Graph.Pin.Disconnected");
+	}
+
+	FString GetExpressionSourceLine(
+		const FVerseDocument& Document,
+		const FVerseTextRange& ExpressionRange)
+	{
+		const FUtf8StringView Source = Document.GetOriginalUtf8View();
+		int32 Begin = FMath::Clamp(ExpressionRange.BeginByte, 0, Source.Len());
+		int32 End = FMath::Clamp(ExpressionRange.EndByte(), Begin, Source.Len());
+		while (Begin > 0
+			&& Source[Begin - 1] != static_cast<UTF8CHAR>('\n')
+			&& Source[Begin - 1] != static_cast<UTF8CHAR>('\r'))
+		{
+			--Begin;
+		}
+		while (End < Source.Len()
+			&& Source[End] != static_cast<UTF8CHAR>('\n')
+			&& Source[End] != static_cast<UTF8CHAR>('\r'))
+		{
+			++End;
+		}
+		return Document.DecodeOriginalRange(FVerseByteRange::FromBounds(Begin, End)).TrimStartAndEnd();
+	}
+
+	TSharedRef<SWidget> BuildClauseExpressionTile(
+		const FVerseVisualClauseItemDescriptor& Item,
+		const FVerseDocument& Document)
+	{
+		const bool bIdentifier = Item.ExpressionKind == EVerseExpressionKind::Identifier;
+		const FString Type = Item.TypeRange.IsSet()
+			? Document.DecodeOriginalRange(Item.TypeRange).TrimStartAndEnd()
+			: FString();
+		const FLinearColor PinColor = GetBlueprintPinColor(Type);
+		const FSlateBrush* PinBrush = GetBlueprintPinBrush(Type);
+		const FText KindText = bIdentifier
+			? LOCTEXT("IdentifierExpressionKind", "Identifier")
+			: LOCTEXT("UnsupportedExpressionKind", "Expression");
+		const int32 FirstSourceLine = Document.GetOriginalLineNumber(Item.ExpressionRange.BeginByte);
+		const int32 LastSourceLine = Document.GetOriginalLineNumber(
+			FMath::Max(Item.ExpressionRange.BeginByte, Item.ExpressionRange.EndByte() - 1));
+		return SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			[
+				SNew(SVerseExecutionInput)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, -8.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor(bIdentifier
+					? FLinearColor(0.10f, 0.19f, 0.28f, 1.0f)
+					: FLinearColor(0.16f, 0.18f, 0.21f, 1.0f))
+				.Padding(FMargin(0.0f, 7.0f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(-5.0f, 0.0f, 7.0f, 0.0f)
+					[
+						SNew(SImage)
+						.Visibility(bIdentifier ? EVisibility::Visible : EVisibility::Collapsed)
+						.Image(bIdentifier ? PinBrush : nullptr)
+						.ColorAndOpacity(PinColor)
+						.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
+						.ToolTipText(LOCTEXT("IdentifierReadSocket", "Identifier value reference"))
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 12.0f, 0.0f)
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(STextBlock)
+							.Text(KindText)
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+							.ColorAndOpacity(bIdentifier
+								? FLinearColor(0.65f, 0.80f, 1.0f, 1.0f)
+								: FLinearColor(0.65f, 0.65f, 0.65f, 1.0f))
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 3.0f, 0.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(GetExpressionSourceLine(Document, Item.ExpressionRange)))
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 5.0f, 0.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(FormatSourceLines(FirstSourceLine, LastSourceLine))
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+							.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
+						]
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, -5.0f, 0.0f)
+					[
+						SNew(SImage)
+						.Visibility(bIdentifier ? EVisibility::Visible : EVisibility::Collapsed)
+						.Image(bIdentifier ? PinBrush : nullptr)
+						.ColorAndOpacity(PinColor)
+						.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
+						.ToolTipText(LOCTEXT("IdentifierWriteSocket", "Assignable identifier"))
+					]
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			.Padding(12.0f, -7.0f, 0.0f, 0.0f)
+			[
+				SNew(SVerseExecutionOutput)
+			];
 	}
 
 	TSharedRef<SWidget> BuildFunctionEntryTile(
@@ -633,6 +780,7 @@ namespace
 			Tab.BodyRange = Item->BodyRange;
 			Tab.ReturnTypeRange = Item->ReturnTypeRange;
 			Tab.Parameters = Item->Parameters;
+			Tab.BodyItems = Item->BodyItems;
 			Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 			Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		}
@@ -1079,6 +1227,7 @@ void SVerseVisualEditor::OpenFunctionView(
 		Tab.BodyRange = Item->BodyRange;
 		Tab.ReturnTypeRange = Item->ReturnTypeRange;
 		Tab.Parameters = Item->Parameters;
+		Tab.BodyItems = Item->BodyItems;
 		Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 		Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		OpenDocument->ActiveFunctionTabIndex = OpenDocument->FunctionTabs.Num() - 1;
@@ -2321,49 +2470,50 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
 		ActiveDocument->FileCanvas.Reset();
 		TSharedPtr<SWidget> FunctionEntryAnchor;
-		TSharedRef<SWidget> FunctionContent =
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
+		const FVerseDocument& SourceDocument =
+			*ActiveDocument->Session->GetParseSnapshot().GetDocument();
+		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
+		FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)
 			[
 				SAssignNew(FunctionEntryAnchor, SBox)
 				[
-					BuildFunctionEntryTile(
-						FunctionTab,
-						*ActiveDocument->Session->GetParseSnapshot().GetDocument())
+					BuildFunctionEntryTile(FunctionTab, SourceDocument)
 				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Fill)
-				[
-					SNew(SVerseExecutionWire)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Top)
-				.Padding(8.0f, 8.0f, 0.0f, 8.0f)
-				[
-					SNew(SMultiLineEditableText)
-					.Text(FunctionTab.BodyRange.IsSet()
-						? FText::FromString(ActiveDocument->Session->GetParseSnapshot()
-							.GetDocument()->DecodeOriginalRange(FunctionTab.BodyRange))
-						: FText::GetEmpty())
-					.IsReadOnly(true)
-				]
-			]
-			+ SVerticalBox::Slot()
+			];
+
+		for (int32 Index = 0; Index < FunctionTab.BodyItems.Num(); ++Index)
+		{
+			const FVerseVisualClauseItemDescriptor& Item = FunctionTab.BodyItems[Index];
+			if (Index > 0)
+			{
+				const int32 ExtraBlankLines =
+					FunctionTab.BodyItems[Index - 1].ExtraBlankLineCount;
+				if (ExtraBlankLines > 0)
+				{
+					FunctionContent->AddSlot()
+					.AutoHeight()
+					.HAlign(HAlign_Left)
+					[
+						SNew(SVerseExecutionWire)
+						.ExtraBlankLines(ExtraBlankLines)
+					];
+				}
+			}
+			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)
 			[
-				BuildReturnTile(
-					FunctionTab,
-					*ActiveDocument->Session->GetParseSnapshot().GetDocument())
+				BuildClauseExpressionTile(Item, SourceDocument)
+			];
+		}
+
+		FunctionContent->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			[
+				BuildReturnTile(FunctionTab, SourceDocument)
 			];
 
 		ActiveView = SAssignNew(

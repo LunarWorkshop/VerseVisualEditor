@@ -403,14 +403,31 @@ This step delivers the first complete edit-and-save workflow.
 - Preserve each nested module's independent complete, header, punctuation, and
   interior ranges so movement and insertion target the correct scope.
 
-### 10. Statements and identifiers
+### 10. Statements and identifiers (complete)
 
-- Represent each statement-level expression with a tile.
-- Display statement order with Blueprint-style execution lines.
-- Represent extra blank lines visually without losing their source text.
-- Add typed expression sockets where assignment or reference is valid.
-- Add identifier expressions and scope-aware references.
-- Display the corresponding Verse line as a read-only tile label.
+- Treat a statement as the contextual occurrence of a root expression in an
+  executable clause, not as a separate VST node or visible wrapper tile.
+- Retain a nonvisual clause-item descriptor for each root expression containing
+  its revision-specific expression, trivia, and type ranges; separator form;
+  blank-line count; and final-value position.
+- Limit the first supported expression to a line containing one identifier.
+  Preserve every other root expression as a read-only unsupported expression
+  tile until its later expression step is implemented.
+- Arrange root expression tiles vertically and connect them with solid,
+  Blueprint-style execution pins and lines.
+- Represent extra blank lines as additional execution-line length with small
+  horizontal markers, without losing or regenerating their source bytes.
+- Give identifier expression tiles left and right Blueprint-style typed sockets.
+  Resolve the initial socket type from an in-scope function parameter when
+  available and use the generic Blueprint object color otherwise.
+- Reserve the left socket for consuming an r-value reference and the right
+  socket for the identifier's assignable/l-value role. Step 11 will make a drag
+  from an identifier into an empty expression create an identifier reference;
+  Step 13 will implement assignment-producing drags. Step 10 renders the typed
+  endpoints but does not create unsupported syntax early.
+- Display the complete corresponding Verse source line as a read-only shorthand
+  label. The source range remains authoritative for future localized editing;
+  tiles do not keep serialized source copies.
 
 ### 11. Expression search
 
@@ -419,6 +436,8 @@ This step delivers the first complete edit-and-save workflow.
 - Filter entries by expected type and current scope.
 - Initially populate the menu with valid identifiers.
 - Replace the empty expression with the selected expression type.
+- Allow a compatible identifier socket dragged into an empty expression to
+  create that identifier expression through a localized source replacement.
 - Allow later expression implementations to register their own entries.
 
 ### 12. Literal expressions
@@ -434,6 +453,8 @@ This step delivers the first complete edit-and-save workflow.
 - Create correctly typed child expression positions automatically.
 - Support unary and binary layouts.
 - Restrict expression choices according to operand and result types.
+- Implement compatible identifier-to-destination socket drags that create an
+  assignment expression through the same localized editing pipeline.
 
 ### 14. Function calls
 

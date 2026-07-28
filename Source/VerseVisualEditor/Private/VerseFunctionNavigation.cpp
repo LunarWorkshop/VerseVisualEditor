@@ -40,6 +40,7 @@ namespace
 					Item.FunctionRange = Tile.Range;
 					Item.DeclarationRange = Tile.HeaderRange;
 					Item.BodyRange = Tile.BodyRange;
+					Item.BodyItems = Tile.BodyClause.Items;
 					Item.ReturnTypeRange = Tile.TypeRange;
 					for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
 					{

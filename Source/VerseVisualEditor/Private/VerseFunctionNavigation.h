@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "VerseDocumentRevision.h"
+#include "VerseVisualTile.h"
 
 class FVerseParseSnapshot;
-struct FVerseVisualTile;
 
 struct FVerseFunctionNavigationParameter
 {
@@ -21,6 +21,7 @@ struct FVerseFunctionNavigationItem
 	FVerseTextRange BodyRange;
 	FVerseTextRange ReturnTypeRange;
 	TArray<FVerseFunctionNavigationParameter> Parameters;
+	TArray<FVerseVisualClauseItemDescriptor> BodyItems;
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
 };

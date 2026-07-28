@@ -11,6 +11,18 @@ enum class EVerseVisualTileKind : uint8
 	Unknown
 };
 
+struct FVerseVisualClauseItemDescriptor
+{
+	FVerseTextRange ExpressionRange;
+	FVerseTextRange LeadingTriviaRange;
+	FVerseTextRange TrailingTriviaRange;
+	FVerseTextRange TypeRange;
+	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
+	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+	int32 ExtraBlankLineCount = 0;
+	bool bIsFinalValuePosition = false;
+};
+
 struct FVerseVisualClauseDescriptor
 {
 	FVerseTextRange InteriorRange;
@@ -18,6 +30,7 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange ClosingPunctuationRange;
 	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
 	FVerseTextRange EmptyBodyInsertionAnchor;
+	TArray<FVerseVisualClauseItemDescriptor> Items;
 };
 
 struct FVerseVisualFunctionParameter

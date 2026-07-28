@@ -387,6 +387,62 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			Function->Children[0].Kind,
 			EVerseSourceRegionKind::Raw);
 	}
+	TestEqual(TEXT("Unsupported compound root is still represented as one clause item"),
+		Function->BodyClause.Items.Num(), 1);
+	if (Function->BodyClause.Items.Num() == 1)
+	{
+		TestEqual(TEXT("Compound root remains unsupported for Step 10"),
+			Function->BodyClause.Items[0].ExpressionKind,
+			EVerseExpressionKind::Unsupported);
+	}
+
+	const FVerseSourceRegion* IdentifierFunction = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("Describe"));
+	if (TestNotNull(TEXT("Identifier-body function is recognized"), IdentifierFunction)
+		&& TestEqual(TEXT("Single identifier becomes one clause item"),
+			IdentifierFunction->BodyClause.Items.Num(), 1))
+	{
+		const FVerseClauseItemDescriptor& Item = IdentifierFunction->BodyClause.Items[0];
+		TestEqual(TEXT("Bare identifier is the first supported expression kind"),
+			Item.ExpressionKind,
+			EVerseExpressionKind::Identifier);
+		TestTrue(TEXT("Identifier range is source exact"),
+			Snapshot.GetSourceView(Item.ExpressionRange) == UTF8TEXTVIEW("Label"));
+		TestTrue(TEXT("Identifier type resolves from the function parameter"),
+			Snapshot.GetSourceView(Item.TypeRange) == UTF8TEXTVIEW("string"));
+		TestTrue(TEXT("Single identifier is the final value position"),
+			Item.bIsFinalValuePosition);
+		TestEqual(TEXT("Single identifier ends its clause"),
+			Item.Separator,
+			EVerseClauseItemSeparator::EndOfClause);
+	}
+
+	const FVerseSourceRegion* SpacedFunction = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("ChooseLast"));
+	if (TestNotNull(TEXT("Multi-expression function is recognized"), SpacedFunction)
+		&& TestEqual(TEXT("Each root identifier becomes a clause item"),
+			SpacedFunction->BodyClause.Items.Num(), 2))
+	{
+		const FVerseClauseItemDescriptor& First = SpacedFunction->BodyClause.Items[0];
+		const FVerseClauseItemDescriptor& Last = SpacedFunction->BodyClause.Items[1];
+		TestTrue(TEXT("First root identifier is exact"),
+			Snapshot.GetSourceView(First.ExpressionRange) == UTF8TEXTVIEW("First"));
+		TestEqual(TEXT("Blank source line is retained as visual spacing metadata"),
+			First.ExtraBlankLineCount, 1);
+		TestEqual(TEXT("Newline separator is classified from the source gap"),
+			First.Separator,
+			EVerseClauseItemSeparator::Newline);
+		TestFalse(TEXT("First expression is not the function result position"),
+			First.bIsFinalValuePosition);
+		TestTrue(TEXT("Last expression is the function result position"),
+			Last.bIsFinalValuePosition);
+		TestTrue(TEXT("Trailing trivia preserves source through the next expression"),
+			Snapshot.GetSourceView(First.TrailingTriviaRange).Find(UTF8TEXTVIEW("\n\n")) != INDEX_NONE);
+	}
 	return true;
 }
 

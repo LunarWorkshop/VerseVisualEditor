@@ -83,6 +83,18 @@ namespace
 					Descriptor.EmptyBodyInsertionByte,
 					Descriptor.EmptyBodyInsertionByte));
 		}
+		for (const FVerseClauseItemDescriptor& Item : Descriptor.Items)
+		{
+			FVerseVisualClauseItemDescriptor& VisualItem = Result.Items.AddDefaulted_GetRef();
+			VisualItem.ExpressionRange = MakeTextRange(Revision, Item.ExpressionRange);
+			VisualItem.LeadingTriviaRange = MakeTextRange(Revision, Item.LeadingTriviaRange);
+			VisualItem.TrailingTriviaRange = MakeTextRange(Revision, Item.TrailingTriviaRange);
+			VisualItem.TypeRange = MakeTextRange(Revision, Item.TypeRange);
+			VisualItem.ExpressionKind = Item.ExpressionKind;
+			VisualItem.Separator = Item.Separator;
+			VisualItem.ExtraBlankLineCount = Item.ExtraBlankLineCount;
+			VisualItem.bIsFinalValuePosition = Item.bIsFinalValuePosition;
+		}
 		return Result;
 	}
 
