@@ -4,6 +4,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FVerseDocument;
+struct FSlateRoundedBoxBrush;
 
 /** Canvas-independent rendering of every Verse visual tile kind. */
 class SVerseTile final : public SCompoundWidget
@@ -55,6 +56,7 @@ private:
 	FReply HandleHeaderMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
 	FReply ToggleExpanded();
 	const FSlateBrush* GetExpansionImage() const;
+	const FSlateBrush* GetHeaderBrush() const;
 	EVisibility GetBodyVisibility() const;
 	FSlateColor GetOutlineColor() const;
 
@@ -66,6 +68,10 @@ private:
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TSharedPtr<SWidget> FirstValueInputAnchor;
 	TSharedPtr<SWidget> FirstValueOutputAnchor;
+	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
+	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
+	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;
+	TUniquePtr<FSlateRoundedBoxBrush> BodyBrush;
 	bool bExpanded = true;
 	bool bShowBody = true;
 };

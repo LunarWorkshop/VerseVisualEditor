@@ -363,16 +363,20 @@ namespace
 		TSharedRef<const FVerseDocument> Document)
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
-		const FLinearColor TileColor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
-			? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
-			: bExpression && Tile.ExpressionKind == EVerseExpressionKind::Identifier
-				? FLinearColor(0.10f, 0.19f, 0.28f, 1.0f)
+		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
+			|| Tile.Kind == EVerseVisualTileKind::FunctionReturn;
+		const bool bIdentifier = bExpression
+			&& Tile.ExpressionKind == EVerseExpressionKind::Identifier;
+		const FLinearColor TileColor = bFunctionBoundary
+			? FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("6a3083")))
+			: bIdentifier
+				? FLinearColor(0.025f, 0.025f, 0.035f, 1.0f)
 				: FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
 		TSharedRef<SWidget> Body = SNullWidget::NullWidget;
-		if (bExpression)
+		if (bExpression && !bIdentifier)
 		{
 			Body = SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderImage(nullptr)
 				.Padding(FMargin(10.0f, 7.0f))
 				[
 					SNew(STextBlock)
@@ -384,11 +388,11 @@ namespace
 			.Tile(Tile)
 			.Document(Document)
 			.TileColor(TileColor)
-			.UnselectedOutlineColor(TileColor)
+			.UnselectedOutlineColor(FLinearColor::Black)
 			.HeaderPadding(Tile.Kind == EVerseVisualTileKind::FunctionEntry
 				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
-			.ShowBody(bExpression)
+			.ShowBody(bExpression && !bIdentifier)
 			.BodyContent()
 			[
 				Body

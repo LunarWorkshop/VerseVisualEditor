@@ -1,5 +1,6 @@
 #include "SVerseTile.h"
 
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "GraphEditorSettings.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
@@ -115,6 +116,16 @@ namespace
 
 void SVerseTile::Construct(const FArguments& InArgs)
 {
+	constexpr float BlueprintCornerRadius = 6.0f;
+	constexpr float InnerCornerRadius = BlueprintCornerRadius - 1.0f;
+	OuterBrush = MakeUnique<FSlateRoundedBoxBrush>(FLinearColor::White, BlueprintCornerRadius);
+	ExpandedHeaderBrush = MakeUnique<FSlateRoundedBoxBrush>(
+		FLinearColor::White,
+		FVector4(InnerCornerRadius, InnerCornerRadius, 0.0f, 0.0f));
+	CollapsedHeaderBrush = MakeUnique<FSlateRoundedBoxBrush>(FLinearColor::White, InnerCornerRadius);
+	BodyBrush = MakeUnique<FSlateRoundedBoxBrush>(
+		FLinearColor::White,
+		FVector4(0.0f, 0.0f, InnerCornerRadius, InnerCornerRadius));
 	Tile = InArgs._Tile;
 	Document = InArgs._Document;
 	IsSelected = InArgs._IsSelected;
@@ -139,16 +150,16 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
 		.OnMouseButtonDown(this, &SVerseTile::HandleTileMouseButtonDown)
-		.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+		.BorderImage(OuterBrush.Get())
 		.BorderBackgroundColor(this, &SVerseTile::GetOutlineColor)
-		.Padding(2.0f)
+		.Padding(1.0f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
 				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderImage(this, &SVerseTile::GetHeaderBrush)
 				.BorderBackgroundColor(InArgs._TileColor)
 				.Padding(0.0f)
 				[
@@ -197,7 +208,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			[
 				SNew(SBorder)
 				.Visibility(this, &SVerseTile::GetBodyVisibility)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderImage(BodyBrush.Get())
 				.BorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
 				.Padding(0.0f)
 				[
@@ -253,9 +264,11 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	const FText Type = GetTypeText();
 	const FText Lines = GetLineText();
 	TSharedRef<SVerticalBox> Header = SNew(SVerticalBox);
-	Header->AddSlot().AutoHeight()
+	Header->AddSlot()
+	.AutoHeight()
 	[
 		SNew(SHorizontalBox)
+		.Visibility(Kind.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 5.0f, 0.0f)
 		[
 			SNew(SImage)
@@ -294,9 +307,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	}
 	if (!Lines.IsEmpty())
 	{
-		const float LineLeftPadding = Tile.Kind == EVerseVisualTileKind::FunctionEntry
-			? 0.0f
-			: -19.0f;
+		const float LineLeftPadding = bShowBody ? -19.0f : 0.0f;
 		Header->AddSlot().AutoHeight().Padding(LineLeftPadding, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
@@ -390,7 +401,7 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::Expression:
 		return Tile.ExpressionKind == EVerseExpressionKind::Identifier
-			? LOCTEXT("IdentifierKind", "Identifier")
+			? FText::GetEmpty()
 			: LOCTEXT("ExpressionKind", "Expression");
 	case EVerseVisualTileKind::FunctionEntry: return LOCTEXT("FunctionEntryKind", "Function");
 	case EVerseVisualTileKind::FunctionReturn: return LOCTEXT("FunctionReturnKind", "Return");
@@ -487,6 +498,11 @@ FReply SVerseTile::ToggleExpanded()
 const FSlateBrush* SVerseTile::GetExpansionImage() const
 {
 	return FCoreStyle::Get().GetBrush(bExpanded ? "TreeArrow_Expanded" : "TreeArrow_Collapsed");
+}
+
+const FSlateBrush* SVerseTile::GetHeaderBrush() const
+{
+	return bShowBody && bExpanded ? ExpandedHeaderBrush.Get() : CollapsedHeaderBrush.Get();
 }
 
 EVisibility SVerseTile::GetBodyVisibility() const

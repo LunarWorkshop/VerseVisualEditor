@@ -479,9 +479,11 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
 	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
 	const FLinearColor TileColor = bDefinition
-		? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
+		? Tile.DefinitionKind == VerseSyntaxKind::Function
+			? FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2f4655")))
+			: FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("182a36")))
 		: bComment
-			? FLinearColor(0.10f, 0.30f, 0.16f, 1.0f)
+			? FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("10251a")))
 			: FLinearColor(0.35f, 0.20f, 0.08f, 1.0f);
 	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
 	const FVerseByteRange ContentRange = Tile.Kind == EVerseVisualTileKind::Unknown
@@ -517,7 +519,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.TileColor(TileColor)
 			.UnselectedOutlineColor(bHasDiagnostic
 				? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
-				: TileColor)
+				: FLinearColor::Black)
 			.HeaderPadding(FMargin(0.0f, 6.0f, 8.0f, 6.0f))
 			.ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
 			.IsSelected_Lambda([this, Range = Tile.Range]()
@@ -531,7 +533,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.BodyContent()
 			[
 				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderImage(nullptr)
 				.Padding(10.0f)
 				[
 					BodyContent
@@ -642,10 +644,10 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.Document(Snapshot->GetDocument())
 		.Compact(true)
 		.DiagnosticText(bHasDiagnostic ? FormatDiagnosticMessages(TileIndex) : FText::GetEmpty())
-		.TileColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
+		.TileColor(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("182a36"))))
 		.UnselectedOutlineColor(bHasDiagnostic
 			? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
-			: FLinearColor::Transparent)
+			: FLinearColor::Black)
 		.HeaderPadding(FMargin(0.0f, 2.0f, 4.0f, 2.0f))
 		.ArrowPadding(FMargin(4.0f, 3.0f, 3.0f, 0.0f))
 		.IsSelected_Lambda([this, Range = Tile.Range]()
@@ -657,7 +659,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.BodyContent()
 		[
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderImage(nullptr)
 			.Padding(8.0f)
 			[
 				SNew(SMultiLineEditableText)
