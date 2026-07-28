@@ -9,6 +9,7 @@
 #include "VerseOutliner.h"
 #include "SVerseTile.h"
 #include "VerseExpressionActions.h"
+#include "VerseGraphCoordinates.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/STreeView.h"
 
@@ -45,9 +46,6 @@ public:
 		const double InCurrentTime,
 		const float InDeltaTime) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
-	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 	void SaveActiveDocumentFromMenu();
 	void SaveActiveDocumentAs();
 	void SaveAllDocuments();
@@ -160,8 +158,12 @@ private:
 		FVerseCompilationResult Result);
 	void InvalidateCompilationResult(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	FReply BeginSocketDrag(const struct FVerseSocketDragStart& DragStart);
-	void OpenExpressionSearch(FVector2D ScreenPosition);
-	void FinishExpressionSearch(bool bKeepPreview = false);
+	void HandleConnectionDropped(
+		const struct FVerseSocketDragStart& DragStart,
+		FVerseDesktopPoint DesktopPosition);
+	void HandleConnectionCancelled();
+	void OpenExpressionSearch(FVerseDesktopPoint DesktopPosition);
+	void FinishExpressionSearch();
 	void ApplyExpressionAction(TSharedPtr<struct FVerseExpressionAction> Action);
 
 	void RegisterDirectoryWatcher();
@@ -195,10 +197,7 @@ private:
 	int32 ProjectBuildWarningCount = 0;
 	int32 ProjectBuildErrorCount = 0;
 	EVerseCompilationMode CompilationMode = EVerseCompilationMode::Continuous;
-	TWeakPtr<SOverlay> FunctionGraphOverlay;
-	TSharedPtr<SWidget> SocketDragPreviewWire;
 	TOptional<struct FVerseSocketDragStart> SocketDrag;
-	FVector2D SocketDragScreenPosition = FVector2D::ZeroVector;
 	TArray<TSharedPtr<struct FVerseExpressionAction>> ExpressionActions;
 	TSharedPtr<class IMenu> ExpressionMenu;
 };

@@ -2,20 +2,12 @@
 #include "SVerseTile.h"
 
 #include "VerseDocumentSession.h"
-#include "VerseGraphBackground.h"
-#include "Layout/Clipping.h"
-#include "Rendering/DrawElements.h"
-#include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/Layout/SScaleBox.h"
-#include "Widgets/Layout/SScrollBar.h"
-#include "Widgets/Layout/SScrollBox.h"
-#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -23,10 +15,6 @@
 
 namespace
 {
-	constexpr float MinimumZoom = 0.5f;
-	constexpr float MaximumZoom = 2.0f;
-	constexpr float ZoomStep = 0.1f;
-
 	bool BelongsInCompactStack(const FVerseVisualTile& Tile)
 	{
 		return Tile.Kind == EVerseVisualTileKind::Comment
@@ -79,7 +67,6 @@ void SVerseFileCanvas::Construct(
 	Tiles = InSession->GetTiles();
 	TileWidgets.Reset();
 	Diagnostics = InArgs._Diagnostics;
-	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
 	OnFunctionOpened = InArgs._OnFunctionOpened;
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
@@ -87,79 +74,20 @@ void SVerseFileCanvas::Construct(
 	{
 		Selection.Select(InitialSelectedRange.GetValue());
 	}
-	HorizontalScrollbar = SNew(SScrollBar).Orientation(Orient_Horizontal);
-	VerticalScrollbar = SNew(SScrollBar).Orientation(Orient_Vertical);
-
 	ChildSlot
 	[
-		SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.FillHeight(1.0f)
+		SAssignNew(GraphSurface, SVerseGraphSurface, InitialViewState, false)
+		.UseEdgePanPadding(false)
+		.OnBackgroundClicked(FSimpleDelegate::CreateSP(this, &SVerseFileCanvas::ClearTileSelection))
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SAssignNew(VerticalScrollBox, SScrollBox)
-				.Orientation(Orient_Vertical)
-				.ExternalScrollbar(VerticalScrollbar)
-				.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-				+ SScrollBox::Slot()
-				[
-					SAssignNew(HorizontalScrollBox, SScrollBox)
-					.Orientation(Orient_Horizontal)
-					.ExternalScrollbar(HorizontalScrollbar)
-					.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-					+ SScrollBox::Slot()
-					[
-						SAssignNew(ScaleBox, SScaleBox)
-						.Stretch(EStretch::UserSpecified)
-						.StretchDirection(EStretchDirection::Both)
-						.UserSpecifiedScale(Zoom)
-						.HAlign(HAlign_Left)
-						.VAlign(VAlign_Top)
-						[
-							BuildTileRow()
-						]
-					]
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			[
-				VerticalScrollbar.ToSharedRef()
-			]
-		]
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				HorizontalScrollbar.ToSharedRef()
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			[
-				SNew(SSpacer)
-				.Size(FVector2D(12.0f, 12.0f))
-			]
+			BuildTileRow()
 		]
 	];
-
-	HorizontalScrollBox->SetScrollOffset(FMath::Max(0.0, InitialViewState.ScrollOffset.X));
-	VerticalScrollBox->SetScrollOffset(FMath::Max(0.0, InitialViewState.ScrollOffset.Y));
 }
 
 FVerseCanvasViewState SVerseFileCanvas::GetViewState() const
 {
-	FVerseCanvasViewState ViewState;
-	ViewState.ScrollOffset = FVector2D(
-		HorizontalScrollBox.IsValid() ? HorizontalScrollBox->GetScrollOffset() : 0.0f,
-		VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f);
-	ViewState.Zoom = Zoom;
-	return ViewState;
+	return GraphSurface.IsValid() ? GraphSurface->GetViewState() : FVerseCanvasViewState{};
 }
 
 bool SVerseFileCanvas::FocusTile(const FVerseVisualTile& Tile)
@@ -193,208 +121,9 @@ bool SVerseFileCanvas::FocusTile(const FVerseVisualTile& Tile)
 
 	Selection.Select(Tile.Range);
 	OnTileSelected.ExecuteIfBound(Tile);
-	HorizontalScrollBox->ScrollDescendantIntoView(
-		WidgetToFocus,
-		true,
-		EDescendantScrollDestination::Center,
-		20.0f);
-	VerticalScrollBox->ScrollDescendantIntoView(
-		WidgetToFocus,
-		true,
-		EDescendantScrollDestination::Center,
-		20.0f);
+	GraphSurface->FocusWidget(WidgetToFocus, 20.0f);
 	Invalidate(EInvalidateWidgetReason::Paint);
 	return true;
-}
-
-int32 SVerseFileCanvas::OnPaint(
-	const FPaintArgs& Args,
-	const FGeometry& AllottedGeometry,
-	const FSlateRect& MyCullingRect,
-	FSlateWindowElementList& OutDrawElements,
-	int32 LayerId,
-	const FWidgetStyle& InWidgetStyle,
-	bool bParentEnabled) const
-{
-	const FGeometry& ScrollGeometry = VerticalScrollBox->GetCachedGeometry();
-	const FVector2D CanvasSize = ScrollGeometry.GetLocalSize();
-	const FPaintGeometry CanvasPaintGeometry = AllottedGeometry.ToPaintGeometry(
-		CanvasSize,
-		FSlateLayoutTransform(FVector2D::ZeroVector));
-	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
-	PaintVerseGraphBackground(
-		CanvasPaintGeometry,
-		CanvasSize,
-		FVector2D(
-			-HorizontalScrollBox->GetScrollOffset(),
-			-VerticalScrollBox->GetScrollOffset()),
-		Zoom,
-		OutDrawElements,
-		LayerId);
-	OutDrawElements.PopClip();
-	const int32 ContentLayer = SCompoundWidget::OnPaint(
-		Args,
-		AllottedGeometry,
-		MyCullingRect,
-		OutDrawElements,
-		LayerId + 2,
-		InWidgetStyle,
-		bParentEnabled);
-	if (!bIsPanning)
-	{
-		return ContentLayer;
-	}
-
-	const FSlateBrush* CursorBrush = FAppStyle::GetBrush(TEXT("SoftwareCursor_Grab"));
-	OutDrawElements.PushClip(FSlateClippingZone(CanvasPaintGeometry));
-	FSlateDrawElement::MakeBox(
-		OutDrawElements,
-		ContentLayer + 1,
-		AllottedGeometry.ToPaintGeometry(
-			CursorBrush->ImageSize,
-			FSlateLayoutTransform(SoftwareCursorPosition - CursorBrush->ImageSize / 2.0f)),
-		CursorBrush);
-	OutDrawElements.PopClip();
-	return ContentLayer + 1;
-}
-
-FReply SVerseFileCanvas::OnPreviewMouseButtonDown(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::RightMouseButton
-		|| !VerticalScrollBox.IsValid())
-	{
-		return FReply::Unhandled();
-	}
-
-	const FVector2D LocalCursorPosition = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-	const FVector2D CanvasSize = VerticalScrollBox->GetCachedGeometry().GetLocalSize();
-	if (LocalCursorPosition.X < 0.0f
-		|| LocalCursorPosition.Y < 0.0f
-		|| LocalCursorPosition.X > CanvasSize.X
-		|| LocalCursorPosition.Y > CanvasSize.Y)
-	{
-		return FReply::Unhandled();
-	}
-
-	bIsPanning = true;
-	SoftwareCursorPosition = LocalCursorPosition;
-	Invalidate(EInvalidateWidgetReason::Paint);
-	return FReply::Handled()
-		.CaptureMouse(SharedThis(this))
-		.UseHighPrecisionMouseMovement(SharedThis(this));
-}
-
-FReply SVerseFileCanvas::OnMouseButtonDown(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
-	{
-		return FReply::Unhandled();
-	}
-
-	Selection.Clear();
-	OnSelectionCleared.ExecuteIfBound();
-	Invalidate(EInvalidateWidgetReason::Paint);
-	return FReply::Handled();
-}
-
-FReply SVerseFileCanvas::OnMouseButtonUp(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
-{
-	if (!bIsPanning || MouseEvent.GetEffectingButton() != EKeys::RightMouseButton)
-	{
-		return FReply::Unhandled();
-	}
-
-	const FVector2D CanvasSize = VerticalScrollBox->GetCachedGeometry().GetLocalSize();
-	const FVector2D CanvasScreenSpaceTopLeft = MyGeometry.LocalToAbsolute(FVector2D::ZeroVector);
-	const FVector2D CanvasScreenSpaceBottomRight = MyGeometry.LocalToAbsolute(CanvasSize);
-	const FVector2D UnclampedScreenSpaceCursorPosition = MyGeometry.LocalToAbsolute(SoftwareCursorPosition);
-	const FVector2D ScreenSpaceCursorPosition(
-		FMath::Clamp(
-			UnclampedScreenSpaceCursorPosition.X,
-			CanvasScreenSpaceTopLeft.X,
-			CanvasScreenSpaceBottomRight.X),
-		FMath::Clamp(
-			UnclampedScreenSpaceCursorPosition.Y,
-			CanvasScreenSpaceTopLeft.Y,
-			CanvasScreenSpaceBottomRight.Y));
-	bIsPanning = false;
-	Invalidate(EInvalidateWidgetReason::Paint);
-	return FReply::Handled()
-		.ReleaseMouseCapture()
-		.SetMousePos(FIntPoint(
-			FMath::RoundToInt(ScreenSpaceCursorPosition.X),
-			FMath::RoundToInt(ScreenSpaceCursorPosition.Y)));
-}
-
-FReply SVerseFileCanvas::OnMouseMove(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
-{
-	if (!bIsPanning || !HasMouseCapture())
-	{
-		return FReply::Unhandled();
-	}
-
-	const FVector2D CursorDelta = MouseEvent.GetCursorDelta();
-	const float PreviousHorizontalOffset = FMath::Clamp(
-		HorizontalScrollBox->GetScrollOffset(),
-		0.0f,
-		HorizontalScrollBox->GetScrollOffsetOfEnd());
-	const float PreviousVerticalOffset = FMath::Clamp(
-		VerticalScrollBox->GetScrollOffset(),
-		0.0f,
-		VerticalScrollBox->GetScrollOffsetOfEnd());
-	const float NewHorizontalOffset = FMath::Clamp(
-		PreviousHorizontalOffset - CursorDelta.X,
-		0.0f,
-		HorizontalScrollBox->GetScrollOffsetOfEnd());
-	const float NewVerticalOffset = FMath::Clamp(
-		PreviousVerticalOffset - CursorDelta.Y,
-		0.0f,
-		VerticalScrollBox->GetScrollOffsetOfEnd());
-
-	HorizontalScrollBox->SetScrollOffset(NewHorizontalOffset);
-	VerticalScrollBox->SetScrollOffset(NewVerticalOffset);
-	SoftwareCursorPosition.X -= NewHorizontalOffset - PreviousHorizontalOffset;
-	SoftwareCursorPosition.Y -= NewVerticalOffset - PreviousVerticalOffset;
-	Invalidate(EInvalidateWidgetReason::Paint);
-	return FReply::Handled();
-}
-
-FReply SVerseFileCanvas::OnMouseWheel(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
-{
-	const float NewZoom = FMath::Clamp(
-		Zoom + FMath::Sign(MouseEvent.GetWheelDelta()) * ZoomStep,
-		MinimumZoom,
-		MaximumZoom);
-	if (!FMath::IsNearlyEqual(NewZoom, Zoom))
-	{
-		Zoom = NewZoom;
-		ScaleBox->SetUserSpecifiedScale(Zoom);
-	}
-	return FReply::Handled();
-}
-
-FCursorReply SVerseFileCanvas::OnCursorQuery(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& CursorEvent) const
-{
-	return FCursorReply::Cursor(bIsPanning ? EMouseCursor::None : EMouseCursor::Default);
-}
-
-void SVerseFileCanvas::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
-{
-	bIsPanning = false;
-	Invalidate(EInvalidateWidgetReason::Paint);
-	SCompoundWidget::OnMouseCaptureLost(CaptureLostEvent);
 }
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildTileRow()

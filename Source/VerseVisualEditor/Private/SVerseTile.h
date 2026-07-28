@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VerseVisualTile.h"
+#include "VerseGraphCoordinates.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FVerseDocument;
@@ -11,6 +12,8 @@ struct FVerseSocketDragStart
 	TSharedPtr<SWidget> Anchor;
 	FVerseVisualTile Tile;
 	FVerseVisualSocket Socket;
+	FVerseDesktopPoint DesktopPosition;
+	FLinearColor WireColor = FLinearColor::White;
 	bool bOutput = false;
 	int32 SocketIndex = INDEX_NONE;
 };
@@ -57,6 +60,8 @@ public:
 	}
 	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return GetValueInputAnchor(0); }
 	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
+	TSharedPtr<SWidget> GetExecutionInputAnchor() const { return ExecutionInputAnchor; }
+	TSharedPtr<SWidget> GetExecutionOutputAnchor() const { return ExecutionOutputAnchor; }
 
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
@@ -96,6 +101,8 @@ private:
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
+	TSharedPtr<SWidget> ExecutionInputAnchor;
+	TSharedPtr<SWidget> ExecutionOutputAnchor;
 	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;

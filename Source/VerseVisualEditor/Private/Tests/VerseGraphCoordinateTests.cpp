@@ -1,0 +1,80 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "VerseGraphCoordinates.h"
+
+#include "Misc/AutomationTest.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphWindowOriginTest,
+	"VerseVisualEditor.Graph.Coordinates.WindowOrigin",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphWindowOriginTest::RunTest(const FString& Parameters)
+{
+	const FVector2D LocalPoint(37.0f, 83.0f);
+	const FGeometry FirstDesktopGeometry = FGeometry::MakeRoot(
+		FVector2D(800.0f, 600.0f), FSlateLayoutTransform(1.0f, FVector2D(100.0f, 250.0f)));
+	const FGeometry SecondDesktopGeometry = FGeometry::MakeRoot(
+		FVector2D(800.0f, 600.0f), FSlateLayoutTransform(1.0f, FVector2D(475.0f, 25.0f)));
+	const FGeometry PaintGeometry = FGeometry::MakeRoot(
+		FVector2D(800.0f, 600.0f), FSlateLayoutTransform(1.0f, FVector2D::ZeroVector));
+
+	const FVerseCanvasPoint FirstLocal = VerseDesktopToCanvas(
+		FirstDesktopGeometry, FVerseDesktopPoint(FirstDesktopGeometry.LocalToAbsolute(LocalPoint)));
+	const FVerseCanvasPoint SecondLocal = VerseDesktopToCanvas(
+		SecondDesktopGeometry, FVerseDesktopPoint(SecondDesktopGeometry.LocalToAbsolute(LocalPoint)));
+	const FVersePaintPoint FirstPaint = VerseCanvasToPaint(PaintGeometry, FirstLocal);
+	const FVersePaintPoint SecondPaint = VerseCanvasToPaint(PaintGeometry, SecondLocal);
+
+	TestEqual(TEXT("First desktop origin is removed once"), FirstPaint.Value, LocalPoint);
+	TestEqual(TEXT("Moving the window does not move the paint endpoint"), SecondPaint.Value, LocalPoint);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphPanZoomTest,
+	"VerseVisualEditor.Graph.Coordinates.PanZoom",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphPanZoomTest::RunTest(const FString& Parameters)
+{
+	const FVerseGraphPoint GraphPoint(FVector2D(120.0f, 80.0f));
+	for (const FVector2D Pan : {FVector2D::ZeroVector, FVector2D(200.0f, 150.0f), FVector2D(900.0f, 700.0f)})
+	{
+		for (const float Zoom : {0.5f, 1.0f, 2.0f})
+		{
+			const FVerseCanvasPoint Origin(-Pan);
+			const FVerseCanvasPoint Canvas = VerseGraphToCanvas(GraphPoint, Origin, Zoom);
+			const FVerseGraphPoint RoundTrip = VerseCanvasToGraph(Canvas, Origin, Zoom);
+			TestEqual(TEXT("Pan and zoom round-trip"), RoundTrip.Value, GraphPoint.Value);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphScaleRoundTripTest,
+	"VerseVisualEditor.Graph.Coordinates.ScaleRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphScaleRoundTripTest::RunTest(const FString& Parameters)
+{
+	const FVector2D LocalPoint(72.0f, 54.0f);
+	for (const float Scale : {0.5f, 1.0f, 2.0f})
+	{
+		const FGeometry DesktopGeometry = FGeometry::MakeRoot(
+			FVector2D(800.0f, 600.0f), FSlateLayoutTransform(Scale, FVector2D(211.0f, 97.0f)));
+		const FGeometry PaintGeometry = FGeometry::MakeRoot(
+			FVector2D(800.0f, 600.0f), FSlateLayoutTransform(Scale, FVector2D(13.0f, 17.0f)));
+		const FVerseCanvasPoint Local = VerseDesktopToCanvas(
+			DesktopGeometry, FVerseDesktopPoint(DesktopGeometry.LocalToAbsolute(LocalPoint)));
+		const FVersePaintPoint Paint = VerseCanvasToPaint(PaintGeometry, Local);
+		TestEqual(
+			FString::Printf(TEXT("Scale %.1f preserves local position"), Scale),
+			Paint.Value,
+			FVector2D(PaintGeometry.LocalToAbsolute(LocalPoint)));
+	}
+	return true;
+}
+
+#endif

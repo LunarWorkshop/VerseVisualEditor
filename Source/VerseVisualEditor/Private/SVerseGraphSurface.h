@@ -1,0 +1,129 @@
+#pragma once
+
+#include "Input/CursorReply.h"
+#include "Input/Reply.h"
+#include "SVerseTile.h"
+#include "VerseCanvasViewState.h"
+#include "VerseGraphCoordinates.h"
+#include "Widgets/SCompoundWidget.h"
+
+class SScaleBox;
+class SScrollBar;
+class SScrollBox;
+
+enum class EVerseGraphConnectionAxis : uint8
+{
+	Horizontal,
+	Vertical,
+};
+
+struct FVerseGraphConnection
+{
+	TWeakPtr<SWidget> SourceAnchor;
+	TWeakPtr<SWidget> TargetAnchor;
+	EVerseGraphConnectionAxis Axis = EVerseGraphConnectionAxis::Horizontal;
+	FLinearColor Color = FLinearColor::White;
+	float Thickness = 2.0f;
+	int32 ExtraBlankLineMarkers = 0;
+	FVector2D SourceAnchorCoordinate = FVector2D(0.5f, 0.5f);
+	FVector2D TargetAnchorCoordinate = FVector2D(0.5f, 0.5f);
+};
+
+DECLARE_DELEGATE_TwoParams(
+	FOnVerseGraphConnectionDropped,
+	const FVerseSocketDragStart&,
+	FVerseDesktopPoint);
+
+/** Shared transform, interaction, background, and connection owner for every Verse graph. */
+class SVerseGraphSurface final : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SVerseGraphSurface)
+		: _UseEdgePanPadding(false)
+	{}
+		SLATE_ARGUMENT(bool, UseEdgePanPadding)
+		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
+		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
+		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
+		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
+		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
+		SLATE_DEFAULT_SLOT(FArguments, Content)
+	SLATE_END_ARGS()
+
+	void Construct(
+		const FArguments& InArgs,
+		FVerseCanvasViewState InitialViewState,
+		bool bCenterInitially);
+
+	FVerseCanvasViewState GetViewState() const;
+	bool FocusWidget(const TSharedPtr<SWidget>& Widget, float Padding = 20.0f);
+	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
+	void EndConnectionPreview();
+	void SetConnections(TArray<FVerseGraphConnection> InConnections);
+
+	virtual void Tick(
+		const FGeometry& AllottedGeometry,
+		double InCurrentTime,
+		float InDeltaTime) override;
+	virtual int32 OnPaint(
+		const FPaintArgs& Args,
+		const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId,
+		const FWidgetStyle& InWidgetStyle,
+		bool bParentEnabled) const override;
+	virtual FReply OnPreviewMouseButtonDown(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseButtonDown(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseButtonUp(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseMove(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseWheel(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FCursorReply OnCursorQuery(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& CursorEvent) const override;
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
+
+private:
+	FMargin GetPanPadding() const;
+	FVector2D GetCanvasSize() const;
+	FVector2D GetGraphOrigin() const;
+	int32 PaintConnections(
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId) const;
+	void PaintConnection(
+		const FVerseGraphConnection& Connection,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId) const;
+	void PaintPreviewConnection(
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId) const;
+
+	TSharedPtr<SScrollBar> HorizontalScrollbar;
+	TSharedPtr<SScrollBar> VerticalScrollbar;
+	TSharedPtr<SScrollBox> HorizontalScrollBox;
+	TSharedPtr<SScrollBox> VerticalScrollBox;
+	TSharedPtr<SScaleBox> ScaleBox;
+	TWeakPtr<SWidget> InitialAnchor;
+	TArray<FVerseGraphConnection> Connections;
+	TOptional<FVerseSocketDragStart> ConnectionDrag;
+	FVerseCanvasPoint PreviewEndpoint;
+	FOnVerseGraphConnectionDropped OnConnectionDropped;
+	FSimpleDelegate OnConnectionCancelled;
+	FSimpleDelegate OnBackgroundClicked;
+	float Zoom = 1.0f;
+	bool bUseEdgePanPadding = false;
+	bool bPendingInitialCenter = false;
+	bool bIsPanning = false;
+	bool bPreviewFrozen = false;
+	FVerseCanvasPoint SoftwareCursorPosition;
+};

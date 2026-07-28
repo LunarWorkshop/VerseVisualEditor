@@ -74,28 +74,12 @@ namespace
 			bool bParentEnabled) const override
 		{
 			const FVector2D PinCenter = bInput ? FVector2D(24.0f, 24.0f) : FVector2D(12.0f, 8.0f);
-			const FVector2D WireStart =
-				bInput ? FVector2D(PinCenter.X, 0.0f) : PinCenter + FVector2D(0.0f, 5.0f);
-			const FVector2D WireEnd =
-				bInput ? PinCenter - FVector2D(0.0f, 5.0f) : FVector2D(PinCenter.X, 48.0f);
-			FSlateDrawElement::MakeSpline(
-				OutDrawElements,
-				LayerId,
-				AllottedGeometry.ToPaintGeometry(),
-				WireStart,
-				FVector2D(0.0f, 24.0f),
-				WireEnd,
-				FVector2D(0.0f, 24.0f),
-				2.5f,
-				ESlateDrawEffect::None,
-				FLinearColor::White);
-
 			const FSlateBrush* PinBrush = FAppStyle::GetBrush(
 				bConnected ? "Graph.ExecPin.Connected" : "Graph.ExecPin.Disconnected");
 			const FVector2D PinSize = PinBrush->ImageSize;
 			FSlateDrawElement::MakeRotatedBox(
 				OutDrawElements,
-				LayerId + 1,
+				LayerId,
 				AllottedGeometry.ToPaintGeometry(
 					PinSize,
 					FSlateLayoutTransform(PinCenter - PinSize * 0.5f)),
@@ -105,7 +89,7 @@ namespace
 				PinSize * 0.5f,
 				FSlateDrawElement::RelativeToElement,
 				InWidgetStyle.GetColorAndOpacityTint());
-			return LayerId + 1;
+			return LayerId;
 		}
 
 	private:
@@ -142,7 +126,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.HAlign(HAlign_Left)
 		[
-			SNew(SVerseTileExecutionPin)
+			SAssignNew(ExecutionInputAnchor, SVerseTileExecutionPin)
 			.Input(true)
 			.Connected(Tile.bExecutionInputConnected)
 		];
@@ -243,7 +227,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.VAlign(VAlign_Bottom)
 		.Padding(12.0f, 0.0f, 0.0f, 0.0f)
 		[
-			SNew(SVerseTileExecutionPin)
+			SAssignNew(ExecutionOutputAnchor, SVerseTileExecutionPin)
 			.Input(false)
 			.Connected(Tile.bExecutionOutputConnected)
 		];
@@ -415,7 +399,17 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	{
 		return FReply::Unhandled();
 	}
-	return OnSocketDragStarted.Execute({Anchor, Tile, Socket, bOutput, SocketIndex});
+	FVerseSocketDragStart DragStart;
+	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.Tile = Tile;
+	DragStart.Socket = Socket;
+	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
+	DragStart.WireColor = GetVerseTilePinColor(Socket.TypeRange.IsSet()
+		? Decode(Socket.TypeRange).ToString()
+		: Socket.IntrinsicTypeName.ToString());
+	DragStart.bOutput = bOutput;
+	DragStart.SocketIndex = SocketIndex;
+	return OnSocketDragStarted.Execute(DragStart);
 }
 
 FText SVerseTile::Decode(FVerseByteRange Range) const

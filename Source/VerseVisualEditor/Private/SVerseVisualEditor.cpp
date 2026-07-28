@@ -2,8 +2,6 @@
 
 #include "SVerseFunctionCanvas.h"
 #include "SVerseFileCanvas.h"
-#include "SVerseGraphWire.h"
-#include "SVerseGraphPreviewWire.h"
 #include "SVerseTile.h"
 
 #include "Async/Async.h"
@@ -29,7 +27,6 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
-#include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "UnrealEdGlobals.h"
@@ -55,7 +52,6 @@
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
-#include "Widgets/SLeafWidget.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -219,183 +215,6 @@ namespace
 		FOnVerseExpressionChosen OnChosen;
 	};
 
-	class SVerseExecutionOutput final : public SLeafWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseExecutionOutput) {}
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			SetCanTick(false);
-		}
-
-		virtual FVector2D ComputeDesiredSize(float) const override
-		{
-			return FVector2D(24.0f, 48.0f);
-		}
-
-		virtual int32 OnPaint(
-			const FPaintArgs& Args,
-			const FGeometry& AllottedGeometry,
-			const FSlateRect& MyCullingRect,
-			FSlateWindowElementList& OutDrawElements,
-			int32 LayerId,
-			const FWidgetStyle& InWidgetStyle,
-			bool bParentEnabled) const override
-		{
-			const FVector2D PinCenter(12.0f, 8.0f);
-			const FVector2D WireStart = AllottedGeometry.LocalToAbsolute(PinCenter + FVector2D(0.0f, 5.0f));
-			const FVector2D WireEnd = AllottedGeometry.LocalToAbsolute(FVector2D(PinCenter.X, 48.0f));
-			FSlateDrawElement::MakeDrawSpaceSpline(
-				OutDrawElements,
-				LayerId,
-				WireStart,
-				FVector2D(0.0f, 24.0f),
-				WireEnd,
-				FVector2D(0.0f, 24.0f),
-				2.5f,
-				ESlateDrawEffect::None,
-				FLinearColor::White);
-
-			const FSlateBrush* PinBrush = FAppStyle::GetBrush("Graph.ExecPin.Disconnected");
-			const FVector2D PinSize = PinBrush->ImageSize;
-			FSlateDrawElement::MakeRotatedBox(
-				OutDrawElements,
-				LayerId + 1,
-				AllottedGeometry.ToPaintGeometry(
-					PinSize,
-					FSlateLayoutTransform(PinCenter - PinSize * 0.5f)),
-				PinBrush,
-				ESlateDrawEffect::None,
-				HALF_PI,
-				PinSize * 0.5f,
-				FSlateDrawElement::RelativeToElement,
-				InWidgetStyle.GetColorAndOpacityTint());
-			return LayerId + 1;
-		}
-	};
-
-	class SVerseExecutionWire final : public SLeafWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseExecutionWire) {}
-			SLATE_ARGUMENT(int32, ExtraBlankLines)
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			ExtraBlankLines = FMath::Max(0, InArgs._ExtraBlankLines);
-			SetCanTick(false);
-		}
-
-		virtual FVector2D ComputeDesiredSize(float) const override
-		{
-			return FVector2D(48.0f, ExtraBlankLines * 24.0f);
-		}
-
-		virtual int32 OnPaint(
-			const FPaintArgs& Args,
-			const FGeometry& AllottedGeometry,
-			const FSlateRect& MyCullingRect,
-			FSlateWindowElementList& OutDrawElements,
-			int32 LayerId,
-			const FWidgetStyle& InWidgetStyle,
-			bool bParentEnabled) const override
-		{
-			const FVector2D Start(24.0f, 0.0f);
-			const FVector2D End(24.0f, AllottedGeometry.GetLocalSize().Y);
-			FSlateDrawElement::MakeSpline(
-				OutDrawElements,
-				LayerId,
-				AllottedGeometry.ToPaintGeometry(),
-				Start,
-				FVector2D(0.0f, 24.0f),
-				End,
-				FVector2D(0.0f, 24.0f),
-				2.5f,
-				ESlateDrawEffect::None,
-				FLinearColor::White);
-			for (int32 Index = 0; Index < ExtraBlankLines; ++Index)
-			{
-				const float MarkerY = (Index + 0.5f) * 24.0f;
-				TArray<FVector2D> MarkerPoints;
-				MarkerPoints.Add(FVector2D(18.0f, MarkerY));
-				MarkerPoints.Add(FVector2D(30.0f, MarkerY));
-				FSlateDrawElement::MakeLines(
-					OutDrawElements,
-					LayerId + 1,
-					AllottedGeometry.ToPaintGeometry(),
-					MarkerPoints,
-					ESlateDrawEffect::None,
-					FLinearColor::White,
-					true,
-					2.0f);
-			}
-			return LayerId + 1;
-		}
-
-	private:
-		int32 ExtraBlankLines = 0;
-	};
-
-	class SVerseExecutionInput final : public SLeafWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseExecutionInput) {}
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			SetCanTick(false);
-		}
-
-		virtual FVector2D ComputeDesiredSize(float) const override
-		{
-			return FVector2D(48.0f, 32.0f);
-		}
-
-		virtual int32 OnPaint(
-			const FPaintArgs& Args,
-			const FGeometry& AllottedGeometry,
-			const FSlateRect& MyCullingRect,
-			FSlateWindowElementList& OutDrawElements,
-			int32 LayerId,
-			const FWidgetStyle& InWidgetStyle,
-			bool bParentEnabled) const override
-		{
-			const FVector2D PinCenter(24.0f, 24.0f);
-			const FVector2D WireStart = AllottedGeometry.LocalToAbsolute(FVector2D(PinCenter.X, 0.0f));
-			const FVector2D WireEnd = AllottedGeometry.LocalToAbsolute(PinCenter - FVector2D(0.0f, 5.0f));
-			FSlateDrawElement::MakeDrawSpaceSpline(
-				OutDrawElements,
-				LayerId,
-				WireStart,
-				FVector2D(0.0f, 24.0f),
-				WireEnd,
-				FVector2D(0.0f, 24.0f),
-				2.5f,
-				ESlateDrawEffect::None,
-				FLinearColor::White);
-
-			const FSlateBrush* PinBrush = FAppStyle::GetBrush("Graph.ExecPin.Disconnected");
-			const FVector2D PinSize = PinBrush->ImageSize;
-			FSlateDrawElement::MakeRotatedBox(
-				OutDrawElements,
-				LayerId + 1,
-				AllottedGeometry.ToPaintGeometry(
-					PinSize,
-					FSlateLayoutTransform(PinCenter - PinSize * 0.5f)),
-				PinBrush,
-				ESlateDrawEffect::None,
-				HALF_PI,
-				PinSize * 0.5f,
-				FSlateDrawElement::RelativeToElement,
-				InWidgetStyle.GetColorAndOpacityTint());
-			return LayerId + 1;
-		}
-	};
-
 	FText FormatSourceLines(int32 FirstLine, int32 LastLine)
 	{
 		if (FirstLine == INDEX_NONE || LastLine == INDEX_NONE)
@@ -532,6 +351,7 @@ namespace
 	{
 		TSharedRef<SWidget> Widget;
 		TSharedRef<SVerseTile> RootTile;
+		TArray<FVerseGraphConnection> Connections;
 	};
 
 	FBuiltFunctionGraphRow BuildFunctionGraphRow(
@@ -554,14 +374,13 @@ namespace
 				[
 					RootTile
 				],
-				RootTile};
+				RootTile,
+				{}};
 		}
 
 		const TSharedRef<SVerseTile> LeftOperand = BuildFunctionGraphTile(Tile.Children[0], Document, OnSocketDragStarted);
 		const TSharedRef<SVerseTile> RightOperand = BuildFunctionGraphTile(Tile.Children[1], Document, OnSocketDragStarted);
-		TSharedRef<SOverlay> Subtree = SNew(SOverlay);
-		Subtree->AddSlot()
-		[
+		TSharedRef<SWidget> Subtree =
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 			[
@@ -587,190 +406,16 @@ namespace
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 			[
 				RootTile
-			]
-		];
+			];
 
 		const FString TypeName = GetVisualTypeName(Tile.TypeRange, Tile.IntrinsicTypeName, *Document);
-		Subtree->AddSlot()
-		[
-			SNew(SVerseGraphWire)
-			.SourceAnchor(LeftOperand->GetValueOutputAnchor(0))
-			.TargetAnchor(RootTile->GetValueInputAnchor(0))
-			.WireColor(GetBlueprintPinColor(TypeName))
-		];
-		Subtree->AddSlot()
-		[
-			SNew(SVerseGraphWire)
-			.SourceAnchor(RightOperand->GetValueOutputAnchor(0))
-			.TargetAnchor(RootTile->GetValueInputAnchor(1))
-			.WireColor(GetBlueprintPinColor(TypeName))
-		];
-		return {Subtree, RootTile};
-	}
-
-	TSharedRef<SWidget> BuildFunctionEntryTile(
-		const FOpenVerseFunctionTab& FunctionTab,
-		const FVerseDocument& Document)
-	{
-		const FLinearColor TileColor(0.12f, 0.25f, 0.45f, 1.0f);
-		TSharedRef<SVerticalBox> ParameterPins = SNew(SVerticalBox);
-		for (const FVerseFunctionNavigationParameter& Parameter : FunctionTab.Parameters)
-		{
-			const FString Name = Document.DecodeOriginalRange(Parameter.NameRange);
-			const FString Type = Document.DecodeOriginalRange(Parameter.TypeRange);
-			ParameterPins->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Right)
-			.Padding(0.0f, 1.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 5.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Name))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, -5.0f, 0.0f)
-				[
-					SNew(SImage)
-					.Image(GetBlueprintPinBrush(Type))
-					.ColorAndOpacity(GetBlueprintPinColor(Type))
-					.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
-				]
-			];
-		}
-		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.BorderBackgroundColor(TileColor)
-				.Padding(FMargin(10.0f, 7.0f, 0.0f, 8.0f))
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.FillWidth(1.0f)
-					.Padding(0.0f, 0.0f, 24.0f, 0.0f)
-					[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						.Padding(0.0f, 0.0f, 5.0f, 0.0f)
-						[
-							SNew(SImage)
-							.Image(FAppStyle::GetBrush("GraphEditor.Function_16x"))
-							.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("FunctionEntryKind", "Function"))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-							.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
-						]
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(FunctionTab.Name))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(FormatSourceLines(
-							FunctionTab.FirstDeclarationLine,
-							FunctionTab.LastDeclarationLine))
-						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-						.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
-					]
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						ParameterPins
-					]
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(12.0f, -7.0f, 0.0f, 0.0f)
-			[
-				SNew(SVerseExecutionOutput)
-			];
-	}
-
-	TSharedRef<SWidget> BuildReturnTile(
-		const FOpenVerseFunctionTab& FunctionTab,
-		const FVerseDocument& Document)
-	{
-		const FString ReturnType = FunctionTab.ReturnTypeRange.IsSet()
-			? Document.DecodeOriginalRange(FunctionTab.ReturnTypeRange).TrimStartAndEnd()
-			: FString();
-		const bool bHasReturnValue = !ReturnType.IsEmpty()
-			&& !ReturnType.Equals(TEXT("void"), ESearchCase::IgnoreCase);
-		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SVerseExecutionInput)
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, -8.0f, 0.0f, 0.0f)
-			[
-				SNew(SBox)
-				.MinDesiredWidth(120.0f)
-				[
-					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.BorderBackgroundColor(FLinearColor(0.16f, 0.18f, 0.21f, 1.0f))
-					.Padding(FMargin(12.0f, 10.0f))
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						.Padding(-17.0f, 0.0f, 8.0f, 0.0f)
-						[
-							SNew(SImage)
-							.Visibility(bHasReturnValue ? EVisibility::Visible : EVisibility::Collapsed)
-							.Image(bHasReturnValue ? GetBlueprintPinBrush(ReturnType) : nullptr)
-							.ColorAndOpacity(bHasReturnValue
-								? GetBlueprintPinColor(ReturnType)
-								: FLinearColor::White)
-							.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("FunctionReturnTile", "Return"))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-						]
-					]
-				]
-			];
+		const FLinearColor WireColor = GetBlueprintPinColor(TypeName);
+		TArray<FVerseGraphConnection> Connections;
+		Connections.Add({LeftOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(0),
+			EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+		Connections.Add({RightOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(1),
+			EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+		return {Subtree, RootTile, MoveTemp(Connections)};
 	}
 
 	FText GetSourceControlStatus(const FString& FilePath)
@@ -1388,6 +1033,7 @@ void SVerseVisualEditor::OpenFunctionView(
 
 FReply SVerseVisualEditor::ActivateGlobalView(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	FinishExpressionSearch();
 	if (OpenDocument.IsValid())
 	{
 		if (OpenDocument == ActiveDocument)
@@ -1407,6 +1053,7 @@ FReply SVerseVisualEditor::ActivateFunctionView(
 	TSharedPtr<FOpenVerseDocument> OpenDocument,
 	int32 FunctionTabIndex)
 {
+	FinishExpressionSearch();
 	if (OpenDocument.IsValid() && OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
 	{
 		if (OpenDocument == ActiveDocument)
@@ -1426,6 +1073,7 @@ FReply SVerseVisualEditor::CloseFunctionView(
 	TSharedPtr<FOpenVerseDocument> OpenDocument,
 	int32 FunctionTabIndex)
 {
+	FinishExpressionSearch();
 	if (!OpenDocument.IsValid() || !OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
 	{
 		return FReply::Handled();
@@ -2037,64 +1685,34 @@ FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 
 FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStart)
 {
-	if (!DragStart.Anchor.IsValid() || !ActiveDocument.IsValid())
+	if (!DragStart.Anchor.IsValid() || !ActiveDocument.IsValid()
+		|| !ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
 	{
 		return FReply::Unhandled();
 	}
 	FinishExpressionSearch();
 	SocketDrag = DragStart;
-	SocketDragScreenPosition = FSlateApplication::Get().GetCursorPos();
-	if (const TSharedPtr<SOverlay> Overlay = FunctionGraphOverlay.Pin())
-	{
-		SocketDragPreviewWire = SNew(SVerseGraphPreviewWire)
-			.FixedAnchor(DragStart.Anchor)
-			.FreeEnd_Lambda([this]() { return SocketDragScreenPosition; })
-			.FreeEndIsSource(!DragStart.bOutput)
-			.WireColor(GetBlueprintPinColor(GetVisualTypeName(
-				DragStart.Socket.TypeRange,
-				DragStart.Socket.IntrinsicTypeName,
-				*ActiveDocument->Session->GetParseSnapshot().GetDocument())));
-		Overlay->AddSlot()[SocketDragPreviewWire.ToSharedRef()];
-	}
-	return FReply::Handled().CaptureMouse(SharedThis(this));
+	FOpenVerseFunctionTab& Tab =
+		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+	return Tab.FunctionCanvas.IsValid()
+		? Tab.FunctionCanvas->BeginConnectionDrag(DragStart)
+		: FReply::Unhandled();
 }
 
-FReply SVerseVisualEditor::OnMouseMove(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
+void SVerseVisualEditor::HandleConnectionDropped(
+	const FVerseSocketDragStart& DragStart,
+	FVerseDesktopPoint DesktopPosition)
 {
-	if (SocketDrag.IsSet() && HasMouseCapture())
-	{
-		SocketDragScreenPosition = MouseEvent.GetScreenSpacePosition();
-		Invalidate(EInvalidateWidgetReason::Paint);
-		return FReply::Handled();
-	}
-	return SCompoundWidget::OnMouseMove(MyGeometry, MouseEvent);
+	SocketDrag = DragStart;
+	OpenExpressionSearch(DesktopPosition);
 }
 
-FReply SVerseVisualEditor::OnMouseButtonUp(
-	const FGeometry& MyGeometry,
-	const FPointerEvent& MouseEvent)
+void SVerseVisualEditor::HandleConnectionCancelled()
 {
-	if (SocketDrag.IsSet() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		SocketDragScreenPosition = MouseEvent.GetScreenSpacePosition();
-		OpenExpressionSearch(SocketDragScreenPosition);
-		return FReply::Handled().ReleaseMouseCapture();
-	}
-	return SCompoundWidget::OnMouseButtonUp(MyGeometry, MouseEvent);
+	SocketDrag.Reset();
 }
 
-void SVerseVisualEditor::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
-{
-	SCompoundWidget::OnMouseCaptureLost(CaptureLostEvent);
-	if (!ExpressionMenu.IsValid())
-	{
-		FinishExpressionSearch();
-	}
-}
-
-void SVerseVisualEditor::OpenExpressionSearch(FVector2D ScreenPosition)
+void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition)
 {
 	if (!SocketDrag.IsSet()
 		|| !ActiveDocument.IsValid()
@@ -2113,7 +1731,7 @@ void SVerseVisualEditor::OpenExpressionSearch(FVector2D ScreenPosition)
 		.Actions(ExpressionActions)
 		.OnChosen(FOnVerseExpressionChosen::CreateSP(this, &SVerseVisualEditor::ApplyExpressionAction));
 	ExpressionMenu = FSlateApplication::Get().PushMenu(
-		AsShared(), FWidgetPath(), Search, ScreenPosition,
+		AsShared(), FWidgetPath(), Search, DesktopPosition.Value,
 		FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
 	if (!ExpressionMenu.IsValid())
 	{
@@ -2134,18 +1752,19 @@ void SVerseVisualEditor::OpenExpressionSearch(FVector2D ScreenPosition)
 		});
 }
 
-void SVerseVisualEditor::FinishExpressionSearch(bool bKeepPreview)
+void SVerseVisualEditor::FinishExpressionSearch()
 {
-	if (!bKeepPreview)
+	if (ActiveDocument.IsValid()
+		&& ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
 	{
-		if (const TSharedPtr<SOverlay> Overlay = FunctionGraphOverlay.Pin();
-			Overlay.IsValid() && SocketDragPreviewWire.IsValid())
+		FOpenVerseFunctionTab& Tab =
+			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+		if (Tab.FunctionCanvas.IsValid())
 		{
-			Overlay->RemoveSlot(SocketDragPreviewWire.ToSharedRef());
+			Tab.FunctionCanvas->EndConnectionPreview();
 		}
-		SocketDragPreviewWire.Reset();
-		SocketDrag.Reset();
 	}
+	SocketDrag.Reset();
 	ExpressionActions.Reset();
 	ExpressionMenu.Reset();
 }
@@ -2303,6 +1922,7 @@ FReply SVerseVisualEditor::HandleTabMouseButtonDoubleClick(
 
 void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 {
+	FinishExpressionSearch();
 	FString NormalizedPath = FPaths::ConvertRelativePathToFull(FilePath);
 	FPaths::NormalizeFilename(NormalizedPath);
 	if (const TSharedPtr<FOpenVerseDocument>* Existing = OpenDocuments.FindByPredicate(
@@ -2399,6 +2019,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 
 FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	FinishExpressionSearch();
 	CaptureActiveCanvasView();
 	ActiveDocument = MoveTemp(OpenDocument);
 	RebuildDocumentTabs();
@@ -2409,6 +2030,7 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 
 FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocument)
 {
+	FinishExpressionSearch();
 	if (OpenDocument.IsValid() && OpenDocument->Session.IsValid() && OpenDocument->Session->IsDirty())
 	{
 		const EAppReturnType::Type Choice = FMessageDialog::Open(
@@ -2768,6 +2390,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		const TSharedRef<const FVerseDocument> SourceDocument =
 			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
+		TArray<FVerseGraphConnection> GraphConnections;
+		TArray<TSharedPtr<SVerseTile>> RootTiles;
 		TSharedPtr<SVerseTile> ImplicitReturnSourceTile;
 		TSharedPtr<SVerseTile> ReturnTile;
 		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
@@ -2777,18 +2401,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			{
 				FunctionContent->AddSlot()
 				.AutoHeight()
-				.HAlign(HAlign_Left)
 				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth()
-					[
-						SNew(SBox).WidthOverride(262.0f)
-					]
-					+ SHorizontalBox::Slot().AutoWidth()
-					[
-						SNew(SVerseExecutionWire)
-						.ExtraBlankLines(FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount)
-					]
+					SNew(SBox).HeightOverride(
+						FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount * 24.0f)
 				];
 			}
 			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(
@@ -2801,6 +2416,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			[
 				GraphRow.Widget
 			];
+			GraphConnections.Append(GraphRow.Connections);
+			RootTiles.Add(GraphRow.RootTile);
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
 				FunctionEntryAnchor = GraphRow.RootTile;
@@ -2814,26 +2431,28 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				ReturnTile = GraphRow.RootTile;
 			}
 		}
-
-		TSharedRef<SOverlay> FunctionGraph = SNew(SOverlay);
-		FunctionGraphOverlay = FunctionGraph;
-		FunctionGraph->AddSlot()
-		[
-			FunctionContent
-		];
+		for (int32 Index = 1; Index < RootTiles.Num(); ++Index)
+		{
+			const TSharedPtr<SWidget> Source = RootTiles[Index - 1]->GetExecutionOutputAnchor();
+			const TSharedPtr<SWidget> Target = RootTiles[Index]->GetExecutionInputAnchor();
+			if (Source.IsValid() && Target.IsValid())
+			{
+				GraphConnections.Add({Source, Target, EVerseGraphConnectionAxis::Vertical,
+					FLinearColor::White, 2.5f,
+					FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount,
+					FVector2D(0.5f, 8.0f / 48.0f),
+					FVector2D(0.5f, 24.0f / 32.0f)});
+			}
+		}
 		if (ImplicitReturnSourceTile.IsValid() && ReturnTile.IsValid())
 		{
 			const FString ReturnType = GetVisualTypeName(
 				FunctionTab.GraphTiles.Last().TypeRange,
 				FunctionTab.GraphTiles.Last().IntrinsicTypeName,
 				*SourceDocument);
-			FunctionGraph->AddSlot()
-			[
-				SNew(SVerseGraphWire)
-				.SourceAnchor(ImplicitReturnSourceTile->GetFirstValueOutputAnchor())
-				.TargetAnchor(ReturnTile->GetFirstValueInputAnchor())
-				.WireColor(GetBlueprintPinColor(ReturnType))
-			];
+			GraphConnections.Add({ImplicitReturnSourceTile->GetFirstValueOutputAnchor(),
+				ReturnTile->GetFirstValueInputAnchor(), EVerseGraphConnectionAxis::Horizontal,
+				GetBlueprintPinColor(ReturnType), 2.0f, 0});
 		}
 
 		ActiveView = SAssignNew(
@@ -2842,13 +2461,17 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			FunctionTab.ViewState,
 			!FunctionTab.bHasViewState)
 			.InitialAnchor(FunctionEntryAnchor)
+			.Connections(GraphConnections)
+			.OnConnectionDropped(FOnVerseGraphConnectionDropped::CreateSP(
+				this, &SVerseVisualEditor::HandleConnectionDropped))
+			.OnConnectionCancelled(FSimpleDelegate::CreateSP(
+				this, &SVerseVisualEditor::HandleConnectionCancelled))
 			[
-				FunctionGraph
+				FunctionContent
 			];
 	}
 	else
 	{
-		FunctionGraphOverlay.Reset();
 		ActiveView = SAssignNew(
 			ActiveDocument->FileCanvas,
 			SVerseFileCanvas,

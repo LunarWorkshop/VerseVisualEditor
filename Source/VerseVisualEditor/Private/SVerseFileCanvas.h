@@ -1,7 +1,6 @@
 #pragma once
 
-#include "Input/CursorReply.h"
-#include "Input/Reply.h"
+#include "SVerseGraphSurface.h"
 #include "VerseCanvasViewState.h"
 #include "VerseCompilation.h"
 #include "VerseParseSnapshot.h"
@@ -9,9 +8,6 @@
 #include "VerseVisualTile.h"
 #include "Widgets/SCompoundWidget.h"
 
-class SScaleBox;
-class SScrollBar;
-class SScrollBox;
 class FVerseDocumentSession;
 
 DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
@@ -40,22 +36,6 @@ public:
 	/** Selects a tile and centers its widget, or its nearest rendered containing tile. */
 	bool FocusTile(const FVerseVisualTile& Tile);
 
-	virtual int32 OnPaint(
-		const FPaintArgs& Args,
-		const FGeometry& AllottedGeometry,
-		const FSlateRect& MyCullingRect,
-		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId,
-		const FWidgetStyle& InWidgetStyle,
-		bool bParentEnabled) const override;
-	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
-	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override;
-	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
-
 private:
 	TSharedRef<SWidget> BuildTileRow();
 	TSharedRef<SWidget> BuildTileSequence(
@@ -83,16 +63,9 @@ private:
 	TArray<FVerseVisualTile> Tiles;
 	TArray<FTileWidgetEntry> TileWidgets;
 	TArray<FVerseCompilationDiagnostic> Diagnostics;
-	TSharedPtr<SScrollBar> HorizontalScrollbar;
-	TSharedPtr<SScrollBar> VerticalScrollbar;
-	TSharedPtr<SScrollBox> HorizontalScrollBox;
-	TSharedPtr<SScrollBox> VerticalScrollBox;
-	TSharedPtr<SScaleBox> ScaleBox;
+	TSharedPtr<SVerseGraphSurface> GraphSurface;
 	FVerseTileSelection Selection;
 	FOnVerseTileSelected OnTileSelected;
 	FOnVerseFunctionOpened OnFunctionOpened;
 	FSimpleDelegate OnSelectionCleared;
-	float Zoom = 1.0f;
-	bool bIsPanning = false;
-	FVector2D SoftwareCursorPosition = FVector2D::ZeroVector;
 };
