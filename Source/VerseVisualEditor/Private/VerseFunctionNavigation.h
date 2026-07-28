@@ -21,7 +21,7 @@ struct FVerseFunctionNavigationItem
 	FVerseTextRange BodyRange;
 	FVerseTextRange ReturnTypeRange;
 	TArray<FVerseFunctionNavigationParameter> Parameters;
-	TArray<FVerseVisualClauseItemDescriptor> BodyItems;
+	TArray<FVerseVisualTile> GraphTiles;
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
 };

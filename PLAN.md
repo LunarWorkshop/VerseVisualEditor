@@ -407,6 +407,10 @@ This step delivers the first complete edit-and-save workflow.
 
 - Treat a statement as the contextual occurrence of a root expression in an
   executable clause, not as a separate VST node or visible wrapper tile.
+- Represent file definitions, function entry and return nodes, and expression
+  nodes with the same visual-tile model and shared Slate tile chrome. Canvases
+  arrange those tiles differently but do not introduce canvas-specific tile
+  types, allowing later expression tiles to be nested in file-scope tiles.
 - Retain a nonvisual clause-item descriptor for each root expression containing
   its revision-specific expression, trivia, and type ranges; separator form;
   blank-line count; and final-value position.

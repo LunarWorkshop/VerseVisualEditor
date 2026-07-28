@@ -8,7 +8,16 @@ enum class EVerseVisualTileKind : uint8
 {
 	Definition,
 	Comment,
+	Expression,
+	FunctionEntry,
+	FunctionReturn,
 	Unknown
+};
+
+struct FVerseVisualSocket
+{
+	FVerseTextRange NameRange;
+	FVerseTextRange TypeRange;
 };
 
 struct FVerseVisualClauseItemDescriptor
@@ -50,6 +59,7 @@ struct FVerseVisualTile
 	int32 FirstSourceLine = INDEX_NONE;
 	int32 LastSourceLine = INDEX_NONE;
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
+	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
@@ -62,6 +72,13 @@ struct FVerseVisualTile
 	FVerseVisualClauseDescriptor BodyClause;
 	TArray<FVerseVisualTile> Children;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
+	TArray<FVerseVisualSocket> ValueInputs;
+	TArray<FVerseVisualSocket> ValueOutputs;
+	int32 ExtraBlankLineCount = 0;
+	bool bHasExecutionInput = false;
+	bool bHasExecutionOutput = false;
+	bool bExecutionInputConnected = false;
+	bool bExecutionOutputConnected = false;
 };
 
 class FVerseVisualTileBuilder
@@ -70,4 +87,7 @@ public:
 	static TArray<FVerseVisualTile> Build(
 		const FVerseParseSnapshot& Snapshot,
 		FVerseDocumentRevision Revision = {});
+	static TArray<FVerseVisualTile> BuildFunctionGraph(
+		const FVerseVisualTile& FunctionTile,
+		const FVerseParseSnapshot& Snapshot);
 };

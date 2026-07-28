@@ -186,3 +186,80 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(
 {
 	return BuildTiles(Snapshot, Snapshot.GetSourceRegions(), Revision);
 }
+
+TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
+	const FVerseVisualTile& FunctionTile,
+	const FVerseParseSnapshot& Snapshot)
+{
+	TArray<FVerseVisualTile> GraphTiles;
+	if (FunctionTile.Kind != EVerseVisualTileKind::Definition
+		|| FunctionTile.DefinitionKind != VerseSyntaxKind::Function)
+	{
+		return GraphTiles;
+	}
+
+	FVerseVisualTile& Entry = GraphTiles.AddDefaulted_GetRef();
+	Entry.Kind = EVerseVisualTileKind::FunctionEntry;
+	Entry.DefinitionKind = VerseSyntaxKind::Function;
+	Entry.Range = FunctionTile.HeaderRange;
+	Entry.HeaderRange = FunctionTile.HeaderRange;
+	Entry.NameRange = FunctionTile.NameRange;
+	Entry.FirstSourceLine = FunctionTile.FirstSourceLine;
+	Entry.LastSourceLine = FunctionTile.HeaderRange.IsSet()
+		? Snapshot.GetDocument()->GetOriginalLineNumber(
+			FMath::Max(FunctionTile.HeaderRange.BeginByte, FunctionTile.HeaderRange.EndByte() - 1))
+		: FunctionTile.FirstSourceLine;
+	Entry.bHasExecutionOutput = true;
+	Entry.bExecutionOutputConnected = true;
+	for (const FVerseVisualFunctionParameter& Parameter : FunctionTile.FunctionParameters)
+	{
+		FVerseVisualSocket& Socket = Entry.ValueOutputs.AddDefaulted_GetRef();
+		Socket.NameRange = Parameter.NameRange;
+		Socket.TypeRange = Parameter.TypeRange;
+	}
+
+	for (const FVerseVisualClauseItemDescriptor& Item : FunctionTile.BodyClause.Items)
+	{
+		FVerseVisualTile& Expression = GraphTiles.AddDefaulted_GetRef();
+		Expression.Kind = EVerseVisualTileKind::Expression;
+		Expression.ExpressionKind = Item.ExpressionKind;
+		Expression.Range = Item.ExpressionRange;
+		Expression.NameRange = Item.ExpressionRange;
+		Expression.TypeRange = Item.TypeRange;
+		Expression.FirstSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(
+			Item.ExpressionRange.BeginByte);
+		Expression.LastSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(
+			FMath::Max(Item.ExpressionRange.BeginByte, Item.ExpressionRange.EndByte() - 1));
+		Expression.ExtraBlankLineCount = Item.ExtraBlankLineCount;
+		Expression.bHasExecutionInput = true;
+		Expression.bHasExecutionOutput = true;
+		Expression.bExecutionInputConnected = true;
+		Expression.bExecutionOutputConnected = true;
+		if (Item.ExpressionKind == EVerseExpressionKind::Identifier)
+		{
+			Expression.ValueInputs.Add({{}, Item.TypeRange});
+			Expression.ValueOutputs.Add({{}, Item.TypeRange});
+		}
+	}
+
+	FVerseVisualTile& Return = GraphTiles.AddDefaulted_GetRef();
+	Return.Kind = EVerseVisualTileKind::FunctionReturn;
+	Return.TypeRange = FunctionTile.TypeRange;
+	Return.Range = FunctionTile.BodyRange.IsSet()
+		? FVerseTextRange(
+			FunctionTile.BodyRange.Revision,
+			FVerseByteRange::FromBounds(
+				FunctionTile.BodyRange.EndByte(),
+				FunctionTile.BodyRange.EndByte()))
+		: FVerseTextRange();
+	Return.bHasExecutionInput = true;
+	Return.bExecutionInputConnected = true;
+	const FString ReturnType = FunctionTile.TypeRange.IsSet()
+		? Snapshot.GetDocument()->DecodeOriginalRange(FunctionTile.TypeRange).TrimStartAndEnd()
+		: FString();
+	if (!ReturnType.IsEmpty() && !ReturnType.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+	{
+		Return.ValueInputs.Add({{}, FunctionTile.TypeRange});
+	}
+	return GraphTiles;
+}

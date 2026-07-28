@@ -422,6 +422,29 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		&& Function->Children[0].Kind == EVerseVisualTileKind::Unknown
 		&& Function->Children[0].Range == Function->BodyRange);
 
+	const TArray<FVerseVisualTile> GraphTiles =
+		FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Snapshot);
+	if (TestEqual(TEXT("Function graph uses entry, expression, and return visual tiles"), GraphTiles.Num(), 3))
+	{
+		TestTrue(TEXT("Function entry uses the shared visual tile model"),
+			GraphTiles[0].Kind == EVerseVisualTileKind::FunctionEntry
+			&& GraphTiles[0].bHasExecutionOutput
+			&& GraphTiles[0].bExecutionOutputConnected
+			&& GraphTiles[0].ValueOutputs.Num() == 2);
+		TestTrue(TEXT("Function body expression uses the shared visual tile model"),
+			GraphTiles[1].Kind == EVerseVisualTileKind::Expression
+			&& GraphTiles[1].bHasExecutionInput
+			&& GraphTiles[1].bHasExecutionOutput
+			&& GraphTiles[1].bExecutionInputConnected
+			&& GraphTiles[1].bExecutionOutputConnected
+			&& GraphTiles[1].Range.Revision == Revision);
+		TestTrue(TEXT("Function return uses the shared visual tile model"),
+			GraphTiles[2].Kind == EVerseVisualTileKind::FunctionReturn
+			&& GraphTiles[2].bHasExecutionInput
+			&& GraphTiles[2].bExecutionInputConnected
+			&& GraphTiles[2].ValueInputs.Num() == 1);
+	}
+
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Function, Snapshot);
 	const FVerseTileProperty* Access = Properties.FindByPredicate([](const FVerseTileProperty& Property)
 	{

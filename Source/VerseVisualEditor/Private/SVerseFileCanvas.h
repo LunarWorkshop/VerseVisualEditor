@@ -67,8 +67,6 @@ private:
 	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	TSharedRef<SWidget> BuildFunctionSignature(const struct FVerseVisualTile& Tile) const;
 	FText Decode(FVerseByteRange Range) const;
-	FText FormatSpecifiers(const struct FVerseVisualTile& Tile) const;
-	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
 	FText FormatDiagnosticMessages(int32 TileIndex) const;
 	bool HasDiagnosticForTile(int32 TileIndex) const;
 	FReply SelectTileFromClick(FVerseVisualTile Tile);

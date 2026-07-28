@@ -2,6 +2,7 @@
 
 #include "SVerseFunctionCanvas.h"
 #include "SVerseFileCanvas.h"
+#include "SVerseTile.h"
 
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
@@ -65,7 +66,7 @@ struct FOpenVerseFunctionTab
 	FVerseTextRange BodyRange;
 	FVerseTextRange ReturnTypeRange;
 	TArray<FVerseFunctionNavigationParameter> Parameters;
-	TArray<FVerseVisualClauseItemDescriptor> BodyItems;
+	TArray<FVerseVisualTile> GraphTiles;
 	int32 FirstDeclarationLine = INDEX_NONE;
 	int32 LastDeclarationLine = INDEX_NONE;
 	FVerseCanvasViewState ViewState;
@@ -354,6 +355,43 @@ namespace
 			++End;
 		}
 		return Document.DecodeOriginalRange(FVerseByteRange::FromBounds(Begin, End)).TrimStartAndEnd();
+	}
+
+	TSharedRef<SWidget> BuildFunctionGraphTile(
+		const FVerseVisualTile& Tile,
+		TSharedRef<const FVerseDocument> Document)
+	{
+		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
+		const FLinearColor TileColor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
+			? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
+			: bExpression && Tile.ExpressionKind == EVerseExpressionKind::Identifier
+				? FLinearColor(0.10f, 0.19f, 0.28f, 1.0f)
+				: FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
+		TSharedRef<SWidget> Body = SNullWidget::NullWidget;
+		if (bExpression)
+		{
+			Body = SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(FMargin(10.0f, 7.0f))
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(GetExpressionSourceLine(*Document, Tile.Range)))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+				];
+		}
+		return SNew(SVerseTile)
+			.Tile(Tile)
+			.Document(Document)
+			.TileColor(TileColor)
+			.UnselectedOutlineColor(TileColor)
+			.HeaderPadding(Tile.Kind == EVerseVisualTileKind::FunctionEntry
+				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
+				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
+			.ShowBody(bExpression)
+			.BodyContent()
+			[
+				Body
+			];
 	}
 
 	TSharedRef<SWidget> BuildClauseExpressionTile(
@@ -780,7 +818,7 @@ namespace
 			Tab.BodyRange = Item->BodyRange;
 			Tab.ReturnTypeRange = Item->ReturnTypeRange;
 			Tab.Parameters = Item->Parameters;
-			Tab.BodyItems = Item->BodyItems;
+			Tab.GraphTiles = Item->GraphTiles;
 			Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 			Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		}
@@ -1227,7 +1265,7 @@ void SVerseVisualEditor::OpenFunctionView(
 		Tab.BodyRange = Item->BodyRange;
 		Tab.ReturnTypeRange = Item->ReturnTypeRange;
 		Tab.Parameters = Item->Parameters;
-		Tab.BodyItems = Item->BodyItems;
+		Tab.GraphTiles = Item->GraphTiles;
 		Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 		Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		OpenDocument->ActiveFunctionTabIndex = OpenDocument->FunctionTabs.Num() - 1;
@@ -2470,51 +2508,37 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
 		ActiveDocument->FileCanvas.Reset();
 		TSharedPtr<SWidget> FunctionEntryAnchor;
-		const FVerseDocument& SourceDocument =
-			*ActiveDocument->Session->GetParseSnapshot().GetDocument();
+		const TSharedRef<const FVerseDocument> SourceDocument =
+			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
-		FunctionContent->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			[
-				SAssignNew(FunctionEntryAnchor, SBox)
-				[
-					BuildFunctionEntryTile(FunctionTab, SourceDocument)
-				]
-			];
-
-		for (int32 Index = 0; Index < FunctionTab.BodyItems.Num(); ++Index)
+		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
 		{
-			const FVerseVisualClauseItemDescriptor& Item = FunctionTab.BodyItems[Index];
-			if (Index > 0)
+			const FVerseVisualTile& Tile = FunctionTab.GraphTiles[Index];
+			if (Index > 0 && FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount > 0)
 			{
-				const int32 ExtraBlankLines =
-					FunctionTab.BodyItems[Index - 1].ExtraBlankLineCount;
-				if (ExtraBlankLines > 0)
-				{
-					FunctionContent->AddSlot()
-					.AutoHeight()
-					.HAlign(HAlign_Left)
-					[
-						SNew(SVerseExecutionWire)
-						.ExtraBlankLines(ExtraBlankLines)
-					];
-				}
+				FunctionContent->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Left)
+				[
+					SNew(SVerseExecutionWire)
+					.ExtraBlankLines(FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount)
+				];
 			}
+			TSharedPtr<SBox> TileAnchor;
 			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)
 			[
-				BuildClauseExpressionTile(Item, SourceDocument)
+				SAssignNew(TileAnchor, SBox)
+				[
+					BuildFunctionGraphTile(Tile, SourceDocument)
+				]
 			];
+			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
+			{
+				FunctionEntryAnchor = TileAnchor;
+			}
 		}
-
-		FunctionContent->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			[
-				BuildReturnTile(FunctionTab, SourceDocument)
-			];
 
 		ActiveView = SAssignNew(
 			FunctionTab.FunctionCanvas,

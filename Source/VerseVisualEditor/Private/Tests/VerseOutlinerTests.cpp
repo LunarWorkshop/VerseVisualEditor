@@ -128,6 +128,19 @@ bool FVerseOutlinerHierarchyTest::RunTest(const FString& Parameters)
 			TEXT("Function navigation retains parameters for entry-tile output pins"),
 			Functions[0].Parameters.Num(),
 			1);
+		TestEqual(
+			TEXT("Function navigation carries one shared tile sequence for the graph"),
+			Functions[0].GraphTiles.Num(),
+			3);
+		if (Functions[0].GraphTiles.Num() == 3)
+		{
+			TestEqual(TEXT("Navigation graph starts with a function-entry tile"),
+				Functions[0].GraphTiles[0].Kind,
+				EVerseVisualTileKind::FunctionEntry);
+			TestEqual(TEXT("Navigation graph ends with a function-return tile"),
+				Functions[0].GraphTiles.Last().Kind,
+				EVerseVisualTileKind::FunctionReturn);
+		}
 		if (Functions[0].Parameters.Num() == 1)
 		{
 			TestEqual(

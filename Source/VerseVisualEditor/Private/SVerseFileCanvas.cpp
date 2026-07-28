@@ -1,7 +1,7 @@
 #include "SVerseFileCanvas.h"
+#include "SVerseTile.h"
 
 #include "VerseDocumentSession.h"
-#include "VerseDefinitionIcon.h"
 #include "VerseGraphBackground.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
@@ -9,7 +9,6 @@
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
-#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -66,186 +65,6 @@ namespace
 		return FLinearColor(0.24f, 0.58f, 1.0f, 1.0f);
 	}
 
-	class SVerseTileHeader final : public SCompoundWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseTileHeader) {}
-			SLATE_EVENT(FOnClicked, OnSelected)
-			SLATE_EVENT(FOnClicked, OnOpened)
-			SLATE_DEFAULT_SLOT(FArguments, Content)
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			OnSelected = InArgs._OnSelected;
-			OnOpened = InArgs._OnOpened;
-			ChildSlot[InArgs._Content.Widget];
-		}
-
-		virtual FReply OnMouseButtonDown(
-			const FGeometry& MyGeometry,
-			const FPointerEvent& MouseEvent) override
-		{
-			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnSelected.IsBound()
-				? OnSelected.Execute()
-				: FReply::Unhandled();
-		}
-
-		virtual FReply OnMouseButtonDoubleClick(
-			const FGeometry& MyGeometry,
-			const FPointerEvent& MouseEvent) override
-		{
-			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnOpened.IsBound()
-				? OnOpened.Execute()
-				: FReply::Unhandled();
-		}
-
-	private:
-		FOnClicked OnSelected;
-		FOnClicked OnOpened;
-	};
-
-	class SVerseTileContainer final : public SCompoundWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseTileContainer)
-			: _TileColor(FLinearColor::White)
-			, _UnselectedOutlineColor(FLinearColor::Transparent)
-			, _HeaderPadding(FMargin(0.0f))
-			, _ArrowPadding(FMargin(0.0f))
-			, _IsSelected(false)
-		{}
-			SLATE_ARGUMENT(FLinearColor, TileColor)
-			SLATE_ARGUMENT(FLinearColor, UnselectedOutlineColor)
-			SLATE_ARGUMENT(FMargin, HeaderPadding)
-			SLATE_ARGUMENT(FMargin, ArrowPadding)
-			SLATE_ATTRIBUTE(bool, IsSelected)
-			SLATE_EVENT(FOnClicked, OnSelected)
-			SLATE_EVENT(FOnClicked, OnOpened)
-			SLATE_NAMED_SLOT(FArguments, HeaderContent)
-			SLATE_NAMED_SLOT(FArguments, BodyContent)
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			IsSelected = InArgs._IsSelected;
-			OnOpened = InArgs._OnOpened;
-			UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
-			ChildSlot
-			[
-				SNew(SBorder)
-				.OnMouseButtonDown(this, &SVerseTileContainer::HandleTileMouseButtonDown)
-				.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-				.BorderBackgroundColor(this, &SVerseTileContainer::GetOutlineColor)
-				.Padding(2.0f)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBorder)
-						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-						.BorderBackgroundColor(InArgs._TileColor)
-						.Padding(0.0f)
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Top)
-							.Padding(InArgs._ArrowPadding)
-							[
-								SNew(SButton)
-								.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-								.ContentPadding(0.0f)
-								.OnClicked(this, &SVerseTileContainer::ToggleExpanded)
-								[
-									SNew(SImage)
-									.Image(this, &SVerseTileContainer::GetExpansionImage)
-								]
-							]
-							+ SHorizontalBox::Slot()
-							.FillWidth(1.0f)
-							[
-								SNew(SVerseTileHeader)
-								.OnSelected(InArgs._OnSelected)
-								.OnOpened(InArgs._OnOpened)
-								[
-									SNew(SBorder)
-									.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
-									.Padding(InArgs._HeaderPadding)
-									[
-										InArgs._HeaderContent.Widget
-									]
-								]
-							]
-						]
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBorder)
-						.Visibility(this, &SVerseTileContainer::GetBodyVisibility)
-						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-						.BorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
-						.Padding(0.0f)
-						[
-							InArgs._BodyContent.Widget
-						]
-					]
-				]
-			];
-		}
-
-		virtual FReply OnMouseButtonDoubleClick(
-			const FGeometry& MyGeometry,
-			const FPointerEvent& MouseEvent) override
-		{
-			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnOpened.IsBound()
-				? OnOpened.Execute()
-				: FReply::Unhandled();
-		}
-
-	private:
-		FReply HandleTileMouseButtonDown(
-			const FGeometry& MyGeometry,
-			const FPointerEvent& MouseEvent)
-		{
-			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
-				? FReply::Handled()
-				: FReply::Unhandled();
-		}
-
-		FReply ToggleExpanded()
-		{
-			bExpanded = !bExpanded;
-			Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
-			return FReply::Handled();
-		}
-
-		const FSlateBrush* GetExpansionImage() const
-		{
-			return FCoreStyle::Get().GetBrush(bExpanded
-				? "TreeArrow_Expanded"
-				: "TreeArrow_Collapsed");
-		}
-
-		EVisibility GetBodyVisibility() const
-		{
-			return bExpanded ? EVisibility::Visible : EVisibility::Collapsed;
-		}
-
-		FSlateColor GetOutlineColor() const
-		{
-			return IsSelected.Get(false)
-				? FLinearColor(1.0f, 0.82f, 0.05f, 1.0f)
-				: UnselectedOutlineColor;
-		}
-
-		TAttribute<bool> IsSelected;
-		FOnClicked OnOpened;
-		FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
-		bool bExpanded = true;
-	};
 }
 
 void SVerseFileCanvas::Construct(
@@ -659,25 +478,6 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 {
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
 	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
-	const FText KindText = bDefinition
-		? FText::FromName(Tile.DefinitionKind)
-		: bComment
-			? LOCTEXT("CommentTileKind", "Comment")
-			: LOCTEXT("UnknownTileKind", "unknown");
-	const FText NameText = bDefinition
-		? Decode(Tile.NameRange)
-		: bComment
-			? FText::GetEmpty()
-			: LOCTEXT("UnknownTileName", "raw source");
-	const FText TypeText = bDefinition && Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
-	const FText SpecifierText = bDefinition
-		&& (Tile.DefinitionKind == VerseSyntaxKind::Module
-			|| Tile.DefinitionKind == VerseSyntaxKind::Function)
-		? FormatSpecifiers(Tile)
-		: FText::GetEmpty();
-	const FText DisplayNameText = SpecifierText.IsEmpty()
-		? NameText
-		: FText::Format(LOCTEXT("DefinitionNameWithSpecifiers", "{0}{1}"), NameText, SpecifierText);
 	const FLinearColor TileColor = bDefinition
 		? FLinearColor(0.12f, 0.25f, 0.45f, 1.0f)
 		: bComment
@@ -710,7 +510,10 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 	return SNew(SBox)
 		.MaxDesiredWidth(bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module ? 2400.0f : 720.0f)
 		[
-			SNew(SVerseTileContainer)
+			SNew(SVerseTile)
+			.Tile(Tile)
+			.Document(Snapshot->GetDocument())
+			.DiagnosticText(bHasDiagnostic ? FormatDiagnosticMessages(TileIndex) : FText::GetEmpty())
 			.TileColor(TileColor)
 			.UnselectedOutlineColor(bHasDiagnostic
 				? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
@@ -725,74 +528,6 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.OnOpened(Tile.DefinitionKind == VerseSyntaxKind::Function
 				? FOnClicked::CreateSP(this, &SVerseFileCanvas::OpenFunctionTile, Tile)
 				: FOnClicked())
-			.HeaderContent()
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(0.0f, 0.0f, 5.0f, 0.0f)
-					[
-						SNew(SImage)
-						.Visibility(bDefinition ? EVisibility::Visible : EVisibility::Collapsed)
-						.Image(bDefinition
-							? FAppStyle::GetBrush(GetVerseDefinitionIconName(Tile.DefinitionKind))
-							: nullptr)
-						.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(KindText)
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-						.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
-					]
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(DisplayNameText)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(-19.0f, 6.0f, 0.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(FormatSourceLines(Tile))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Visibility(TypeText.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
-					.Text(TypeText.IsEmpty()
-						? FText::GetEmpty()
-						: FText::Format(LOCTEXT("TileDefinitionType", "Type: {0}"), TypeText))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(-19.0f, 4.0f, 0.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Visibility(bHasDiagnostic ? EVisibility::Visible : EVisibility::Collapsed)
-					.Text(FormatDiagnosticMessages(TileIndex))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
-					.AutoWrapText(true)
-				]
-			]
 			.BodyContent()
 			[
 				SNew(SBorder)
@@ -897,15 +632,16 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildFunctionSignature(const FVerseVisualT
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
-	const FText KindText = FText::FromName(Tile.DefinitionKind);
-	const FText NameText = Decode(Tile.NameRange);
-	const FText TypeText = Tile.TypeRange.IsSet() ? Decode(Tile.TypeRange) : FText::GetEmpty();
 	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
 
 	return SNew(SBox)
 		.MinDesiredWidth(420.0f)
 		[
-		SNew(SVerseTileContainer)
+		SNew(SVerseTile)
+		.Tile(Tile)
+		.Document(Snapshot->GetDocument())
+		.Compact(true)
+		.DiagnosticText(bHasDiagnostic ? FormatDiagnosticMessages(TileIndex) : FText::GetEmpty())
 		.TileColor(FLinearColor(0.12f, 0.25f, 0.45f, 1.0f))
 		.UnselectedOutlineColor(bHasDiagnostic
 			? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
@@ -918,71 +654,6 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		})
 		.OnSelected(FOnClicked::CreateSP(this, &SVerseFileCanvas::SelectTileFromClick, Tile))
 		.OnOpened(FOnClicked())
-		.HeaderContent()
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(2.0f, 0.0f, 5.0f, 0.0f)
-				[
-					SNew(SImage)
-					.Image(FAppStyle::GetBrush(GetVerseDefinitionIconName(Tile.DefinitionKind)))
-					.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 10.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(KindText)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-					.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(STextBlock)
-					.Text(NameText)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(8.0f, 0.0f, 2.0f, 0.0f)
-				[
-					SNew(STextBlock)
-					.Text(TypeText.IsEmpty()
-						? FText::GetEmpty()
-						: FText::Format(LOCTEXT("CompactDefinitionType", ": {0}"), TypeText))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(-19.0f, 6.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(FormatSourceLines(Tile))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-				.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(-19.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Visibility(bHasDiagnostic ? EVisibility::Visible : EVisibility::Collapsed)
-				.Text(FormatDiagnosticMessages(TileIndex))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-				.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
-				.AutoWrapText(true)
-			]
-		]
 		.BodyContent()
 		[
 			SNew(SBorder)
@@ -1002,30 +673,6 @@ FText SVerseFileCanvas::Decode(FVerseByteRange Range) const
 	return Range.IsSet()
 		? FText::FromString(Snapshot->GetDocument()->DecodeOriginalRange(Range))
 		: FText::GetEmpty();
-}
-
-FText SVerseFileCanvas::FormatSpecifiers(const FVerseVisualTile& Tile) const
-{
-	FString Result;
-	for (const FVerseTextRange& Range : Tile.SpecifierRanges)
-	{
-		Result += TEXT("<");
-		Result += Snapshot->GetDocument()->DecodeOriginalRange(Range);
-		Result += TEXT(">");
-	}
-	return FText::FromString(MoveTemp(Result));
-}
-
-FText SVerseFileCanvas::FormatSourceLines(const FVerseVisualTile& Tile) const
-{
-	if (Tile.FirstSourceLine == INDEX_NONE || Tile.LastSourceLine == INDEX_NONE)
-	{
-		return FText::GetEmpty();
-	}
-
-	return FText::FromString(Tile.FirstSourceLine == Tile.LastSourceLine
-		? FString::Printf(TEXT("L%d"), Tile.FirstSourceLine)
-		: FString::Printf(TEXT("L%d-%d"), Tile.FirstSourceLine, Tile.LastSourceLine));
 }
 
 FText SVerseFileCanvas::FormatDiagnosticMessages(int32 TileIndex) const
