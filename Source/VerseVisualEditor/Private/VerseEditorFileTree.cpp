@@ -124,3 +124,31 @@ TArray<TSharedPtr<FVerseFileTreeItem>> VerseVisualEditor::BuildVerseFileTree(TCo
 	}
 	return Result;
 }
+
+TArray<FString> VerseVisualEditor::BuildVerseModulePath(
+	const FString& FilePath,
+	TConstArrayView<FVerseSourceRoot> Roots)
+{
+	FString NormalizedFile = FPaths::ConvertRelativePathToFull(FilePath);
+	FPaths::NormalizeFilename(NormalizedFile);
+	for (const FVerseSourceRoot& Root : Roots)
+	{
+		FString NormalizedRoot = FPaths::ConvertRelativePathToFull(Root.Directory);
+		FPaths::NormalizeDirectoryName(NormalizedRoot);
+		const FString RootPrefix = NormalizedRoot + TEXT("/");
+		if (!NormalizedFile.StartsWith(RootPrefix, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		TArray<FString> Result;
+		Root.Label.ParseIntoArray(Result, TEXT("/"), true);
+		const FString RelativeDirectory = FPaths::GetPath(
+			NormalizedFile.RightChop(RootPrefix.Len()));
+		TArray<FString> DirectoryParts;
+		RelativeDirectory.ParseIntoArray(DirectoryParts, TEXT("/"), true);
+		Result.Append(MoveTemp(DirectoryParts));
+		return Result;
+	}
+	return {};
+}

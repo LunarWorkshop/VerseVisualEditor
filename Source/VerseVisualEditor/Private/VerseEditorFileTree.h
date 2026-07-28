@@ -22,4 +22,7 @@ namespace VerseVisualEditor
 {
 	void DiscoverProjectVerseRoots(TArray<FVerseSourceRoot>& OutRoots);
 	TArray<TSharedPtr<FVerseFileTreeItem>> BuildVerseFileTree(TConstArrayView<FVerseSourceRoot> Roots);
+	TArray<FString> BuildVerseModulePath(
+		const FString& FilePath,
+		TConstArrayView<FVerseSourceRoot> Roots);
 }

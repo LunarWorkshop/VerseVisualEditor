@@ -31,6 +31,7 @@
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
 #include "VerseExternalChange.h"
+#include "VerseFunctionNavigation.h"
 #include "VerseIdentifier.h"
 #include "VerseSpecifier.h"
 #include "VerseTileProperties.h"
@@ -48,8 +49,17 @@
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
+
+struct FOpenVerseFunctionTab
+{
+	FString Name;
+	TArray<FString> ScopePath;
+	FVerseTextRange FunctionRange;
+	FVerseTextRange BodyRange;
+};
 
 struct FOpenVerseDocument
 {
@@ -64,6 +74,8 @@ struct FOpenVerseDocument
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseTileCanvas> TileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
+	TArray<FOpenVerseFunctionTab> FunctionTabs;
+	int32 ActiveFunctionTabIndex = INDEX_NONE;
 	FVerseCompilationResult CompilationResult;
 	bool bHasCompilationResult = false;
 	bool bCompilationPending = false;
@@ -152,6 +164,83 @@ namespace
 			}
 		}
 		return nullptr;
+	}
+
+	bool FindOutlinerItemByRange(
+		TConstArrayView<TSharedPtr<FVerseOutlinerItem>> Items,
+		FVerseTextRange Range,
+		TArray<TSharedPtr<FVerseOutlinerItem>>& Ancestors,
+		TSharedPtr<FVerseOutlinerItem>& OutItem)
+	{
+		for (const TSharedPtr<FVerseOutlinerItem>& Item : Items)
+		{
+			if (Item->TileRange == Range)
+			{
+				OutItem = Item;
+				return true;
+			}
+			Ancestors.Add(Item);
+			if (FindOutlinerItemByRange(Item->Children, Range, Ancestors, OutItem))
+			{
+				return true;
+			}
+			Ancestors.Pop();
+		}
+		return false;
+	}
+
+	const FVerseFunctionNavigationItem* FindFunctionNavigationItem(
+		TConstArrayView<FVerseFunctionNavigationItem> Items,
+		const FOpenVerseFunctionTab& Tab)
+	{
+		if (const FVerseFunctionNavigationItem* ByPath = Items.FindByPredicate(
+			[&Tab](const FVerseFunctionNavigationItem& Item)
+			{
+				return Item.ScopePath == Tab.ScopePath;
+			}))
+		{
+			return ByPath;
+		}
+		return Items.FindByPredicate([&Tab](const FVerseFunctionNavigationItem& Item)
+		{
+			return Item.FunctionRange.BeginByte == Tab.FunctionRange.BeginByte;
+		});
+	}
+
+	void ReconcileFunctionTabs(FOpenVerseDocument& Document)
+	{
+		if (!Document.Session.IsValid())
+		{
+			Document.FunctionTabs.Reset();
+			Document.ActiveFunctionTabIndex = INDEX_NONE;
+			return;
+		}
+
+		const TArray<FVerseFunctionNavigationItem> Items = FVerseFunctionNavigationBuilder::Build(
+			Document.Session->GetTiles(),
+			Document.Session->GetParseSnapshot());
+		for (int32 Index = Document.FunctionTabs.Num() - 1; Index >= 0; --Index)
+		{
+			FOpenVerseFunctionTab& Tab = Document.FunctionTabs[Index];
+			const FVerseFunctionNavigationItem* Item = FindFunctionNavigationItem(Items, Tab);
+			if (!Item)
+			{
+				Document.FunctionTabs.RemoveAt(Index);
+				if (Document.ActiveFunctionTabIndex == Index)
+				{
+					Document.ActiveFunctionTabIndex = INDEX_NONE;
+				}
+				else if (Document.ActiveFunctionTabIndex > Index)
+				{
+					--Document.ActiveFunctionTabIndex;
+				}
+				continue;
+			}
+			Tab.Name = Item->Name;
+			Tab.ScopePath = Item->ScopePath;
+			Tab.FunctionRange = Item->FunctionRange;
+			Tab.BodyRange = Item->BodyRange;
+		}
 	}
 }
 
@@ -251,6 +340,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 								.TreeItemsSource(&OutlinerRootItems)
 								.OnGenerateRow(this, &SVerseVisualEditor::GenerateOutlinerRow)
 								.OnGetChildren(this, &SVerseVisualEditor::GetOutlinerChildren)
+								.OnSelectionChanged(this, &SVerseVisualEditor::HandleOutlinerSelectionChanged)
 								.OnMouseButtonDoubleClick(this, &SVerseVisualEditor::HandleOutlinerItemDoubleClicked)
 								.SelectionMode(ESelectionMode::Single)
 							]
@@ -361,6 +451,10 @@ void SVerseVisualEditor::RefreshOutliner()
 	if (OutlinerTree.IsValid())
 	{
 		OutlinerTree->RequestTreeRefresh();
+		SynchronizeOutlinerSelection(
+			ActiveDocument.IsValid() && ActiveDocument->SelectedTile.IsSet()
+				? TOptional<FVerseTextRange>(ActiveDocument->SelectedTile->Range)
+				: TOptional<FVerseTextRange>());
 	}
 }
 
@@ -432,12 +526,83 @@ void SVerseVisualEditor::GetOutlinerChildren(
 	OutChildren = Item->Children;
 }
 
+void SVerseVisualEditor::HandleOutlinerSelectionChanged(
+	TSharedPtr<FVerseOutlinerItem> Item,
+	ESelectInfo::Type SelectInfo)
+{
+	if (bSynchronizingOutlinerSelection || !ActiveDocument.IsValid())
+	{
+		return;
+	}
+
+	TGuardValue<bool> SynchronizingGuard(bSynchronizingOutlinerSelection, true);
+	if (!Item.IsValid())
+	{
+		if (ActiveDocument->TileCanvas.IsValid())
+		{
+			ActiveDocument->TileCanvas->ClearTileSelection();
+		}
+		else
+		{
+			HandleTileSelectionCleared(ActiveDocument);
+		}
+		return;
+	}
+
+	if (!ActiveDocument->TileCanvas.IsValid())
+	{
+		ActiveDocument->ActiveFunctionTabIndex = INDEX_NONE;
+		RefreshActiveDocument();
+	}
+	if (const FVerseVisualTile* Tile = FindTileByRange(
+		ActiveDocument->Session->GetTiles(),
+		Item->TileRange))
+	{
+		if (ActiveDocument->TileCanvas.IsValid())
+		{
+			ActiveDocument->TileCanvas->SelectTile(*Tile);
+		}
+		else
+		{
+			HandleTileSelected(*Tile, ActiveDocument);
+		}
+	}
+}
+
+void SVerseVisualEditor::SynchronizeOutlinerSelection(TOptional<FVerseTextRange> TileRange)
+{
+	if (!OutlinerTree.IsValid())
+	{
+		return;
+	}
+
+	TGuardValue<bool> SynchronizingGuard(bSynchronizingOutlinerSelection, true);
+	if (!TileRange.IsSet())
+	{
+		OutlinerTree->ClearSelection();
+		return;
+	}
+
+	TArray<TSharedPtr<FVerseOutlinerItem>> Ancestors;
+	TSharedPtr<FVerseOutlinerItem> Item;
+	if (!FindOutlinerItemByRange(OutlinerRootItems, TileRange.GetValue(), Ancestors, Item))
+	{
+		OutlinerTree->ClearSelection();
+		return;
+	}
+	for (const TSharedPtr<FVerseOutlinerItem>& Ancestor : Ancestors)
+	{
+		OutlinerTree->SetItemExpansion(Ancestor, true);
+	}
+	OutlinerTree->SetSelection(Item, ESelectInfo::Direct);
+	OutlinerTree->RequestScrollIntoView(Item);
+}
+
 void SVerseVisualEditor::HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlinerItem> Item)
 {
 	if (!Item.IsValid()
 		|| !ActiveDocument.IsValid()
-		|| !ActiveDocument->Session.IsValid()
-		|| !ActiveDocument->TileCanvas.IsValid())
+		|| !ActiveDocument->Session.IsValid())
 	{
 		return;
 	}
@@ -446,8 +611,290 @@ void SVerseVisualEditor::HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlin
 		ActiveDocument->Session->GetTiles(),
 		Item->TileRange))
 	{
-		ActiveDocument->TileCanvas->FocusTile(*Tile);
+		if (Tile->DefinitionKind == VerseSyntaxKind::Function)
+		{
+			if (ActiveDocument->TileCanvas.IsValid())
+			{
+				ActiveDocument->TileCanvas->FocusTile(*Tile);
+			}
+			else
+			{
+				HandleTileSelected(*Tile, ActiveDocument);
+			}
+			OpenFunctionView(*Tile, ActiveDocument);
+			return;
+		}
+
+		if (!ActiveDocument->TileCanvas.IsValid())
+		{
+			ActiveDocument->ActiveFunctionTabIndex = INDEX_NONE;
+			RefreshActiveDocument();
+		}
+		if (ActiveDocument->TileCanvas.IsValid())
+		{
+			ActiveDocument->TileCanvas->FocusTile(*Tile);
+		}
 	}
+}
+
+void SVerseVisualEditor::OpenFunctionView(
+	const FVerseVisualTile& FunctionTile,
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (!OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid()
+		|| FunctionTile.DefinitionKind != VerseSyntaxKind::Function)
+	{
+		return;
+	}
+
+	const TArray<FVerseFunctionNavigationItem> Items = FVerseFunctionNavigationBuilder::Build(
+		OpenDocument->Session->GetTiles(),
+		OpenDocument->Session->GetParseSnapshot());
+	const FVerseFunctionNavigationItem* Item = Items.FindByPredicate(
+		[&FunctionTile](const FVerseFunctionNavigationItem& Candidate)
+		{
+			return Candidate.FunctionRange == FunctionTile.Range;
+		});
+	if (!Item)
+	{
+		return;
+	}
+
+	const int32 ExistingIndex = OpenDocument->FunctionTabs.IndexOfByPredicate(
+		[Item](const FOpenVerseFunctionTab& Tab)
+		{
+			return Tab.ScopePath == Item->ScopePath;
+		});
+	if (ExistingIndex != INDEX_NONE)
+	{
+		OpenDocument->ActiveFunctionTabIndex = ExistingIndex;
+	}
+	else
+	{
+		FOpenVerseFunctionTab& Tab = OpenDocument->FunctionTabs.AddDefaulted_GetRef();
+		Tab.Name = Item->Name;
+		Tab.ScopePath = Item->ScopePath;
+		Tab.FunctionRange = Item->FunctionRange;
+		Tab.BodyRange = Item->BodyRange;
+		OpenDocument->ActiveFunctionTabIndex = OpenDocument->FunctionTabs.Num() - 1;
+	}
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+FReply SVerseVisualEditor::ActivateGlobalView(TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (OpenDocument.IsValid())
+	{
+		OpenDocument->ActiveFunctionTabIndex = INDEX_NONE;
+		if (OpenDocument == ActiveDocument)
+		{
+			RefreshActiveDocument();
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SVerseVisualEditor::ActivateFunctionView(
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	int32 FunctionTabIndex)
+{
+	if (OpenDocument.IsValid() && OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
+	{
+		OpenDocument->ActiveFunctionTabIndex = FunctionTabIndex;
+		if (OpenDocument == ActiveDocument)
+		{
+			RefreshActiveDocument();
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SVerseVisualEditor::CloseFunctionView(
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	int32 FunctionTabIndex)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->FunctionTabs.IsValidIndex(FunctionTabIndex))
+	{
+		return FReply::Handled();
+	}
+
+	OpenDocument->FunctionTabs.RemoveAt(FunctionTabIndex);
+	if (OpenDocument->ActiveFunctionTabIndex == FunctionTabIndex)
+	{
+		OpenDocument->ActiveFunctionTabIndex = INDEX_NONE;
+	}
+	else if (OpenDocument->ActiveFunctionTabIndex > FunctionTabIndex)
+	{
+		--OpenDocument->ActiveFunctionTabIndex;
+	}
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+	return FReply::Handled();
+}
+
+TSharedRef<SWidget> SVerseVisualEditor::BuildScopeBreadcrumb(
+	TSharedPtr<FOpenVerseDocument> OpenDocument) const
+{
+	TArray<FString> ScopePath;
+	if (OpenDocument.IsValid())
+	{
+		ScopePath = VerseVisualEditor::BuildVerseModulePath(OpenDocument->FilePath, SourceRoots);
+		if (OpenDocument->FunctionTabs.IsValidIndex(OpenDocument->ActiveFunctionTabIndex))
+		{
+			ScopePath.Append(OpenDocument->FunctionTabs[OpenDocument->ActiveFunctionTabIndex].ScopePath);
+		}
+		else if (OpenDocument->Session.IsValid() && OpenDocument->SelectedTile.IsSet())
+		{
+			const FVerseVisualTile& SelectedTile = OpenDocument->SelectedTile.GetValue();
+			if (SelectedTile.DefinitionKind == VerseSyntaxKind::Module
+				|| SelectedTile.DefinitionKind == VerseSyntaxKind::Class
+				|| SelectedTile.DefinitionKind == VerseSyntaxKind::Struct
+				|| SelectedTile.DefinitionKind == VerseSyntaxKind::Interface)
+			{
+				TArray<FString> SelectedPath;
+				if (FVerseFunctionNavigationBuilder::FindDefinitionPath(
+					OpenDocument->Session->GetTiles(),
+					OpenDocument->Session->GetParseSnapshot(),
+					SelectedTile.Range,
+					SelectedPath))
+				{
+					ScopePath.Append(MoveTemp(SelectedPath));
+				}
+			}
+		}
+	}
+
+	TSharedRef<SHorizontalBox> Breadcrumb = SNew(SHorizontalBox);
+	for (int32 Index = 0; Index < ScopePath.Num(); ++Index)
+	{
+		if (Index > 0)
+		{
+			Breadcrumb->AddSlot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(TEXT(">")))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			];
+		}
+		Breadcrumb->AddSlot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(ScopePath[Index]))
+			.Font(FCoreStyle::GetDefaultFontStyle(
+				Index == ScopePath.Num() - 1 ? "Bold" : "Regular",
+				9))
+		];
+	}
+
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(FMargin(8.0f, 5.0f))
+		[
+			Breadcrumb
+		];
+}
+
+TSharedRef<SWidget> SVerseVisualEditor::BuildFunctionTabBar(
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	TSharedRef<SHorizontalBox> Tabs = SNew(SHorizontalBox);
+	const TArray<FString> FileModulePath = VerseVisualEditor::BuildVerseModulePath(
+		OpenDocument->FilePath,
+		SourceRoots);
+	const FText FileModuleTabText = FText::FromString(FString::Printf(
+		TEXT("%s >"),
+		FileModulePath.IsEmpty() ? TEXT("File") : *FileModulePath.Last()));
+	Tabs->AddSlot()
+	.AutoWidth()
+	.Padding(3.0f, 2.0f)
+	[
+		SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush(OpenDocument->ActiveFunctionTabIndex == INDEX_NONE
+			? "DetailsView.CategoryTop"
+			: "ToolPanel.GroupBorder"))
+		.Padding(1.0f)
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.OnClicked(this, &SVerseVisualEditor::ActivateGlobalView, OpenDocument)
+			.ToolTipText(LOCTEXT("GlobalViewTooltip", "File-level and structural view"))
+			[
+				SNew(STextBlock)
+				.Text(FileModuleTabText)
+			]
+		]
+	];
+
+	for (int32 Index = 0; Index < OpenDocument->FunctionTabs.Num(); ++Index)
+	{
+		const FOpenVerseFunctionTab& FunctionTab = OpenDocument->FunctionTabs[Index];
+		Tabs->AddSlot()
+		.AutoWidth()
+		.Padding(3.0f, 2.0f)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush(OpenDocument->ActiveFunctionTabIndex == Index
+				? "DetailsView.CategoryTop"
+				: "ToolPanel.GroupBorder"))
+			.Padding(1.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.OnClicked(this, &SVerseVisualEditor::ActivateFunctionView, OpenDocument, Index)
+					.ToolTipText(FText::FromString(FString::Join(FunctionTab.ScopePath, TEXT(" > "))))
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 5.0f, 0.0f)
+						[
+							SNew(SImage)
+							.Image(FAppStyle::GetBrush("GraphEditor.Function_16x"))
+							.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(FunctionTab.Name))
+						]
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(3.0f, 1.0f))
+					.OnClicked(this, &SVerseVisualEditor::CloseFunctionView, OpenDocument, Index)
+					.ToolTipText(LOCTEXT("CloseFunctionView", "Close function tab"))
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("\u00d7")))
+					]
+				]
+			]
+		];
+	}
+	return Tabs;
 }
 
 void SVerseVisualEditor::HandleTreeSelectionChanged(
@@ -1432,6 +1879,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 
 	if (!ActiveDocument.IsValid())
 	{
+		ScopeBreadcrumbBox.Reset();
 		RebuildProperties();
 		ActiveDocumentBox->SetContent(
 			SNew(SBorder)
@@ -1445,18 +1893,80 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		return;
 	}
 
+	ReconcileFunctionTabs(*ActiveDocument);
 	const TWeakPtr<FOpenVerseDocument> WeakDocument = ActiveDocument;
 	const TOptional<FVerseTextRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
 		? TOptional<FVerseTextRange>(ActiveDocument->SelectedTile->Range)
 		: TOptional<FVerseTextRange>();
+	TSharedRef<SWidget> ActiveView = SNullWidget::NullWidget;
+	if (ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex))
+	{
+		const FOpenVerseFunctionTab& FunctionTab =
+			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+		ActiveDocument->TileCanvas.Reset();
+		ActiveView = SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.Padding(10.0f)
+			[
+				SNew(SScrollBox)
+				+ SScrollBox::Slot()
+				[
+					SNew(SMultiLineEditableText)
+					.Text(FunctionTab.BodyRange.IsSet()
+						? FText::FromString(ActiveDocument->Session->GetParseSnapshot()
+							.GetDocument()->DecodeOriginalRange(FunctionTab.BodyRange))
+						: FText::GetEmpty())
+					.IsReadOnly(true)
+				]
+			];
+	}
+	else
+	{
+		ActiveView = SAssignNew(
+			ActiveDocument->TileCanvas,
+			SVerseTileCanvas,
+			ActiveDocument->Session.ToSharedRef(),
+			ActiveDocument->ViewState,
+			InitialSelectedRange,
+			FOnVerseTileSelected::CreateSP(
+				this,
+				&SVerseVisualEditor::HandleTileSelected,
+				ActiveDocument),
+			FSimpleDelegate::CreateSP(
+				this,
+				&SVerseVisualEditor::HandleTileSelectionCleared,
+				ActiveDocument))
+			.Diagnostics(ActiveDocument->bHasCompilationResult
+				? ActiveDocument->CompilationResult.Diagnostics
+				: TArray<FVerseCompilationDiagnostic>())
+			.OnFunctionOpened(FOnVerseFunctionOpened::CreateSP(
+				this,
+				&SVerseVisualEditor::OpenFunctionView,
+				ActiveDocument));
+	}
 	ActiveDocumentBox->SetContent(
 		SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-		.Padding(8.0f)
+		.Padding(0.0f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
+			[
+				SAssignNew(ScopeBreadcrumbBox, SBox)
+				[
+					BuildScopeBreadcrumb(ActiveDocument)
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(30.0f, 0.0f, 0.0f, 0.0f)
+			[
+				BuildFunctionTabBar(ActiveDocument)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 0.0f)
 			[
 				SNew(STextBlock)
 					.Text_Lambda([WeakDocument]()
@@ -1475,24 +1985,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
+			.Padding(8.0f, 0.0f, 8.0f, 8.0f)
 			[
-				SAssignNew(
-					ActiveDocument->TileCanvas,
-					SVerseTileCanvas,
-					ActiveDocument->Session.ToSharedRef(),
-					ActiveDocument->ViewState,
-					InitialSelectedRange,
-					FOnVerseTileSelected::CreateSP(
-						this,
-						&SVerseVisualEditor::HandleTileSelected,
-						ActiveDocument),
-					FSimpleDelegate::CreateSP(
-						this,
-						&SVerseVisualEditor::HandleTileSelectionCleared,
-						ActiveDocument))
-				.Diagnostics(ActiveDocument->bHasCompilationResult
-					? ActiveDocument->CompilationResult.Diagnostics
-					: TArray<FVerseCompilationDiagnostic>())
+				ActiveView
 			]
 		]);
 	RebuildProperties();
@@ -1513,6 +2008,11 @@ void SVerseVisualEditor::HandleTileSelected(
 	OpenDocument->PendingSpecifierText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
+		SynchronizeOutlinerSelection(Tile.Range);
+		if (ScopeBreadcrumbBox.IsValid())
+		{
+			ScopeBreadcrumbBox->SetContent(BuildScopeBreadcrumb(OpenDocument));
+		}
 		OpenDetailsTab();
 		RebuildProperties();
 	}
@@ -1531,6 +2031,11 @@ void SVerseVisualEditor::HandleTileSelectionCleared(TSharedPtr<FOpenVerseDocumen
 	OpenDocument->PendingSpecifierText.Reset();
 	if (OpenDocument == ActiveDocument)
 	{
+		SynchronizeOutlinerSelection({});
+		if (ScopeBreadcrumbBox.IsValid())
+		{
+			ScopeBreadcrumbBox->SetContent(BuildScopeBreadcrumb(OpenDocument));
+		}
 		RebuildProperties();
 	}
 }

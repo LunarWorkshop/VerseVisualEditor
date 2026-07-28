@@ -454,6 +454,9 @@ This step delivers the first complete edit-and-save workflow.
 
 ### Further work
 - if there are local edits show a modal confirmation before closing yes/no/cancel
+- Dragging tabs left and right
+- Save the open function tabs
+- Zoom into the mouse pointer position
 
 ### 1. Multi-selection and copying
 

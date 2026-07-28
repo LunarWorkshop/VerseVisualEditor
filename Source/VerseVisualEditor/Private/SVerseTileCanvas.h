@@ -14,6 +14,7 @@ class SScrollBox;
 class FVerseDocumentSession;
 
 DECLARE_DELEGATE_OneParam(FOnVerseTileSelected, const FVerseVisualTile&);
+DECLARE_DELEGATE_OneParam(FOnVerseFunctionOpened, const FVerseVisualTile&);
 
 struct FVerseCanvasViewState
 {
@@ -27,6 +28,7 @@ class SVerseTileCanvas final : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SVerseTileCanvas) {}
 		SLATE_ARGUMENT(TArray<FVerseCompilationDiagnostic>, Diagnostics)
+		SLATE_EVENT(FOnVerseFunctionOpened, OnFunctionOpened)
 	SLATE_END_ARGS()
 
 	void Construct(
@@ -38,6 +40,8 @@ public:
 		FSimpleDelegate InOnSelectionCleared);
 
 	FVerseCanvasViewState GetViewState() const;
+	void SelectTile(const FVerseVisualTile& Tile);
+	void ClearTileSelection();
 	/** Selects a tile and centers its widget, or its nearest rendered containing tile. */
 	bool FocusTile(const FVerseVisualTile& Tile);
 
@@ -72,7 +76,8 @@ private:
 	FText FormatSourceLines(const struct FVerseVisualTile& Tile) const;
 	FText FormatDiagnosticMessages(int32 TileIndex) const;
 	bool HasDiagnosticForTile(int32 TileIndex) const;
-	FReply SelectTile(FVerseVisualTile Tile);
+	FReply SelectTileFromClick(FVerseVisualTile Tile);
+	FReply OpenFunctionTile(FVerseVisualTile Tile);
 	bool IsTileSelected(FVerseTextRange TileRange) const;
 
 	struct FTileWidgetEntry
@@ -92,6 +97,7 @@ private:
 	TSharedPtr<SScaleBox> ScaleBox;
 	FVerseTileSelection Selection;
 	FOnVerseTileSelected OnTileSelected;
+	FOnVerseFunctionOpened OnFunctionOpened;
 	FSimpleDelegate OnSelectionCleared;
 	float Zoom = 1.0f;
 	bool bIsPanning = false;

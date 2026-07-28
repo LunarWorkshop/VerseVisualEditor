@@ -61,6 +61,14 @@ bool FVerseEditorFileTreeTest::RunTest(const FString& Parameters)
 		{
 			return Item->Name == TEXT("Empty");
 		}));
+	TestEqual(
+		TEXT("File module path combines the source root and containing directories"),
+		FString::Join(
+			VerseVisualEditor::BuildVerseModulePath(
+				FPaths::Combine(RootDirectory, TEXT("Nested/nested.verse")),
+				Roots),
+			TEXT("/")),
+		FString(TEXT("TestRoot/Nested")));
 
 	IFileManager::Get().DeleteDirectory(*RootDirectory, false, true);
 	return true;

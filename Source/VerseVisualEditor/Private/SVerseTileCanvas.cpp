@@ -65,6 +65,45 @@ namespace
 		return FLinearColor(0.24f, 0.58f, 1.0f, 1.0f);
 	}
 
+	class SVerseTileHeader final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseTileHeader) {}
+			SLATE_EVENT(FOnClicked, OnSelected)
+			SLATE_EVENT(FOnClicked, OnOpened)
+			SLATE_DEFAULT_SLOT(FArguments, Content)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			OnSelected = InArgs._OnSelected;
+			OnOpened = InArgs._OnOpened;
+			ChildSlot[InArgs._Content.Widget];
+		}
+
+		virtual FReply OnMouseButtonDown(
+			const FGeometry& MyGeometry,
+			const FPointerEvent& MouseEvent) override
+		{
+			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnSelected.IsBound()
+				? OnSelected.Execute()
+				: FReply::Unhandled();
+		}
+
+		virtual FReply OnMouseButtonDoubleClick(
+			const FGeometry& MyGeometry,
+			const FPointerEvent& MouseEvent) override
+		{
+			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnOpened.IsBound()
+				? OnOpened.Execute()
+				: FReply::Unhandled();
+		}
+
+	private:
+		FOnClicked OnSelected;
+		FOnClicked OnOpened;
+	};
+
 	class SVerseTileContainer final : public SCompoundWidget
 	{
 	public:
@@ -81,6 +120,7 @@ namespace
 			SLATE_ARGUMENT(FMargin, ArrowPadding)
 			SLATE_ATTRIBUTE(bool, IsSelected)
 			SLATE_EVENT(FOnClicked, OnSelected)
+			SLATE_EVENT(FOnClicked, OnOpened)
 			SLATE_NAMED_SLOT(FArguments, HeaderContent)
 			SLATE_NAMED_SLOT(FArguments, BodyContent)
 		SLATE_END_ARGS()
@@ -88,6 +128,7 @@ namespace
 		void Construct(const FArguments& InArgs)
 		{
 			IsSelected = InArgs._IsSelected;
+			OnOpened = InArgs._OnOpened;
 			UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
 			ChildSlot
 			[
@@ -124,13 +165,16 @@ namespace
 							+ SHorizontalBox::Slot()
 							.FillWidth(1.0f)
 							[
-								SNew(SButton)
-								.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-								.ContentPadding(InArgs._HeaderPadding)
-								.OnClicked(InArgs._OnSelected)
-								.HAlign(HAlign_Fill)
+								SNew(SVerseTileHeader)
+								.OnSelected(InArgs._OnSelected)
+								.OnOpened(InArgs._OnOpened)
 								[
-									InArgs._HeaderContent.Widget
+									SNew(SBorder)
+									.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
+									.Padding(InArgs._HeaderPadding)
+									[
+										InArgs._HeaderContent.Widget
+									]
 								]
 							]
 						]
@@ -149,6 +193,15 @@ namespace
 					]
 				]
 			];
+		}
+
+		virtual FReply OnMouseButtonDoubleClick(
+			const FGeometry& MyGeometry,
+			const FPointerEvent& MouseEvent) override
+		{
+			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnOpened.IsBound()
+				? OnOpened.Execute()
+				: FReply::Unhandled();
 		}
 
 	private:
@@ -188,6 +241,7 @@ namespace
 		}
 
 		TAttribute<bool> IsSelected;
+		FOnClicked OnOpened;
 		FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 		bool bExpanded = true;
 	};
@@ -207,6 +261,7 @@ void SVerseTileCanvas::Construct(
 	Diagnostics = InArgs._Diagnostics;
 	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	OnTileSelected = MoveTemp(InOnTileSelected);
+	OnFunctionOpened = InArgs._OnFunctionOpened;
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
 	if (InitialSelectedRange.IsSet())
 	{
@@ -653,7 +708,10 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildStructuralTile(const FVerseVisualTile
 			{
 				return IsTileSelected(Range);
 			})
-			.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
+			.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTileFromClick, Tile))
+			.OnOpened(Tile.DefinitionKind == VerseSyntaxKind::Function
+				? FOnClicked::CreateSP(this, &SVerseTileCanvas::OpenFunctionTile, Tile)
+				: FOnClicked())
 			.HeaderContent()
 			[
 				SNew(SVerticalBox)
@@ -845,7 +903,8 @@ TSharedRef<SWidget> SVerseTileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		{
 			return IsTileSelected(Range);
 		})
-		.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTile, Tile))
+		.OnSelected(FOnClicked::CreateSP(this, &SVerseTileCanvas::SelectTileFromClick, Tile))
+		.OnOpened(FOnClicked())
 		.HeaderContent()
 		[
 			SNew(SVerticalBox)
@@ -1000,11 +1059,31 @@ bool SVerseTileCanvas::IsTileSelected(FVerseTextRange TileRange) const
 		&& SelectedRange.NumBytes == TileRange.NumBytes;
 }
 
-FReply SVerseTileCanvas::SelectTile(FVerseVisualTile Tile)
+void SVerseTileCanvas::SelectTile(const FVerseVisualTile& Tile)
 {
 	Selection.Select(Tile.Range);
 	OnTileSelected.ExecuteIfBound(Tile);
 	Invalidate(EInvalidateWidgetReason::Paint);
+	return;
+}
+
+void SVerseTileCanvas::ClearTileSelection()
+{
+	Selection.Clear();
+	OnSelectionCleared.ExecuteIfBound();
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+FReply SVerseTileCanvas::SelectTileFromClick(FVerseVisualTile Tile)
+{
+	SelectTile(Tile);
+	return FReply::Handled();
+}
+
+FReply SVerseTileCanvas::OpenFunctionTile(FVerseVisualTile Tile)
+{
+	SelectTile(Tile);
+	OnFunctionOpened.ExecuteIfBound(Tile);
 	return FReply::Handled();
 }
 

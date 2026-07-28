@@ -7,6 +7,7 @@
 #include "Misc/Paths.h"
 #include "VerseDocument.h"
 #include "VerseDefinitionIcon.h"
+#include "VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
 
@@ -58,6 +59,8 @@ bool FVerseOutlinerHierarchyTest::RunTest(const FString& Parameters)
 		Snapshot,
 		FVerseDocumentRevision{31});
 	const TArray<TSharedPtr<FVerseOutlinerItem>> Items = FVerseOutlinerBuilder::Build(Tiles, Snapshot);
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(Tiles, Snapshot);
 	const FVerseOutlinerItem* Root = VerseOutlinerTests::FindItem(Items, TEXT("RootModule"));
 	const FVerseOutlinerItem* NestedModule = VerseOutlinerTests::FindItem(Items, TEXT("NestedModule"));
 	const FVerseOutlinerItem* NestedFunction = VerseOutlinerTests::FindItem(Items, TEXT("ChildFunction"));
@@ -99,6 +102,30 @@ bool FVerseOutlinerHierarchyTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Enums use the native enum list glyph"),
 		GetVerseDefinitionIconName(VerseSyntaxKind::Enum),
 		FName(TEXT("GraphEditor.Enum_16x")));
+	TestEqual(TEXT("One function navigation target is discovered"), Functions.Num(), 1);
+	if (Functions.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Function navigation retains the full explicit scope path"),
+			FString::Join(Functions[0].ScopePath, TEXT("/")),
+			FString(TEXT("RootModule/NestedModule/ChildFunction")));
+		TestEqual(
+			TEXT("Function view range contains only its raw body"),
+			Snapshot.GetDocument()->DecodeOriginalRange(Functions[0].BodyRange).TrimStartAndEnd(),
+			FString(TEXT("Input + 1")));
+		TArray<FString> SelectedFunctionPath;
+		TestTrue(
+			TEXT("Selected definitions resolve their complete containing scope path"),
+			FVerseFunctionNavigationBuilder::FindDefinitionPath(
+				Tiles,
+				Snapshot,
+				Functions[0].FunctionRange,
+				SelectedFunctionPath));
+		TestEqual(
+			TEXT("Selected function path contains modules and function"),
+			FString::Join(SelectedFunctionPath, TEXT("/")),
+			FString(TEXT("RootModule/NestedModule/ChildFunction")));
+	}
 	TestEqual(TEXT("Modules, enums, constants, and type aliases have distinct icons"),
 		TSet<FName>({
 			GetVerseDefinitionIconName(VerseSyntaxKind::Module),

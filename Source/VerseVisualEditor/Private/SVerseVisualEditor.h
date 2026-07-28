@@ -67,7 +67,19 @@ private:
 	void GetOutlinerChildren(
 		TSharedPtr<FVerseOutlinerItem> Item,
 		TArray<TSharedPtr<FVerseOutlinerItem>>& OutChildren) const;
+	void HandleOutlinerSelectionChanged(
+		TSharedPtr<FVerseOutlinerItem> Item,
+		ESelectInfo::Type SelectInfo);
 	void HandleOutlinerItemDoubleClicked(TSharedPtr<FVerseOutlinerItem> Item);
+	void SynchronizeOutlinerSelection(TOptional<FVerseTextRange> TileRange);
+	void OpenFunctionView(
+		const FVerseVisualTile& FunctionTile,
+		TSharedPtr<FOpenVerseDocument> OpenDocument);
+	FReply ActivateGlobalView(TSharedPtr<FOpenVerseDocument> OpenDocument);
+	FReply ActivateFunctionView(TSharedPtr<FOpenVerseDocument> OpenDocument, int32 FunctionTabIndex);
+	FReply CloseFunctionView(TSharedPtr<FOpenVerseDocument> OpenDocument, int32 FunctionTabIndex);
+	TSharedRef<SWidget> BuildScopeBreadcrumb(TSharedPtr<FOpenVerseDocument> OpenDocument) const;
+	TSharedRef<SWidget> BuildFunctionTabBar(TSharedPtr<FOpenVerseDocument> OpenDocument);
 	void HandleTreeSelectionChanged(
 		TSharedPtr<FVerseFileTreeItem> Item,
 		ESelectInfo::Type SelectInfo);
@@ -152,11 +164,13 @@ private:
 	TSharedPtr<STreeView<TSharedPtr<FVerseFileTreeItem>>> FileTree;
 	TArray<TSharedPtr<FVerseOutlinerItem>> OutlinerRootItems;
 	TSharedPtr<STreeView<TSharedPtr<FVerseOutlinerItem>>> OutlinerTree;
+	bool bSynchronizingOutlinerSelection = false;
 
 	TArray<TSharedPtr<FOpenVerseDocument>> OpenDocuments;
 	TSharedPtr<FOpenVerseDocument> ActiveDocument;
 	TSharedPtr<SHorizontalBox> DocumentTabBar;
 	TSharedPtr<SBox> ActiveDocumentBox;
+	TSharedPtr<SBox> ScopeBreadcrumbBox;
 	TSharedPtr<SBox> DetailsPanelHost;
 	TSharedPtr<SDockTab> DetailsTab;
 	TSharedPtr<SSearchBox> PropertyFilter;
