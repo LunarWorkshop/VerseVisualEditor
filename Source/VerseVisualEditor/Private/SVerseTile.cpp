@@ -346,7 +346,9 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	TSharedRef<SVerticalBox> Column = SNew(SVerticalBox);
 	for (const FVerseVisualSocket& Socket : Sockets)
 	{
-		const FString Type = Decode(Socket.TypeRange).ToString();
+		const FString Type = Socket.TypeRange.IsSet()
+			? Decode(Socket.TypeRange).ToString()
+			: Socket.IntrinsicTypeName.ToString();
 		const FText Name = Decode(Socket.NameRange);
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
 		auto AddPin = [&]()
@@ -356,13 +358,13 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 				.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
 				.ColorAndOpacity(GetVerseTilePinColor(Type))
 				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
-			if (bOutput && !FirstValueOutputAnchor.IsValid())
+			if (bOutput)
 			{
-				FirstValueOutputAnchor = PinImage;
+				ValueOutputAnchors.Add(PinImage);
 			}
-			else if (!bOutput && !FirstValueInputAnchor.IsValid())
+			else
 			{
-				FirstValueInputAnchor = PinImage;
+				ValueInputAnchors.Add(PinImage);
 			}
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
@@ -400,8 +402,12 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Definition: return FText::FromName(Tile.DefinitionKind);
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::Expression:
-		return Tile.ExpressionKind == EVerseExpressionKind::Identifier
-			? FText::GetEmpty()
+		if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)
+		{
+			return FText::GetEmpty();
+		}
+		return Tile.ExpressionKind == EVerseExpressionKind::Addition
+			? LOCTEXT("AdditionKind", "Add")
 			: LOCTEXT("ExpressionKind", "Expression");
 	case EVerseVisualTileKind::FunctionEntry: return LOCTEXT("FunctionEntryKind", "Function");
 	case EVerseVisualTileKind::FunctionReturn: return LOCTEXT("FunctionReturnKind", "Return");
@@ -422,7 +428,9 @@ FText SVerseTile::GetNameText() const
 
 FText SVerseTile::GetTypeText() const
 {
-	return Decode(Tile.TypeRange);
+	return Tile.TypeRange.IsSet()
+		? Decode(Tile.TypeRange)
+		: FText::FromName(Tile.IntrinsicTypeName);
 }
 
 FText SVerseTile::GetSpecifierText() const

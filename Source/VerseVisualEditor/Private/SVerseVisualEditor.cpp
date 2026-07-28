@@ -399,108 +399,93 @@ namespace
 			];
 	}
 
-	TSharedRef<SWidget> BuildClauseExpressionTile(
-		const FVerseVisualClauseItemDescriptor& Item,
+	FString GetVisualTypeName(
+		const FVerseTextRange& TypeRange,
+		FName IntrinsicTypeName,
 		const FVerseDocument& Document)
 	{
-		const bool bIdentifier = Item.ExpressionKind == EVerseExpressionKind::Identifier;
-		const FString Type = Item.TypeRange.IsSet()
-			? Document.DecodeOriginalRange(Item.TypeRange).TrimStartAndEnd()
-			: FString();
-		const FLinearColor PinColor = GetBlueprintPinColor(Type);
-		const FSlateBrush* PinBrush = GetBlueprintPinBrush(Type);
-		const FText KindText = bIdentifier
-			? LOCTEXT("IdentifierExpressionKind", "Identifier")
-			: LOCTEXT("UnsupportedExpressionKind", "Expression");
-		const int32 FirstSourceLine = Document.GetOriginalLineNumber(Item.ExpressionRange.BeginByte);
-		const int32 LastSourceLine = Document.GetOriginalLineNumber(
-			FMath::Max(Item.ExpressionRange.BeginByte, Item.ExpressionRange.EndByte() - 1));
-		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			[
-				SNew(SVerseExecutionInput)
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, -8.0f, 0.0f, 0.0f)
-			[
-				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-				.BorderBackgroundColor(bIdentifier
-					? FLinearColor(0.10f, 0.19f, 0.28f, 1.0f)
-					: FLinearColor(0.16f, 0.18f, 0.21f, 1.0f))
-				.Padding(FMargin(0.0f, 7.0f))
+		return TypeRange.IsSet()
+			? Document.DecodeOriginalRange(TypeRange).TrimStartAndEnd()
+			: IntrinsicTypeName.ToString();
+	}
+
+	struct FBuiltFunctionGraphRow
+	{
+		TSharedRef<SWidget> Widget;
+		TSharedRef<SVerseTile> RootTile;
+	};
+
+	FBuiltFunctionGraphRow BuildFunctionGraphRow(
+		const FVerseVisualTile& Tile,
+		TSharedRef<const FVerseDocument> Document)
+	{
+		constexpr float OperandColumnWidth = 190.0f;
+		constexpr float OperandWireSpace = 72.0f;
+		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(Tile, Document);
+		if (Tile.ExpressionKind != EVerseExpressionKind::Addition || Tile.Children.Num() != 2)
+		{
+			return {
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()
 				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(-5.0f, 0.0f, 7.0f, 0.0f)
+					SNew(SBox).WidthOverride(OperandColumnWidth + OperandWireSpace)
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					RootTile
+				],
+				RootTile};
+		}
+
+		const TSharedRef<SVerseTile> LeftOperand = BuildFunctionGraphTile(Tile.Children[0], Document);
+		const TSharedRef<SVerseTile> RightOperand = BuildFunctionGraphTile(Tile.Children[1], Document);
+		TSharedRef<SOverlay> Subtree = SNew(SOverlay);
+		Subtree->AddSlot()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+			[
+				SNew(SBox)
+				.WidthOverride(OperandColumnWidth)
+				.HAlign(HAlign_Right)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
 					[
-						SNew(SImage)
-						.Visibility(bIdentifier ? EVisibility::Visible : EVisibility::Collapsed)
-						.Image(bIdentifier ? PinBrush : nullptr)
-						.ColorAndOpacity(PinColor)
-						.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
-						.ToolTipText(LOCTEXT("IdentifierReadSocket", "Identifier value reference"))
+						LeftOperand
 					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(0.0f, 0.0f, 12.0f, 0.0f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f).HAlign(HAlign_Right)
 					[
-						SNew(SVerticalBox)
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						[
-							SNew(STextBlock)
-							.Text(KindText)
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-							.ColorAndOpacity(bIdentifier
-								? FLinearColor(0.65f, 0.80f, 1.0f, 1.0f)
-								: FLinearColor(0.65f, 0.65f, 0.65f, 1.0f))
-						]
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 3.0f, 0.0f, 0.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString(GetExpressionSourceLine(Document, Item.ExpressionRange)))
-							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
-						]
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 5.0f, 0.0f, 0.0f)
-						[
-							SNew(STextBlock)
-							.Text(FormatSourceLines(FirstSourceLine, LastSourceLine))
-							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-							.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
-						]
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					.Padding(0.0f, 0.0f, -5.0f, 0.0f)
-					[
-						SNew(SImage)
-						.Visibility(bIdentifier ? EVisibility::Visible : EVisibility::Collapsed)
-						.Image(bIdentifier ? PinBrush : nullptr)
-						.ColorAndOpacity(PinColor)
-						.DesiredSizeOverride(FVector2D(11.0f, 11.0f))
-						.ToolTipText(LOCTEXT("IdentifierWriteSocket", "Assignable identifier"))
+						RightOperand
 					]
 				]
 			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			.Padding(12.0f, -7.0f, 0.0f, 0.0f)
+			+ SHorizontalBox::Slot().AutoWidth()
 			[
-				SNew(SVerseExecutionOutput)
-			];
+				SNew(SBox).WidthOverride(OperandWireSpace)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+			[
+				RootTile
+			]
+		];
+
+		const FString TypeName = GetVisualTypeName(Tile.TypeRange, Tile.IntrinsicTypeName, *Document);
+		Subtree->AddSlot()
+		[
+			SNew(SVerseGraphWire)
+			.SourceAnchor(LeftOperand->GetValueOutputAnchor(0))
+			.TargetAnchor(RootTile->GetValueInputAnchor(0))
+			.WireColor(GetBlueprintPinColor(TypeName))
+		];
+		Subtree->AddSlot()
+		[
+			SNew(SVerseGraphWire)
+			.SourceAnchor(RightOperand->GetValueOutputAnchor(0))
+			.TargetAnchor(RootTile->GetValueInputAnchor(1))
+			.WireColor(GetBlueprintPinColor(TypeName))
+		];
+		return {Subtree, RootTile};
 	}
 
 	TSharedRef<SWidget> BuildFunctionEntryTile(
@@ -2527,32 +2512,36 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				.AutoHeight()
 				.HAlign(HAlign_Left)
 				[
-					SNew(SVerseExecutionWire)
-					.ExtraBlankLines(FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount)
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(262.0f)
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SVerseExecutionWire)
+						.ExtraBlankLines(FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount)
+					]
 				];
 			}
-			const TSharedRef<SVerseTile> GraphTile = BuildFunctionGraphTile(Tile, SourceDocument);
-			TSharedPtr<SBox> TileAnchor;
+			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(Tile, SourceDocument);
 			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)
 			[
-				SAssignNew(TileAnchor, SBox)
-				[
-					GraphTile
-				]
+				GraphRow.Widget
 			];
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
-				FunctionEntryAnchor = TileAnchor;
+				FunctionEntryAnchor = GraphRow.RootTile;
 			}
 			if (Tile.bImplicitReturnValue)
 			{
-				ImplicitReturnSourceTile = GraphTile;
+				ImplicitReturnSourceTile = GraphRow.RootTile;
 			}
 			else if (Tile.Kind == EVerseVisualTileKind::FunctionReturn)
 			{
-				ReturnTile = GraphTile;
+				ReturnTile = GraphRow.RootTile;
 			}
 		}
 
@@ -2563,8 +2552,10 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		];
 		if (ImplicitReturnSourceTile.IsValid() && ReturnTile.IsValid())
 		{
-			const FString ReturnType = SourceDocument->DecodeOriginalRange(
-				FunctionTab.GraphTiles.Last().TypeRange).TrimStartAndEnd();
+			const FString ReturnType = GetVisualTypeName(
+				FunctionTab.GraphTiles.Last().TypeRange,
+				FunctionTab.GraphTiles.Last().IntrinsicTypeName,
+				*SourceDocument);
 			FunctionGraph->AddSlot()
 			[
 				SNew(SVerseGraphWire)

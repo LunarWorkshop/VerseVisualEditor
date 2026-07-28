@@ -453,12 +453,77 @@ This step delivers the first complete edit-and-save workflow.
 
 ### 13. Basic expressions
 
-- Add arithmetic, comparison, Boolean, and other basic operators.
-- Create correctly typed child expression positions automatically.
-- Support unary and binary layouts.
-- Restrict expression choices according to operand and result types.
-- Implement compatible identifier-to-destination socket drags that create an
-  assignment expression through the same localized editing pipeline.
+- Begin with a read-only Add-expression slice. Recognize only the exact
+  two-operand VST shape `operand + operand`; preserve add chains, subtraction,
+  mixed add/sub chains, malformed shapes, and all other operators as unsupported
+  expressions until their own slices are implemented.
+- Replace flat expression metadata on clause items with a recursive,
+  revision-specific expression descriptor. Retain the expression kind, complete
+  range, operator-token range, optional type evidence, and ordered operand
+  descriptors. Keep trivia, separators, blank-line count, and final-value status
+  on the enclosing clause item because they describe the root expression's
+  statement-level occurrence.
+- Keep every operator and operand range source-exact and VST-derived. Identifier
+  operands become identifier expressions. Literals remain generic unsupported
+  expression tiles until Step 12, but their VST literal kind may provide local
+  type evidence without making them editable or re-parsing their text.
+- Introduce one reusable operator-signature and local-constraint model rather
+  than type-specific operator tile classes. It must support ordered variadic
+  operands, independent operand and result type variables, equality and operator
+  capability constraints, multiple candidate signatures, and unresolved,
+  locally inferred, and future compiler-resolved provenance.
+- Register only Add initially, using the Verse signatures
+  `(int, int, ...) -> int`, `(float, float, ...) -> float`, and
+  `([]T, []T, ...) -> []T`. Model Add as variadic internally even though the
+  initial VST recognizer accepts exactly two operands.
+- Conservatively bind an Add occurrence from declared parameter types,
+  recognized literal kinds, a compatible declared return type when the Add is
+  the function's final value, and already-resolved child expressions. All
+  evidence must select the same signature. Missing or conflicting evidence
+  leaves the occurrence unresolved and uses wildcard socket presentation; the
+  editor must never guess.
+- Decode source-backed type spellings only when comparison or display requires
+  them. Local constraints are responsive UI guidance, not a second Verse type
+  checker. Future semantic-compiler results will be the higher-authority source
+  for aliases, constrained types, imports, and overload resolution, and must be
+  able to replace a provisional result without changing operator or socket APIs.
+- Present the Add as the statement-level tile with its source shorthand, source
+  line range, execution input and output, two typed value inputs on the left,
+  and one typed result output on the right. Place the left operand above-left
+  and the right operand below-left as nested expression tiles with value outputs
+  but no execution pins. Connect both operands with the shared graph-wire widget.
+- If the Add is the function's final value, connect its result output to the
+  Return tile through the existing implicit-return behavior. Give value sockets
+  stable identities or indices so every operand socket can be addressed and
+  render every connected socket filled.
+- Keep the root Add in the function's vertical execution chain while arranging
+  its nested operand subtree around it. Preserve existing pan, zoom, clipping,
+  selection, source-range, and execution-wire behavior.
+- Keep this first slice read-only: do not add expression creation, pin
+  addition/removal, rewiring, or source mutation. When these become editable,
+  unresolved or incompatible connections are non-connectable, the proposed
+  localized replacement remains temporary UI state, and the complete candidate
+  source must parse successfully before the document revision can change.
+- Later, collapse a homogeneous source chain such as `A + B + C` into one
+  variadic Add tile. Partition mixed left-associative chains into maximal
+  homogeneous runs without changing evaluation order; for example,
+  `A + B - C - D + E` becomes Add(A, B), then Subtract(previous, C, D), then
+  Add(previous, E). Mixed runs remain separate tiles.
+- Add later arithmetic, comparison, Boolean, assignment, and other basic
+  operators through the same signature model. Do not assume every operator is
+  `(T, T) -> T`: the model must accommodate asymmetric inputs, results that
+  differ from operands, fixed-result operations, writable/reference
+  destinations, unary layouts, and multiple overload candidates.
+- Restrict later expression-search choices and compatible
+  identifier-to-destination assignment drags according to proven operand and
+  result constraints, using the same localized editing pipeline.
+- Test exact VST and source ranges, recursive operand order, trivia and byte
+  preservation, int/float/array Add resolution, return-context evidence,
+  unresolved and conflicting evidence, indexed sockets, child value wires,
+  filled connected pins, execution flow, and implicit returns. Verify that
+  chains and mixed operators remain unsupported in the initial slice and that
+  the variadic Add signature itself accepts an arbitrary same-typed operand
+  count for its later chain implementation.
 
 ### 14. Function calls
 

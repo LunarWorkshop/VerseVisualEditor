@@ -5,6 +5,7 @@
 #include "uLang/SourceProject/UploadedAtFNVersion.h"
 #include "uLang/SourceProject/VerseVersion.h"
 #include "uLang/Syntax/VstNode.h"
+#include "VerseOperatorTyping.h"
 
 const FName VerseSyntaxKind::Module(TEXT("Module"));
 const FName VerseSyntaxKind::Class(TEXT("Class"));
@@ -540,6 +541,83 @@ namespace VerseParseSnapshotBuilder
 			: EVerseClauseItemSeparator::None;
 	}
 
+	FVerseExpressionType FindIdentifierType(
+		FUtf8StringView IdentifierText,
+		const FSourceIndex& SourceIndex,
+		TConstArrayView<FVerseFunctionParameter> Parameters)
+	{
+		for (const FVerseFunctionParameter& Parameter : Parameters)
+		{
+			const FUtf8StringView ParameterName = SourceIndex.GetSource().Mid(
+				Parameter.NameRange.BeginByte,
+				Parameter.NameRange.NumBytes);
+			if (IdentifierText == ParameterName)
+			{
+				return {Parameter.TypeRange, NAME_None,
+					EVerseTypeResolutionProvenance::LocallyInferred};
+			}
+		}
+		return {};
+	}
+
+	FVerseExpressionDescriptor BuildExpressionDescriptor(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		TConstArrayView<FVerseFunctionParameter> Parameters)
+	{
+		FVerseExpressionDescriptor Result;
+		Result.Range = SourceIndex.ToRange(Node.Whence());
+		if (const Verse::Vst::Identifier* Identifier = Node.AsNullable<Verse::Vst::Identifier>())
+		{
+			Result.Kind = EVerseExpressionKind::Identifier;
+			const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
+			if (IdentifierLength > 0 && Result.Range.NumBytes >= IdentifierLength)
+			{
+				Result.Range = {Result.Range.EndByte() - IdentifierLength, IdentifierLength};
+			}
+			Result.Type = FindIdentifierType(
+				SourceIndex.GetSource().Mid(Result.Range.BeginByte, Result.Range.NumBytes),
+				SourceIndex,
+				Parameters);
+			return Result;
+		}
+		if (Node.IsA<Verse::Vst::IntLiteral>())
+		{
+			Result.Type = {{}, TEXT("int"), EVerseTypeResolutionProvenance::LocallyInferred};
+			return Result;
+		}
+		if (Node.IsA<Verse::Vst::FloatLiteral>())
+		{
+			Result.Type = {{}, TEXT("float"), EVerseTypeResolutionProvenance::LocallyInferred};
+			return Result;
+		}
+
+		const Verse::Vst::BinaryOpAddSub* Add = Node.AsNullable<Verse::Vst::BinaryOpAddSub>();
+		if (Add == nullptr || Add->GetChildCount() != 3)
+		{
+			return Result;
+		}
+		const Verse::Vst::Node& Left = *Add->GetChildren()[0];
+		const Verse::Vst::Node& OperatorNode = *Add->GetChildren()[1];
+		const Verse::Vst::Node& Right = *Add->GetChildren()[2];
+		const Verse::Vst::Operator* Operator = OperatorNode.AsNullable<Verse::Vst::Operator>();
+		if (Left.GetTag<Verse::Vst::BinaryOp::op>() != Verse::Vst::BinaryOp::op::Operand
+			|| OperatorNode.GetTag<Verse::Vst::BinaryOp::op>() != Verse::Vst::BinaryOp::op::Operator
+			|| Right.GetTag<Verse::Vst::BinaryOp::op>() != Verse::Vst::BinaryOp::op::Operand
+			|| Operator == nullptr
+			|| Operator->GetSourceText().ByteLen() != 1
+			|| Operator->GetSourceText()[0] != u'+')
+		{
+			return Result;
+		}
+
+		Result.Kind = EVerseExpressionKind::Addition;
+		Result.OperatorRange = SourceIndex.ToRange(OperatorNode.Whence());
+		Result.Operands.Add(BuildExpressionDescriptor(Left, SourceIndex, Parameters));
+		Result.Operands.Add(BuildExpressionDescriptor(Right, SourceIndex, Parameters));
+		return Result;
+	}
+
 	void BuildFunctionClauseItems(
 		const Verse::Vst::Node& Body,
 		const FSourceIndex& SourceIndex,
@@ -580,37 +658,29 @@ namespace VerseParseSnapshotBuilder
 			}
 
 			FVerseClauseItemDescriptor& Item = OutRegion.BodyClause.Items.AddDefaulted_GetRef();
-			Item.ExpressionRange = ExpressionRange;
-			if (const Verse::Vst::Identifier* Identifier = Expression->AsNullable<Verse::Vst::Identifier>())
-			{
-				Item.ExpressionKind = EVerseExpressionKind::Identifier;
-				const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
-				if (IdentifierLength > 0 && Item.ExpressionRange.NumBytes >= IdentifierLength)
-				{
-					Item.ExpressionRange = {
-						Item.ExpressionRange.EndByte() - IdentifierLength,
-						IdentifierLength};
-				}
-			}
+			Item.Expression = BuildExpressionDescriptor(
+				*Expression,
+				SourceIndex,
+				OutRegion.FunctionParameters);
 		}
 
 		TArray<FVerseClauseItemDescriptor>& Items = OutRegion.BodyClause.Items;
 		for (int32 Index = 0; Index < Items.Num(); ++Index)
 		{
 			FVerseClauseItemDescriptor& Item = Items[Index];
-			if (Index == 0 && OutRegion.BodyRange.BeginByte < Item.ExpressionRange.BeginByte)
+			if (Index == 0 && OutRegion.BodyRange.BeginByte < Item.Expression.Range.BeginByte)
 			{
 				Item.LeadingTriviaRange = FVerseByteRange::FromBounds(
 					OutRegion.BodyRange.BeginByte,
-					Item.ExpressionRange.BeginByte);
+					Item.Expression.Range.BeginByte);
 			}
 			const int32 TrailingEnd = Index + 1 < Items.Num()
-				? Items[Index + 1].ExpressionRange.BeginByte
+				? Items[Index + 1].Expression.Range.BeginByte
 				: OutRegion.BodyRange.EndByte();
-			if (Item.ExpressionRange.EndByte() < TrailingEnd)
+			if (Item.Expression.Range.EndByte() < TrailingEnd)
 			{
 				Item.TrailingTriviaRange = FVerseByteRange::FromBounds(
-					Item.ExpressionRange.EndByte(),
+					Item.Expression.Range.EndByte(),
 					TrailingEnd);
 			}
 			const FUtf8StringView Trivia = Item.TrailingTriviaRange.IsSet()
@@ -622,22 +692,23 @@ namespace VerseParseSnapshotBuilder
 			Item.Separator = ClassifySeparator(Trivia, Item.bIsFinalValuePosition);
 			Item.ExtraBlankLineCount = FMath::Max(0, CountLineBreaks(Trivia) - 1);
 
-			if (Item.ExpressionKind == EVerseExpressionKind::Identifier)
+			if (Item.Expression.Kind == EVerseExpressionKind::Addition)
 			{
-				const FUtf8StringView IdentifierText = SourceIndex.GetSource().Mid(
-					Item.ExpressionRange.BeginByte,
-					Item.ExpressionRange.NumBytes);
-				for (const FVerseFunctionParameter& Parameter : OutRegion.FunctionParameters)
+				TArray<FVerseExpressionType> OperandTypes;
+				for (const FVerseExpressionDescriptor& Operand : Item.Expression.Operands)
 				{
-					const FUtf8StringView ParameterName = SourceIndex.GetSource().Mid(
-						Parameter.NameRange.BeginByte,
-						Parameter.NameRange.NumBytes);
-					if (IdentifierText == ParameterName)
-					{
-						Item.TypeRange = Parameter.TypeRange;
-						break;
-					}
+					OperandTypes.Add(Operand.Type);
 				}
+				const FVerseExpressionType ExpectedResult = Item.bIsFinalValuePosition
+					&& OutRegion.TypeRange.IsSet()
+					? FVerseExpressionType{OutRegion.TypeRange, NAME_None,
+						EVerseTypeResolutionProvenance::LocallyInferred}
+					: FVerseExpressionType{};
+				Item.Expression.Type = FVerseOperatorTyping::Resolve(
+					EVerseOperatorKind::Addition,
+					OperandTypes,
+					ExpectedResult,
+					SourceIndex.GetSource());
 			}
 		}
 	}

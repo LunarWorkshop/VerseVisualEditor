@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseOperatorTyping.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
@@ -343,6 +344,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 {
+	TestTrue(TEXT("Add signature is variadic for its future chain presentation"),
+		FVerseOperatorTyping::SupportsOperandCount(EVerseOperatorKind::Addition, 5));
 	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
 		*this,
 		TEXT("functions.verse"));
@@ -387,13 +390,26 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			Function->Children[0].Kind,
 			EVerseSourceRegionKind::Raw);
 	}
-	TestEqual(TEXT("Unsupported compound root is still represented as one clause item"),
+	TestEqual(TEXT("Add root is represented as one clause item"),
 		Function->BodyClause.Items.Num(), 1);
 	if (Function->BodyClause.Items.Num() == 1)
 	{
-		TestEqual(TEXT("Compound root remains unsupported for Step 10"),
-			Function->BodyClause.Items[0].ExpressionKind,
-			EVerseExpressionKind::Unsupported);
+		const FVerseExpressionDescriptor& Add = Function->BodyClause.Items[0].Expression;
+		TestEqual(TEXT("Binary plus is recognized as Add"),
+			Add.Kind,
+			EVerseExpressionKind::Addition);
+		TestEqual(TEXT("Add retains two ordered operands"), Add.Operands.Num(), 2);
+		TestTrue(TEXT("Add operator range is exact"),
+			Snapshot.GetSourceView(Add.OperatorRange) == UTF8TEXTVIEW("+"));
+		TestTrue(TEXT("Add type resolves to the parameter's int spelling"),
+			Snapshot.GetSourceView(Add.Type.SourceRange) == UTF8TEXTVIEW("int"));
+		if (Add.Operands.Num() == 2)
+		{
+			TestTrue(TEXT("First Add operand is exact"),
+				Snapshot.GetSourceView(Add.Operands[0].Range) == UTF8TEXTVIEW("Used"));
+			TestTrue(TEXT("Second Add operand is exact"),
+				Snapshot.GetSourceView(Add.Operands[1].Range) == UTF8TEXTVIEW("Used"));
+		}
 	}
 
 	const FVerseSourceRegion* IdentifierFunction = VerseParseSnapshotBuilderTests::FindTypedRegion(
@@ -406,12 +422,12 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	{
 		const FVerseClauseItemDescriptor& Item = IdentifierFunction->BodyClause.Items[0];
 		TestEqual(TEXT("Bare identifier is the first supported expression kind"),
-			Item.ExpressionKind,
+			Item.Expression.Kind,
 			EVerseExpressionKind::Identifier);
 		TestTrue(TEXT("Identifier range is source exact"),
-			Snapshot.GetSourceView(Item.ExpressionRange) == UTF8TEXTVIEW("Label"));
+			Snapshot.GetSourceView(Item.Expression.Range) == UTF8TEXTVIEW("Label"));
 		TestTrue(TEXT("Identifier type resolves from the function parameter"),
-			Snapshot.GetSourceView(Item.TypeRange) == UTF8TEXTVIEW("string"));
+			Snapshot.GetSourceView(Item.Expression.Type.SourceRange) == UTF8TEXTVIEW("string"));
 		TestTrue(TEXT("Single identifier is the final value position"),
 			Item.bIsFinalValuePosition);
 		TestEqual(TEXT("Single identifier ends its clause"),
@@ -430,7 +446,7 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 		const FVerseClauseItemDescriptor& First = SpacedFunction->BodyClause.Items[0];
 		const FVerseClauseItemDescriptor& Last = SpacedFunction->BodyClause.Items[1];
 		TestTrue(TEXT("First root identifier is exact"),
-			Snapshot.GetSourceView(First.ExpressionRange) == UTF8TEXTVIEW("First"));
+			Snapshot.GetSourceView(First.Expression.Range) == UTF8TEXTVIEW("First"));
 		TestEqual(TEXT("Blank source line is retained as visual spacing metadata"),
 			First.ExtraBlankLineCount, 1);
 		TestEqual(TEXT("Newline separator is classified from the source gap"),
@@ -442,6 +458,50 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			Last.bIsFinalValuePosition);
 		TestTrue(TEXT("Trailing trivia preserves source through the next expression"),
 			Snapshot.GetSourceView(First.TrailingTriviaRange).Find(UTF8TEXTVIEW("\n\n")) != INDEX_NONE);
+	}
+
+	auto FindOnlyExpression = [this, &Snapshot](FUtf8StringView Name) -> const FVerseExpressionDescriptor*
+	{
+		const FVerseSourceRegion* Region = VerseParseSnapshotBuilderTests::FindTypedRegion(
+			Snapshot, Snapshot.GetSourceRegions(), Name);
+		if (!TestNotNull(TEXT("Typed Add fixture exists"), Region)
+			|| !TestEqual(TEXT("Fixture has one root expression"), Region->BodyClause.Items.Num(), 1))
+		{
+			return nullptr;
+		}
+		return &Region->BodyClause.Items[0].Expression;
+	};
+	if (const FVerseExpressionDescriptor* AddInt = FindOnlyExpression(UTF8TEXTVIEW("AddIntLiteral")))
+	{
+		TestEqual(TEXT("Identifier plus literal is Add"), AddInt->Kind, EVerseExpressionKind::Addition);
+		TestTrue(TEXT("Integer literal remains unsupported"),
+			AddInt->Operands.Num() == 2
+			&& AddInt->Operands[1].Kind == EVerseExpressionKind::Unsupported
+			&& AddInt->Operands[1].Type.IntrinsicName == TEXT("int"));
+	}
+	if (const FVerseExpressionDescriptor* AddFloat = FindOnlyExpression(UTF8TEXTVIEW("AddFloat")))
+	{
+		TestTrue(TEXT("Float Add resolves from source-backed evidence"),
+			Snapshot.GetSourceView(AddFloat->Type.SourceRange) == UTF8TEXTVIEW("float"));
+	}
+	if (const FVerseExpressionDescriptor* AddArray = FindOnlyExpression(UTF8TEXTVIEW("AddArray")))
+	{
+		TestTrue(TEXT("Generic array Add retains the concrete source type"),
+			Snapshot.GetSourceView(AddArray->Type.SourceRange) == UTF8TEXTVIEW("[]int"));
+	}
+	if (const FVerseExpressionDescriptor* Conflict = FindOnlyExpression(UTF8TEXTVIEW("AddConflict")))
+	{
+		TestFalse(TEXT("Conflicting local evidence remains unresolved"), Conflict->Type.IsResolved());
+	}
+	if (const FVerseExpressionDescriptor* Chain = FindOnlyExpression(UTF8TEXTVIEW("AddChain")))
+	{
+		TestEqual(TEXT("Add chains remain unsupported in this slice"),
+			Chain->Kind, EVerseExpressionKind::Unsupported);
+	}
+	if (const FVerseExpressionDescriptor* Subtract = FindOnlyExpression(UTF8TEXTVIEW("Subtract")))
+	{
+		TestEqual(TEXT("Subtraction remains unsupported in this slice"),
+			Subtract->Kind, EVerseExpressionKind::Unsupported);
 	}
 	return true;
 }

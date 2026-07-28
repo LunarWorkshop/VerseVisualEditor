@@ -433,20 +433,57 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& GraphTiles[0].ValueOutputs.Num() == 2);
 		TestTrue(TEXT("Function body expression uses the shared visual tile model"),
 			GraphTiles[1].Kind == EVerseVisualTileKind::Expression
+			&& GraphTiles[1].ExpressionKind == EVerseExpressionKind::Addition
 			&& GraphTiles[1].bHasExecutionInput
 			&& GraphTiles[1].bHasExecutionOutput
 			&& GraphTiles[1].bExecutionInputConnected
 			&& GraphTiles[1].bExecutionOutputConnected
 			&& GraphTiles[1].bImplicitReturnValue
+			&& GraphTiles[1].ValueInputs.Num() == 2
+			&& GraphTiles[1].ValueInputs[0].bConnected
+			&& GraphTiles[1].ValueInputs[1].bConnected
 			&& GraphTiles[1].ValueOutputs.Num() == 1
 			&& GraphTiles[1].ValueOutputs[0].bConnected
+			&& GraphTiles[1].Children.Num() == 2
 			&& GraphTiles[1].Range.Revision == Revision);
+		if (GraphTiles[1].Children.Num() == 2)
+		{
+			TestTrue(TEXT("Upper-left operand is an identifier value source"),
+				GraphTiles[1].Children[0].ExpressionKind == EVerseExpressionKind::Identifier
+				&& !GraphTiles[1].Children[0].bHasExecutionInput
+				&& !GraphTiles[1].Children[0].bHasExecutionOutput
+				&& GraphTiles[1].Children[0].ValueOutputs.Num() == 1
+				&& GraphTiles[1].Children[0].ValueOutputs[0].bConnected);
+			TestTrue(TEXT("Second operand is another identifier value source"),
+				GraphTiles[1].Children[1].ExpressionKind == EVerseExpressionKind::Identifier
+				&& GraphTiles[1].Children[1].ValueOutputs.Num() == 1);
+		}
 		TestTrue(TEXT("Function return uses the shared visual tile model"),
 			GraphTiles[2].Kind == EVerseVisualTileKind::FunctionReturn
 			&& GraphTiles[2].bHasExecutionInput
 			&& GraphTiles[2].bExecutionInputConnected
 			&& GraphTiles[2].ValueInputs.Num() == 1
 			&& GraphTiles[2].ValueInputs[0].bConnected);
+	}
+
+	const FVerseVisualTile* IntLiteralFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("AddIntLiteral"));
+	if (TestNotNull(TEXT("Integer-literal Add visual tile exists"), IntLiteralFunction))
+	{
+		const TArray<FVerseVisualTile> IntGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*IntLiteralFunction, Snapshot);
+		if (TestEqual(TEXT("Integer-literal Add graph has three root tiles"), IntGraph.Num(), 3)
+			&& TestEqual(TEXT("Integer-literal Add has two child operands"), IntGraph[1].Children.Num(), 2))
+		{
+			TestTrue(TEXT("Literal stays a generic expression with an int value output"),
+				IntGraph[1].Children[1].ExpressionKind == EVerseExpressionKind::Unsupported
+				&& IntGraph[1].Children[1].IntrinsicTypeName == TEXT("int")
+				&& IntGraph[1].Children[1].ValueOutputs.Num() == 1
+				&& IntGraph[1].Children[1].ValueOutputs[0].IntrinsicTypeName == TEXT("int")
+				&& IntGraph[1].Children[1].ValueOutputs[0].bConnected);
+		}
 	}
 
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Function, Snapshot);

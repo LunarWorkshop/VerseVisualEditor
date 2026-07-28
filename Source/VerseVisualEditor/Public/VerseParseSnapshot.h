@@ -37,6 +37,38 @@ enum class EVerseExpressionKind : uint8
 {
 	Unsupported,
 	Identifier,
+	Addition,
+};
+
+enum class EVerseTypeResolutionProvenance : uint8
+{
+	Unresolved,
+	LocallyInferred,
+	CompilerResolved,
+};
+
+/** Conservative type evidence. SourceRange is preferred over an intrinsic name. */
+struct VERSEVISUALEDITOR_API FVerseExpressionType
+{
+	FVerseByteRange SourceRange;
+	FName IntrinsicName;
+	EVerseTypeResolutionProvenance Provenance = EVerseTypeResolutionProvenance::Unresolved;
+
+	bool IsResolved() const
+	{
+		return Provenance != EVerseTypeResolutionProvenance::Unresolved
+			&& (SourceRange.IsSet() || !IntrinsicName.IsNone());
+	}
+};
+
+/** Recursive, source-exact expression recognized from the official Verse VST. */
+struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
+{
+	FVerseByteRange Range;
+	FVerseByteRange OperatorRange;
+	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	FVerseExpressionType Type;
+	TArray<FVerseExpressionDescriptor> Operands;
 };
 
 enum class EVerseClauseItemSeparator : uint8
@@ -51,11 +83,9 @@ enum class EVerseClauseItemSeparator : uint8
 /** A root expression's occurrence within an executable clause. */
 struct VERSEVISUALEDITOR_API FVerseClauseItemDescriptor
 {
-	FVerseByteRange ExpressionRange;
+	FVerseExpressionDescriptor Expression;
 	FVerseByteRange LeadingTriviaRange;
 	FVerseByteRange TrailingTriviaRange;
-	FVerseByteRange TypeRange;
-	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
 	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;

@@ -35,8 +35,16 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
-	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return FirstValueInputAnchor; }
-	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return FirstValueOutputAnchor; }
+	TSharedPtr<SWidget> GetValueInputAnchor(int32 Index) const
+	{
+		return ValueInputAnchors.IsValidIndex(Index) ? ValueInputAnchors[Index] : nullptr;
+	}
+	TSharedPtr<SWidget> GetValueOutputAnchor(int32 Index) const
+	{
+		return ValueOutputAnchors.IsValidIndex(Index) ? ValueOutputAnchors[Index] : nullptr;
+	}
+	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return GetValueInputAnchor(0); }
+	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
 
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
@@ -66,8 +74,8 @@ private:
 	FOnClicked OnSelected;
 	FOnClicked OnOpened;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
-	TSharedPtr<SWidget> FirstValueInputAnchor;
-	TSharedPtr<SWidget> FirstValueOutputAnchor;
+	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
+	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
 	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;

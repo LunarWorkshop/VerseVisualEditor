@@ -19,15 +19,25 @@ struct FVerseVisualSocket
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
 	bool bConnected = false;
+	FName IntrinsicTypeName;
+};
+
+struct FVerseVisualExpressionDescriptor
+{
+	FVerseTextRange Range;
+	FVerseTextRange OperatorRange;
+	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	FVerseTextRange TypeRange;
+	FName IntrinsicTypeName;
+	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
+	TArray<FVerseVisualExpressionDescriptor> Operands;
 };
 
 struct FVerseVisualClauseItemDescriptor
 {
-	FVerseTextRange ExpressionRange;
+	FVerseVisualExpressionDescriptor Expression;
 	FVerseTextRange LeadingTriviaRange;
 	FVerseTextRange TrailingTriviaRange;
-	FVerseTextRange TypeRange;
-	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
 	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;
@@ -64,6 +74,8 @@ struct FVerseVisualTile
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
+	FName IntrinsicTypeName;
+	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	TArray<FVerseTextRange> SpecifierRanges;
 	TArray<FVerseTextRange> FunctionAccessSpecifierRanges;
 	TArray<FVerseTextRange> FunctionEffectSpecifierRanges;
