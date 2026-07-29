@@ -8,6 +8,7 @@
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseSemanticCandidates.h"
 #include "VerseSemanticWorkspace.h"
+#include "VerseIntrinsicPresentation.h"
 
 #define LOCTEXT_NAMESPACE "VerseExpressionActions"
 
@@ -35,36 +36,6 @@ namespace
 			reinterpret_cast<const ANSICHAR*>(Source.GetData() + Type.SourceRange.BeginByte),
 			Type.SourceRange.NumBytes);
 		return NormalizeActionType(FString(Converted.Length(), Converted.Get()));
-	}
-
-	FText GetBlueprintOperatorDisplayName(
-		EVerseSemanticCandidateKind Kind,
-		FStringView Spelling,
-		FStringView ResultTypeName)
-	{
-		if (Kind == EVerseSemanticCandidateKind::PrefixOperator
-			&& Spelling == TEXT("-"))
-		{
-			return ResultTypeName.Equals(TEXT("int"), ESearchCase::IgnoreCase)
-				? LOCTEXT("BlueprintNegateIntName", "Negate Int")
-				: LOCTEXT("BlueprintNegateFloatName", "Negate Float");
-		}
-		if (Kind == EVerseSemanticCandidateKind::InfixOperator)
-		{
-			if (Spelling == TEXT("+")) return LOCTEXT("BlueprintAddOperatorName", "Add");
-			if (Spelling == TEXT("-")) return LOCTEXT("BlueprintSubtractOperatorName", "Subtract");
-			if (Spelling == TEXT("*")) return LOCTEXT("BlueprintMultiplyOperatorName", "Multiply");
-			if (Spelling == TEXT("/")) return LOCTEXT("BlueprintDivideOperatorName", "Divide");
-			if (Spelling == TEXT("=")) return LOCTEXT("BlueprintEqualOperatorName", "Equal");
-			if (Spelling == TEXT("<>")) return LOCTEXT("BlueprintNotEqualOperatorName", "Not Equal");
-			if (Spelling == TEXT("<")) return LOCTEXT("BlueprintLessOperatorName", "Less");
-			if (Spelling == TEXT("<=")) return LOCTEXT("BlueprintLessEqualOperatorName", "Less or Equal");
-			if (Spelling == TEXT(">")) return LOCTEXT("BlueprintGreaterOperatorName", "Greater");
-			if (Spelling == TEXT(">=")) return LOCTEXT("BlueprintGreaterEqualOperatorName", "Greater or Equal");
-		}
-		return FText::Format(
-			LOCTEXT("GenericOperatorAction", "Operator ({0})"),
-			FText::FromString(FString(Spelling)));
 	}
 
 	bool ContainsExpressionAt(
@@ -188,9 +159,19 @@ namespace
 		Addition.Action = MakeShared<FVerseExpressionAction>();
 		Addition.Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
 		Addition.Action->SourceSpelling = TEXT("+");
-		Addition.Action->DisplayName = LOCTEXT("AddAction", "Add");
-		Addition.Action->Category = LOCTEXT(
-			"BlueprintOperatorsCategory", "Utilities|Operators");
+		FVerseIntrinsicPresentationKey AdditionPresentationKey;
+		AdditionPresentationKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
+		AdditionPresentationKey.Spelling = TEXT("+");
+		const FVerseResolvedExpressionPresentation AdditionPresentation =
+			ResolveVerseExpressionPresentation(
+				FText::GetEmpty(),
+				FText::GetEmpty(),
+				FText::GetEmpty(),
+				FText::GetEmpty(),
+				FindVerseIntrinsicPresentation(AdditionPresentationKey),
+				AdditionPresentationKey.Spelling);
+		Addition.Action->DisplayName = AdditionPresentation.DisplayName;
+		Addition.Action->Category = AdditionPresentation.Category;
 		Addition.Action->ModuleCategory = LOCTEXT("VerseModuleCategory", "Verse");
 		Addition.PolymorphicOperator = EVerseOperatorKind::Addition;
 		Addition.RequiredInputCount = 2;
@@ -291,39 +272,29 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 			Action->SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = Candidate.BlueprintDisplayName.IsEmpty()
-				? Action->DisplayName
-				: Candidate.BlueprintDisplayName;
-			Action->Category = Candidate.Category.IsEmpty()
-				? LOCTEXT("UncategorizedCallableCategory", "Uncategorized")
-				: Candidate.Category;
+			Action->DisplayName = Candidate.PresentationDisplayName;
+			Action->Category = Candidate.Category;
 			break;
 		case EVerseSemanticCandidateKind::InfixOperator:
 			Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = GetBlueprintOperatorDisplayName(
-				Candidate.Kind, Candidate.SourceSpelling, Candidate.ResultTypeName);
-			Action->Category = LOCTEXT(
-				"BlueprintOperatorsCategory", "Utilities|Operators");
+			Action->DisplayName = Candidate.PresentationDisplayName;
+			Action->Category = Candidate.Category;
 			break;
 		case EVerseSemanticCandidateKind::PrefixOperator:
 			Action->SourceForm = EVerseExpressionSourceForm::PrefixOperator;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = GetBlueprintOperatorDisplayName(
-				Candidate.Kind, Candidate.SourceSpelling, Candidate.ResultTypeName);
-			Action->Category = LOCTEXT(
-				"BlueprintOperatorsCategory", "Utilities|Operators");
+			Action->DisplayName = Candidate.PresentationDisplayName;
+			Action->Category = Candidate.Category;
 			break;
 		case EVerseSemanticCandidateKind::PostfixOperator:
 			Action->SourceForm = EVerseExpressionSourceForm::PostfixOperator;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = GetBlueprintOperatorDisplayName(
-				Candidate.Kind, Candidate.SourceSpelling, Candidate.ResultTypeName);
-			Action->Category = LOCTEXT(
-				"BlueprintOperatorsCategory", "Utilities|Operators");
+			Action->DisplayName = Candidate.PresentationDisplayName;
+			Action->Category = Candidate.Category;
 			break;
 		}
 		Result.Add(MoveTemp(Action));

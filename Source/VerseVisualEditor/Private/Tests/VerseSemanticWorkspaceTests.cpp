@@ -298,7 +298,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Function
 				&& Candidate.SourceSpelling == TEXT("Abs")
-				&& Candidate.BlueprintDisplayName.ToString()
+				&& Candidate.PresentationDisplayName.ToString()
 					== TEXT("Absolute (Integer)");
 		});
 	TestNotNull(

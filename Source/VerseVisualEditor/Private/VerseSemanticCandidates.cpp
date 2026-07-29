@@ -2,6 +2,7 @@
 
 #include "VerseDocument.h"
 #include "VerseBlueprintCallablePresentation.h"
+#include "VerseIntrinsicPresentation.h"
 #include "VerseSemanticWorkspace.h"
 #include "uLang/Semantics/DataDefinition.h"
 #include "uLang/Semantics/Expression.h"
@@ -185,14 +186,6 @@ namespace
 		return FText::FromString(ToFString(Module->GetScopePath('|')));
 	}
 
-	bool IsIntrinsic(const uLang::CDefinition& Definition)
-	{
-		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
-		return Program._intrinsicClass != nullptr
-			&& Definition.GetPrototypeDefinition()->GetAttributes().HasAttributeClass(
-				Program._intrinsicClass, Program);
-	}
-
 	FString DefaultSourceForType(const uLang::CTypeBase& Type)
 	{
 		using namespace uLang;
@@ -364,27 +357,42 @@ namespace
 		}
 		const FText DefinitionCategory = GetDefinitionCategory(Function);
 		const FText DefinitionDisplayName = GetDefinitionDisplayName(Function);
-		const bool bIntrinsic = IsIntrinsic(Function);
+		FVerseIntrinsicPresentationKey PresentationKey;
+		PresentationKey.Form = bInfix
+			? EVerseIntrinsicCallableForm::InfixOperator
+			: (bPrefix
+				? EVerseIntrinsicCallableForm::PrefixOperator
+				: (bPostfix
+					? EVerseIntrinsicCallableForm::PostfixOperator
+					: EVerseIntrinsicCallableForm::Ordinary));
+		PresentationKey.Spelling = Spelling;
+		for (const uLang::CTypeBase* Param : Params)
+		{
+			PresentationKey.ParameterTypes.Add(ToFString(Param->AsCode()));
+		}
+		PresentationKey.ResultType = ToFString(FunctionType->GetReturnType().AsCode());
+		const FVerseIntrinsicPresentationDescriptor* IntrinsicPresentation =
+			FindVerseIntrinsicPresentation(PresentationKey);
 		const TOptional<FVerseBlueprintCallablePresentation> BlueprintPresentation =
-			bOperator
+			bOperator && (IntrinsicPresentation == nullptr
+				|| IntrinsicPresentation->BlueprintLibrary ==
+					EVerseIntrinsicBlueprintLibrary::None)
 				? TOptional<FVerseBlueprintCallablePresentation>()
-				: ResolveVerseBlueprintCallablePresentation(Spelling, *FunctionType);
-		const FText ResolvedCategory = !DefinitionCategory.IsEmpty()
-			? DefinitionCategory
-			: (BlueprintPresentation.IsSet()
-				? BlueprintPresentation->Category
-				: (Spelling == TEXT("ToDiagnostic")
-					? FText::FromString(TEXT("Utilities|String"))
-					: FText::GetEmpty()));
-		const FText ModuleCategory = GetModuleCategory(Function);
-		const FText ResolvedDisplayName = !DefinitionDisplayName.IsEmpty()
-			? DefinitionDisplayName
-			: (BlueprintPresentation.IsSet()
-				&& !BlueprintPresentation->ExplicitDisplayName.IsEmpty()
+				: ResolveVerseBlueprintCallablePresentation(
+					Spelling, *FunctionType, IntrinsicPresentation);
+		const FVerseResolvedExpressionPresentation ResolvedPresentation =
+			ResolveVerseExpressionPresentation(
+				DefinitionDisplayName,
+				DefinitionCategory,
+				BlueprintPresentation.IsSet()
 					? BlueprintPresentation->ExplicitDisplayName
-					: (bIntrinsic && BlueprintPresentation.IsSet()
-						? BlueprintPresentation->IntrinsicFallbackDisplayName
-						: FText::GetEmpty()));
+					: FText::GetEmpty(),
+				BlueprintPresentation.IsSet()
+					? BlueprintPresentation->Category
+					: FText::GetEmpty(),
+				IntrinsicPresentation,
+				Spelling);
+		const FText ModuleCategory = GetModuleCategory(Function);
 
 		if (!bDraggingFromOutput)
 		{
@@ -402,9 +410,9 @@ namespace
 						? EVerseSemanticCandidateKind::PostfixOperator
 						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
-			Candidate.Category = ResolvedCategory;
+			Candidate.Category = ResolvedPresentation.Category;
 			Candidate.ModuleCategory = ModuleCategory;
-			Candidate.BlueprintDisplayName = ResolvedDisplayName;
+			Candidate.PresentationDisplayName = ResolvedPresentation.DisplayName;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
 			Candidate.Function = &Function;
@@ -440,9 +448,9 @@ namespace
 						? EVerseSemanticCandidateKind::PostfixOperator
 						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
-			Candidate.Category = ResolvedCategory;
+			Candidate.Category = ResolvedPresentation.Category;
 			Candidate.ModuleCategory = ModuleCategory;
-			Candidate.BlueprintDisplayName = ResolvedDisplayName;
+			Candidate.PresentationDisplayName = ResolvedPresentation.DisplayName;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
 			Candidate.BoundInputIndex = BoundIndex;

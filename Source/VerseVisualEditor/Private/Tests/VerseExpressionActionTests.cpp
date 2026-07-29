@@ -4,6 +4,7 @@
 #include "VerseDocumentSession.h"
 #include "VerseExpressionActions.h"
 #include "VerseFunctionNavigation.h"
+#include "VerseIntrinsicPresentation.h"
 
 #include "Misc/AutomationTest.h"
 #include "Containers/StringConv.h"
@@ -17,6 +18,91 @@ namespace
 		Bytes.Append(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
 		return FVerseDocument::CreateFromBytes(Bytes, Error);
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseIntrinsicPresentationRegistryTest,
+	"VerseVisualEditor.Expressions.Presentation.IntrinsicRegistry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
+{
+	const TConstArrayView<FVerseIntrinsicPresentationDescriptor> Table =
+		GetVerseIntrinsicPresentationTable();
+	TestTrue(TEXT("Intrinsic presentation table is populated"), !Table.IsEmpty());
+	for (const FVerseIntrinsicPresentationDescriptor& Descriptor : Table)
+	{
+		TestTrue(
+			*FString::Printf(
+				TEXT("Descriptor is the unique first match for %s"),
+				*Descriptor.Key.Spelling),
+			FindVerseIntrinsicPresentation(Descriptor.Key) == &Descriptor);
+		if (Descriptor.BlueprintLibrary != EVerseIntrinsicBlueprintLibrary::None)
+		{
+			TestNotNull(
+				*FString::Printf(
+					TEXT("Blueprint target resolves for %s"),
+					*Descriptor.Key.Spelling),
+				ResolveVerseIntrinsicBlueprintFunction(Descriptor));
+		}
+	}
+
+	FVerseIntrinsicPresentationKey AddKey;
+	AddKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
+	AddKey.Spelling = TEXT("+");
+	AddKey.ParameterTypes = {TEXT("int"), TEXT("int")};
+	AddKey.ResultType = TEXT("int");
+	const FVerseIntrinsicPresentationDescriptor* Add =
+		FindVerseIntrinsicPresentation(AddKey);
+	if (!TestNotNull(TEXT("Typed Add descriptor resolves"), Add))
+	{
+		return false;
+	}
+
+	const FVerseResolvedExpressionPresentation VerseWins =
+		ResolveVerseExpressionPresentation(
+			FText::FromString(TEXT("Verse Name")),
+			FText::FromString(TEXT("Verse Category")),
+			FText::FromString(TEXT("UFunction Name")),
+			FText::FromString(TEXT("UFunction Category")),
+			Add,
+			TEXT("+"));
+	TestEqual(TEXT("Verse display name has highest precedence"),
+		VerseWins.DisplayName.ToString(), FString(TEXT("Verse Name")));
+	TestEqual(TEXT("Verse category has highest precedence"),
+		VerseWins.Category.ToString(), FString(TEXT("Verse Category")));
+
+	const FVerseResolvedExpressionPresentation UFunctionWins =
+		ResolveVerseExpressionPresentation(
+			FText::GetEmpty(),
+			FText::GetEmpty(),
+			FText::FromString(TEXT("UFunction Name")),
+			FText::FromString(TEXT("UFunction Category")),
+			Add,
+			TEXT("+"));
+	TestEqual(TEXT("Explicit UFunction display name precedes the table"),
+		UFunctionWins.DisplayName.ToString(), FString(TEXT("UFunction Name")));
+	TestEqual(TEXT("UFunction category precedes the table"),
+		UFunctionWins.Category.ToString(), FString(TEXT("UFunction Category")));
+
+	const FVerseResolvedExpressionPresentation TableFallback =
+		ResolveVerseExpressionPresentation(
+			FText::GetEmpty(), FText::GetEmpty(),
+			FText::GetEmpty(), FText::GetEmpty(), Add, TEXT("+"));
+	TestEqual(TEXT("Intrinsic display name comes from the table"),
+		TableFallback.DisplayName.ToString(), FString(TEXT("Add")));
+	TestEqual(TEXT("Intrinsic category comes from the table"),
+		TableFallback.Category.ToString(), FString(TEXT("Utilities|Operators")));
+
+	const FVerseResolvedExpressionPresentation FinalFallback =
+		ResolveVerseExpressionPresentation(
+			FText::GetEmpty(), FText::GetEmpty(),
+			FText::GetEmpty(), FText::GetEmpty(), nullptr, TEXT("Unmapped"));
+	TestEqual(TEXT("Unmapped callable retains its actual name"),
+		FinalFallback.DisplayName.ToString(), FString(TEXT("Unmapped")));
+	TestEqual(TEXT("Unmapped callable is uncategorized"),
+		FinalFallback.Category.ToString(), FString(TEXT("Uncategorized")));
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

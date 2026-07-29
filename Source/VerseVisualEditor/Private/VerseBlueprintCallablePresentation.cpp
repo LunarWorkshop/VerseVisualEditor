@@ -4,38 +4,13 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
-#include "ObjectTools.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
+#include "VerseIntrinsicPresentation.h"
 #include "uLang/Semantics/SemanticTypes.h"
 
 namespace
 {
-	bool IsVerseIntrinsicAlias(FStringView VerseName, FStringView FunctionName)
-	{
-		const FString Verse(VerseName);
-		const FString Function(FunctionName);
-		return (Verse.Equals(TEXT("BitAnd"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("And_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("BitOr"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Or_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("BitXor"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Xor_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("BitNot"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Not_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("Ceil"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("FCeil"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("Floor"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("FFloor"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("Mod"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Percent_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("Quotient"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Divide_"), ESearchCase::IgnoreCase))
-			|| (Verse.Equals(TEXT("ToString"), ESearchCase::IgnoreCase)
-				&& Function.StartsWith(TEXT("Conv_"), ESearchCase::IgnoreCase)
-				&& Function.EndsWith(TEXT("ToString"), ESearchCase::IgnoreCase));
-	}
-
 	const TMultiMap<FString, const UFunction*>& GetBlueprintCallableIndex()
 	{
 		// Native Blueprint function-library classes and their functions live for the
@@ -77,17 +52,6 @@ namespace
 							Function->GetMetaData(TEXT("ScriptMethod")).ToLower(),
 							Function);
 					}
-					static const TCHAR* VerseAliases[] = {
-						TEXT("BitAnd"), TEXT("BitOr"), TEXT("BitXor"), TEXT("BitNot"),
-						TEXT("Ceil"), TEXT("Floor"), TEXT("Mod"), TEXT("Quotient"),
-						TEXT("ToString")};
-					for (const TCHAR* Alias : VerseAliases)
-					{
-						if (IsVerseIntrinsicAlias(Alias, FunctionName))
-						{
-							Result.Add(FString(Alias).ToLower(), Function);
-						}
-					}
 				}
 			}
 			return Result;
@@ -112,10 +76,6 @@ namespace
 				VerseNameString, ESearchCase::IgnoreCase))
 		{
 			return 90;
-		}
-		if (IsVerseIntrinsicAlias(VerseName, FunctionName))
-		{
-			return 70;
 		}
 		return INDEX_NONE;
 	}
@@ -208,53 +168,38 @@ namespace
 		return ReturnScore == INDEX_NONE ? INDEX_NONE : Score + ReturnScore;
 	}
 
-	int32 ScoreToStringSignature(
-		const uLang::CFunctionType& VerseType, const UFunction& Function)
+	TOptional<FVerseBlueprintCallablePresentation> BuildPresentation(
+		const UFunction* Function)
 	{
-		const uLang::CFunctionType::ParamTypes Params = VerseType.GetParamTypes();
-		if (Params.Num() != 1)
+		if (Function == nullptr)
 		{
-			return INDEX_NONE;
+			return {};
 		}
-		const FProperty* Input = nullptr;
-		const FProperty* Return = nullptr;
-		for (TFieldIterator<FProperty> It(&Function); It; ++It)
-		{
-			const FProperty* Property = *It;
-			if (!Property->HasAnyPropertyFlags(CPF_Parm))
-			{
-				continue;
-			}
-			if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
-			{
-				Return = Property;
-			}
-			else if (Input == nullptr)
-			{
-				Input = Property;
-			}
-			else
-			{
-				return INDEX_NONE;
-			}
-		}
-		if (Input == nullptr || CastField<FStrProperty>(Return) == nullptr)
-		{
-			return INDEX_NONE;
-		}
-		return ScoreProperty(*Params[0], *Input);
+		const FText ExplicitDisplayName = Function->HasMetaData(TEXT("DisplayName"))
+			? Function->GetDisplayNameText()
+			: FText::GetEmpty();
+		return FVerseBlueprintCallablePresentation{
+			ExplicitDisplayName,
+			UK2Node_CallFunction::GetDefaultCategoryForFunction(
+				Function, FText::GetEmpty())};
 	}
 }
 
 TOptional<FVerseBlueprintCallablePresentation> ResolveVerseBlueprintCallablePresentation(
 	FStringView VerseName,
-	const uLang::CFunctionType& VerseFunctionType)
+	const uLang::CFunctionType& VerseFunctionType,
+	const FVerseIntrinsicPresentationDescriptor* Intrinsic)
 {
+	if (Intrinsic != nullptr
+		&& Intrinsic->BlueprintLibrary != EVerseIntrinsicBlueprintLibrary::None)
+	{
+		return BuildPresentation(ResolveVerseIntrinsicBlueprintFunction(*Intrinsic));
+	}
+
 	const UFunction* BestFunction = nullptr;
 	int32 BestScore = INDEX_NONE;
 	TArray<const UFunction*> Functions;
 	GetBlueprintCallableIndex().MultiFind(FString(VerseName).ToLower(), Functions);
-	const bool bToString = VerseName.Equals(TEXT("ToString"), ESearchCase::IgnoreCase);
 	for (const UFunction* Function : Functions)
 	{
 		if (Function == nullptr)
@@ -266,12 +211,7 @@ TOptional<FVerseBlueprintCallablePresentation> ResolveVerseBlueprintCallablePres
 		{
 			continue;
 		}
-		int32 SignatureScore = ScoreSignature(VerseFunctionType, *Function);
-		if (SignatureScore == INDEX_NONE && bToString
-			&& IsVerseIntrinsicAlias(VerseName, Function->GetName()))
-		{
-			SignatureScore = ScoreToStringSignature(VerseFunctionType, *Function);
-		}
+		const int32 SignatureScore = ScoreSignature(VerseFunctionType, *Function);
 		if (SignatureScore == INDEX_NONE)
 		{
 			continue;
@@ -284,16 +224,5 @@ TOptional<FVerseBlueprintCallablePresentation> ResolveVerseBlueprintCallablePres
 		}
 	}
 
-	if (BestFunction == nullptr)
-	{
-		return {};
-	}
-	const FText ExplicitDisplayName = BestFunction->HasMetaData(TEXT("DisplayName"))
-		? BestFunction->GetDisplayNameText()
-		: FText::GetEmpty();
-	return FVerseBlueprintCallablePresentation{
-		ExplicitDisplayName,
-		ObjectTools::GetUserFacingFunctionName(BestFunction, true),
-		UK2Node_CallFunction::GetDefaultCategoryForFunction(
-			BestFunction, FText::GetEmpty())};
+	return BuildPresentation(BestFunction);
 }

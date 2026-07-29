@@ -28,8 +28,8 @@ struct FVerseSemanticCandidate
 {
 	EVerseSemanticCandidateKind Kind = EVerseSemanticCandidateKind::Identifier;
 	FString DisplayName;
-	FText BlueprintDisplayName;
-	/** Category metadata resolved from the Verse definition, then intrinsic presentation. */
+	FText PresentationDisplayName;
+	/** Category resolved by the shared Verse/UFunction/intrinsic precedence policy. */
 	FText Category;
 	/** Semantic module hierarchy, independent of presentation category metadata. */
 	FText ModuleCategory;
