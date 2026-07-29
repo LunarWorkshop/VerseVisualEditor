@@ -133,6 +133,12 @@ bool FVerseSemanticWorkspaceFailureRetentionTest::RunTest(const FString& Paramet
 
 	TestEqual(TEXT("Failed current analysis is reported"), Workspace.GetState(), EVerseSemanticWorkspaceState::Failed);
 	TestTrue(
+		TEXT("Failed analysis still records the exact revision it diagnosed"),
+		Workspace.LatestAnalysisDescribes(NewDocument.FilePath, NewDocument.Revision));
+	TestFalse(
+		TEXT("Failed analysis does not describe the previous revision"),
+		Workspace.LatestAnalysisDescribes(OldDocument.FilePath, OldDocument.Revision));
+	TestTrue(
 		TEXT("Last successful snapshot remains available for display"),
 		Workspace.GetLastSuccessfulSnapshot().IsValid()
 			&& Workspace.GetLastSuccessfulSnapshot()->Describes(

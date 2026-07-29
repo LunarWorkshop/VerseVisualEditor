@@ -308,6 +308,7 @@ void FVerseSemanticWorkspace::RequestAnalysis(
 	Diagnostics.Reset();
 	if (PendingDocuments.IsEmpty())
 	{
+		LastAnalyzedDocuments.Reset();
 		LastSuccessfulSnapshot = CompiledBaseline;
 		DiscoverySnapshot = CompiledBaseline;
 		MutationSnapshot = CompiledBaseline;
@@ -319,6 +320,7 @@ void FVerseSemanticWorkspace::RequestAnalysis(
 
 	if (CompiledBaselineDescribesAll(PendingDocuments))
 	{
+		LastAnalyzedDocuments = PendingDocuments;
 		LastSuccessfulSnapshot = CompiledBaseline;
 		DiscoverySnapshot = CompiledBaseline;
 		MutationSnapshot = CompiledBaseline;
@@ -372,7 +374,24 @@ void FVerseSemanticWorkspace::RefreshCompiledBaseline(
 	TSharedRef<FVerseSemanticSnapshot> Snapshot = MakeShared<FVerseSemanticSnapshot>();
 	Snapshot->Program = BuildManager->GetProgramContext()._Program;
 	Snapshot->ProjectVst = BuildManager->GetProjectVst();
-	Snapshot->AddDocuments(CompiledDocuments);
+	// An open, clean editor buffer is not necessarily part of Solaris's project
+	// (for example the plugin's private test corpus). Only let the official
+	// baseline claim revisions for snippets it actually owns; every other file
+	// must continue through the in-memory overlay compiler.
+	TArray<FVerseSemanticDocumentInput> RegisteredDocuments;
+	const TSharedPtr<ISolIdeSourceProject> SourceProject =
+		ISolarisLoadCompilerModule::Get().GetSourceProject();
+	if (SourceProject.IsValid())
+	{
+		for (const FVerseSemanticDocumentInput& Document : CompiledDocuments)
+		{
+			if (FindFileSnippet(SourceProject.ToSharedRef(), Document.FilePath) != nullptr)
+			{
+				RegisteredDocuments.Add(Document);
+			}
+		}
+	}
+	Snapshot->AddDocuments(RegisteredDocuments);
 	CompiledBaseline = Snapshot;
 	if (!DiscoverySnapshot.IsValid())
 	{
@@ -398,6 +417,19 @@ bool FVerseSemanticWorkspace::HasExactSnapshot(
 {
 	return MutationSnapshot.IsValid()
 		&& MutationSnapshot->Describes(FilePath, Revision);
+}
+
+bool FVerseSemanticWorkspace::LatestAnalysisDescribes(
+	const FString& FilePath,
+	FVerseDocumentRevision Revision) const
+{
+	return LastAnalyzedDocuments.ContainsByPredicate(
+		[&FilePath, Revision](const FVerseSemanticDocumentInput& Document)
+		{
+			return FVerseSemanticSnapshot::MakeDocumentKey(Document.FilePath)
+				== FVerseSemanticSnapshot::MakeDocumentKey(FilePath)
+				&& Document.Revision == Revision;
+		});
 }
 
 FText FVerseSemanticWorkspace::GetMutationUnavailableReason(
@@ -647,6 +679,7 @@ bool FVerseSemanticWorkspace::TryPublishResult(
 	{
 		return false;
 	}
+	LastAnalyzedDocuments = PendingDocuments;
 	PendingDocuments.Reset();
 	Diagnostics = MoveTemp(Result.Diagnostics);
 	if (Result.Snapshot.IsValid())

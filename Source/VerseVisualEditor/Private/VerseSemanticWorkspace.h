@@ -126,6 +126,10 @@ public:
 		return Result;
 	}
 	const TArray<FVerseSemanticDiagnostic>& GetDiagnostics() const { return Diagnostics; }
+	/** True when the latest completed analysis, successful or not, consumed this exact buffer. */
+	bool LatestAnalysisDescribes(
+		const FString& FilePath,
+		FVerseDocumentRevision Revision) const;
 	bool HasExactSnapshot(const FString& FilePath, FVerseDocumentRevision Revision) const;
 	FText GetMutationUnavailableReason(
 		const FString& FilePath,
@@ -152,6 +156,7 @@ private:
 	uint64 LatestRequestId = 0;
 	uint64 PendingRequestId = 0;
 	TArray<FVerseSemanticDocumentInput> PendingDocuments;
+	TArray<FVerseSemanticDocumentInput> LastAnalyzedDocuments;
 	EVerseSemanticWorkspaceState State = EVerseSemanticWorkspaceState::Unavailable;
 	TSharedPtr<const FVerseSemanticSnapshot> CompiledBaseline;
 	/** Latest partial or complete compiler state, used only for candidate discovery. */

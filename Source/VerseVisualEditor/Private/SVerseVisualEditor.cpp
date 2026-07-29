@@ -99,6 +99,10 @@ struct FOpenVerseDocument
 	bool bCompilationInFlight = false;
 	double CompileAfterSeconds = 0.0;
 	uint64 CompilationRequestId = 0;
+	FVerseDocumentRevision SemanticCompilationRevision;
+	TArray<FVerseSemanticDiagnostic> SemanticCompilationDiagnostics;
+	bool bSemanticCompilationPending = false;
+	bool bHasSemanticCompilationResult = false;
 };
 
 namespace
@@ -1478,6 +1482,7 @@ void SVerseVisualEditor::Tick(
 	if (SemanticWorkspace)
 	{
 		SemanticWorkspace->Tick(FPlatformTime::Seconds());
+		PublishCompletedSemanticCompilations();
 	}
 	const EVerseCompilationMode PreferredMode =
 		GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
@@ -1529,9 +1534,73 @@ void SVerseVisualEditor::QueueSemanticAnalysis(bool bDebounce)
 	}
 }
 
+void SVerseVisualEditor::RequestSemanticCompilation(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (!SemanticWorkspace || !OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	OpenDocument->SemanticCompilationRevision = OpenDocument->Session->GetRevision();
+	OpenDocument->SemanticCompilationDiagnostics.Reset();
+	OpenDocument->bSemanticCompilationPending = true;
+	OpenDocument->bHasSemanticCompilationResult = false;
+	QueueSemanticAnalysis(false);
+}
+
+void SVerseVisualEditor::PublishCompletedSemanticCompilations()
+{
+	if (!SemanticWorkspace
+		|| (SemanticWorkspace->GetState() != EVerseSemanticWorkspaceState::Ready
+			&& SemanticWorkspace->GetState() != EVerseSemanticWorkspaceState::Failed))
+	{
+		return;
+	}
+
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (!OpenDocument.IsValid()
+			|| !OpenDocument->Session.IsValid()
+			|| !OpenDocument->bSemanticCompilationPending
+			|| OpenDocument->Session->GetRevision() != OpenDocument->SemanticCompilationRevision
+			|| !SemanticWorkspace->LatestAnalysisDescribes(
+				OpenDocument->FilePath,
+				OpenDocument->SemanticCompilationRevision))
+		{
+			continue;
+		}
+
+		OpenDocument->SemanticCompilationDiagnostics.Reset();
+		for (const FVerseSemanticDiagnostic& Diagnostic : SemanticWorkspace->GetDiagnostics())
+		{
+			if (Diagnostic.AppliesToFile(OpenDocument->FilePath))
+			{
+				OpenDocument->SemanticCompilationDiagnostics.Add(Diagnostic);
+			}
+		}
+		OpenDocument->bSemanticCompilationPending = false;
+		OpenDocument->bHasSemanticCompilationResult = true;
+
+		const bool bHasErrors = OpenDocument->SemanticCompilationDiagnostics.ContainsByPredicate(
+			[](const FVerseSemanticDiagnostic& Diagnostic)
+			{
+				return Diagnostic.Severity == ELogVerbosity::Error
+					|| Diagnostic.Severity == ELogVerbosity::Fatal;
+			});
+		if (OpenDocument == ActiveDocument && bHasErrors)
+		{
+			bLocalCompilePanelOpen = true;
+		}
+	}
+}
+
 bool SVerseVisualEditor::HasLocalCompileDiagnosticsForActiveDocument() const
 {
-	return ActiveDocument.IsValid() && !ActiveDocument->LoadError.IsEmpty();
+	return ActiveDocument.IsValid()
+		&& (!ActiveDocument->LoadError.IsEmpty()
+			|| (ActiveDocument->bHasSemanticCompilationResult
+				&& !ActiveDocument->SemanticCompilationDiagnostics.IsEmpty()));
 }
 
 FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
@@ -1545,6 +1614,25 @@ FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
 	if (!ActiveDocument->LoadError.IsEmpty())
 	{
 		Lines.Add(FString::Printf(TEXT("Error: %s"), *ActiveDocument->LoadError.ToString()));
+	}
+	if (ActiveDocument->bHasSemanticCompilationResult)
+	{
+		for (const FVerseSemanticDiagnostic& Diagnostic : ActiveDocument->SemanticCompilationDiagnostics)
+		{
+			const TCHAR* Severity = Diagnostic.Severity == ELogVerbosity::Warning
+				? TEXT("Warning")
+				: Diagnostic.Severity == ELogVerbosity::Error || Diagnostic.Severity == ELogVerbosity::Fatal
+					? TEXT("Error")
+					: TEXT("Info");
+			const FString Location = Diagnostic.RowSpan.X > 0
+				? FString::Printf(TEXT(" (L%d)"), Diagnostic.RowSpan.X)
+				: FString();
+			Lines.Add(FString::Printf(
+				TEXT("%s%s: %s"),
+				Severity,
+				*Location,
+				*Diagnostic.Message.ToString()));
+		}
 	}
 	if (Lines.IsEmpty())
 	{
@@ -1603,6 +1691,12 @@ TSharedRef<SWidget> SVerseVisualEditor::BuildToolbar()
 
 void SVerseVisualEditor::CompileVerseProject()
 {
+	// BuildScripts only knows registered Solaris packages. Schedule the same
+	// explicit compile result for private and unsaved editor buffers as well.
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		RequestSemanticCompilation(OpenDocument);
+	}
 	if (ISolarisEditorModule::IsModuleLoaded())
 	{
 		ISolarisEditorModule::Get().BuildScripts(
@@ -1618,11 +1712,24 @@ bool SVerseVisualEditor::CanCompileVerseProject() const
 FSlateIcon SVerseVisualEditor::GetCompileVerseIcon() const
 {
 	const TCHAR* IconName = TEXT("SolarisEditor.BuildScripts");
+	if (ProjectBuildState == EVerseProjectBuildState::Building
+		|| (ActiveDocument.IsValid() && ActiveDocument->bSemanticCompilationPending))
+	{
+		return FSlateIcon("SolarisEditorStyle", TEXT("SolarisEditor.BuildScriptsLoading"));
+	}
+	if (ActiveDocument.IsValid()
+		&& ActiveDocument->bHasSemanticCompilationResult
+		&& ActiveDocument->SemanticCompilationDiagnostics.ContainsByPredicate(
+			[](const FVerseSemanticDiagnostic& Diagnostic)
+			{
+				return Diagnostic.Severity == ELogVerbosity::Error
+					|| Diagnostic.Severity == ELogVerbosity::Fatal;
+			}))
+	{
+		return FSlateIcon("SolarisEditorStyle", TEXT("SolarisEditor.BuildScriptsError"));
+	}
 	switch (ProjectBuildState)
 	{
-	case EVerseProjectBuildState::Building:
-		IconName = TEXT("SolarisEditor.BuildScriptsLoading");
-		break;
 	case EVerseProjectBuildState::Success:
 		IconName = TEXT("SolarisEditor.BuildScriptsSuccess");
 		break;
@@ -1641,10 +1748,31 @@ FSlateIcon SVerseVisualEditor::GetCompileVerseIcon() const
 
 FText SVerseVisualEditor::GetCompileVerseTooltip() const
 {
+	if (ProjectBuildState == EVerseProjectBuildState::Building
+		|| (ActiveDocument.IsValid() && ActiveDocument->bSemanticCompilationPending))
+	{
+		return LOCTEXT("VerseBuildInProgress", "Build in progress...");
+	}
+	if (ActiveDocument.IsValid() && ActiveDocument->bHasSemanticCompilationResult)
+	{
+		int32 LocalErrorCount = 0;
+		for (const FVerseSemanticDiagnostic& Diagnostic : ActiveDocument->SemanticCompilationDiagnostics)
+		{
+			if (Diagnostic.Severity == ELogVerbosity::Error
+				|| Diagnostic.Severity == ELogVerbosity::Fatal)
+			{
+				++LocalErrorCount;
+			}
+		}
+		if (LocalErrorCount > 0)
+		{
+			return FText::Format(
+				LOCTEXT("PrivateVerseBuildErrors", "Built with {0} local {0}|plural(one=error,other=errors)."),
+				LocalErrorCount);
+		}
+	}
 	switch (ProjectBuildState)
 	{
-	case EVerseProjectBuildState::Building:
-		return LOCTEXT("VerseBuildInProgress", "Build in progress...");
 	case EVerseProjectBuildState::Success:
 		return LOCTEXT("VerseBuildSucceeded", "Built successfully.");
 	case EVerseProjectBuildState::Warnings:
@@ -1669,11 +1797,13 @@ void SVerseVisualEditor::HandleProjectBuildStarted(
 	ProjectBuildErrorCount = 0;
 	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
 	{
-		if (OpenDocument.IsValid()
-			&& OpenDocument->Session.IsValid()
-			&& OpenDocument->Session->IsDirty())
+		if (OpenDocument.IsValid() && OpenDocument->Session.IsValid())
 		{
-			StartCompilation(OpenDocument);
+			RequestSemanticCompilation(OpenDocument);
+			if (OpenDocument->Session->IsDirty())
+			{
+				StartCompilation(OpenDocument);
+			}
 		}
 	}
 }
@@ -1858,6 +1988,7 @@ void SVerseVisualEditor::StartCompilation(const TSharedPtr<FOpenVerseDocument>& 
 	{
 		return;
 	}
+	RequestSemanticCompilation(OpenDocument);
 
 	OpenDocument->bCompilationPending = false;
 	OpenDocument->bCompilationInFlight = true;
@@ -1936,6 +2067,9 @@ void SVerseVisualEditor::InvalidateCompilationResult(
 	OpenDocument->CompilationResult = {};
 	OpenDocument->bHasCompilationResult = false;
 	OpenDocument->bCompilationInFlight = false;
+	OpenDocument->SemanticCompilationDiagnostics.Reset();
+	OpenDocument->bSemanticCompilationPending = false;
+	OpenDocument->bHasSemanticCompilationResult = false;
 }
 
 FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
@@ -2345,6 +2479,10 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 	if (HasLocalCompileDiagnosticsForActiveDocument())
 	{
 		bLocalCompilePanelOpen = true;
+	}
+	else
+	{
+		bLocalCompilePanelOpen = false;
 	}
 	return FReply::Handled();
 }
