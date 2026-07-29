@@ -62,6 +62,10 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestEqual(
+		TEXT("The editor-supported Add action uses structural validation"),
+		(*Add)->Validation,
+		EVerseExpressionActionValidation::Structural);
 	FVerseVisualSocket FloatSocket;
 	FloatSocket.IntrinsicTypeName = TEXT("float");
 	const TArray<TSharedPtr<FVerseExpressionAction>> FloatConsumers =
@@ -93,6 +97,7 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		IntProducers.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
 			return Action->Kind == EVerseExpressionActionKind::Identifier
+				&& Action->Validation == EVerseExpressionActionValidation::Structural
 				&& Action->DisplayName.ToString() == TEXT("Input");
 		}));
 	TestTrue(TEXT("Add applies after prospective structural validation"),

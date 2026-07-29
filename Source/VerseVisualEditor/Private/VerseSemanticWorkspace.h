@@ -1,0 +1,146 @@
+#pragma once
+
+#include "Containers/Map.h"
+#include "Containers/Set.h"
+#include "Containers/UnrealString.h"
+#include "Containers/Utf8String.h"
+#include "Internationalization/Text.h"
+#include "Logging/LogVerbosity.h"
+#include "Templates/Function.h"
+#include "Templates/SharedPointer.h"
+#include "VerseDocumentRevision.h"
+#include "uLang/Common/Containers/SharedPointer.h"
+#include "uLang/Syntax/VstNode.h"
+
+class ISolarisIde;
+class ISolIdeSourceProject;
+
+namespace uLang
+{
+	class CSemanticProgram;
+}
+
+struct FVerseSemanticDocumentInput
+{
+	FString FilePath;
+	FUtf8String Source;
+	FVerseDocumentRevision Revision;
+};
+
+struct FVerseSemanticDiagnostic
+{
+	FText Message;
+	ELogVerbosity::Type Severity = ELogVerbosity::Log;
+};
+
+/** Immutable compiler-owned semantic state for a known set of document revisions. */
+class FVerseSemanticSnapshot
+{
+public:
+	bool Describes(const FString& FilePath, FVerseDocumentRevision Revision) const;
+	const uLang::TSPtr<uLang::CSemanticProgram>& GetProgram() const { return Program; }
+	const Verse::Vst::TNodePtr<Verse::Vst::Project>& GetProjectVst() const { return ProjectVst; }
+
+	static TSharedRef<FVerseSemanticSnapshot> CreateForTesting(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents);
+
+private:
+	friend class FVerseSemanticWorkspace;
+
+	static FString MakeDocumentKey(const FString& FilePath);
+	void AddDocuments(TConstArrayView<FVerseSemanticDocumentInput> Documents);
+
+	uLang::TSPtr<uLang::CSemanticProgram> Program;
+	Verse::Vst::TNodePtr<Verse::Vst::Project> ProjectVst;
+	TMap<FString, FVerseDocumentRevision> DocumentRevisions;
+};
+
+enum class EVerseSemanticWorkspaceState : uint8
+{
+	Unavailable,
+	Debouncing,
+	Analyzing,
+	Ready,
+	Failed,
+};
+
+struct FVerseSemanticAnalysisResult
+{
+	bool bSucceeded = false;
+	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
+	TArray<FVerseSemanticDiagnostic> Diagnostics;
+};
+
+/**
+ * Owns the compiled semantic baseline and an isolated Solaris environment used
+ * only to analyze unsaved editor buffers.
+ */
+class FVerseSemanticWorkspace
+{
+public:
+	using FAnalysisFunction =
+		TFunction<FVerseSemanticAnalysisResult(TConstArrayView<FVerseSemanticDocumentInput>)>;
+
+	explicit FVerseSemanticWorkspace(double InDebounceSeconds = 0.25);
+	FVerseSemanticWorkspace(FAnalysisFunction InAnalysisFunction, double InDebounceSeconds);
+
+	void RequestAnalysis(
+		TArray<FVerseSemanticDocumentInput> Documents,
+		double CurrentTimeSeconds,
+		bool bDebounce);
+	void Tick(double CurrentTimeSeconds);
+
+	/** Refreshes the engine-owned compiled baseline after a successful project build. */
+	void RefreshCompiledBaseline(TConstArrayView<FVerseSemanticDocumentInput> CompiledDocuments);
+	void InvalidateCompiledBaseline();
+
+	EVerseSemanticWorkspaceState GetState() const { return State; }
+	const TSharedPtr<const FVerseSemanticSnapshot>& GetLastSuccessfulSnapshot() const
+	{
+		return LastSuccessfulSnapshot;
+	}
+	/** Read-only semantic states to union for degraded candidate discovery. */
+	TArray<TSharedPtr<const FVerseSemanticSnapshot>> GetCandidateSnapshots() const
+	{
+		TArray<TSharedPtr<const FVerseSemanticSnapshot>> Result;
+		if (LastSuccessfulSnapshot.IsValid())
+		{
+			Result.Add(LastSuccessfulSnapshot);
+		}
+		if (CompiledBaseline.IsValid() && CompiledBaseline != LastSuccessfulSnapshot)
+		{
+			Result.Add(CompiledBaseline);
+		}
+		return Result;
+	}
+	const TArray<FVerseSemanticDiagnostic>& GetDiagnostics() const { return Diagnostics; }
+	bool HasExactSnapshot(const FString& FilePath, FVerseDocumentRevision Revision) const;
+	FText GetMutationUnavailableReason(
+		const FString& FilePath,
+		FVerseDocumentRevision Revision) const;
+
+private:
+	FVerseSemanticAnalysisResult AnalyzeWithPrivateEnvironment(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents);
+	bool RebuildPrivateEnvironment(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents,
+		TSet<FString>& OutInMemoryDocumentKeys,
+		TArray<FVerseSemanticDiagnostic>& OutDiagnostics);
+	bool TryPublishResult(uint64 RequestId, FVerseSemanticAnalysisResult Result);
+	bool CompiledBaselineDescribesAll(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents) const;
+
+	FAnalysisFunction AnalysisFunction;
+	double DebounceSeconds = 0.25;
+	double AnalyzeAfterSeconds = 0.0;
+	uint64 LatestRequestId = 0;
+	uint64 PendingRequestId = 0;
+	TArray<FVerseSemanticDocumentInput> PendingDocuments;
+	EVerseSemanticWorkspaceState State = EVerseSemanticWorkspaceState::Unavailable;
+	TSharedPtr<const FVerseSemanticSnapshot> CompiledBaseline;
+	TSharedPtr<const FVerseSemanticSnapshot> LastSuccessfulSnapshot;
+	TSharedPtr<const FVerseSemanticSnapshot> MutationSnapshot;
+	TArray<FVerseSemanticDiagnostic> Diagnostics;
+	TSharedPtr<ISolarisIde> PrivateIde;
+	TSharedPtr<ISolIdeSourceProject> PrivateProject;
+};

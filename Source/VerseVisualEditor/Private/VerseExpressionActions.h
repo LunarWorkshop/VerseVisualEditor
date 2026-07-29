@@ -14,10 +14,20 @@ enum class EVerseExpressionActionKind : uint8
 	Addition,
 };
 
+enum class EVerseExpressionActionValidation : uint8
+{
+	/** Current-revision ranges plus prospective syntax/VST validation are sufficient. */
+	Structural,
+	/** The action is bound to semantic claims that require the exact current snapshot. */
+	ExactSemanticSnapshot,
+};
+
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
 	EVerseExpressionActionKind Kind = EVerseExpressionActionKind::Identifier;
+	EVerseExpressionActionValidation Validation =
+		EVerseExpressionActionValidation::Structural;
 	FText DisplayName;
 	FText Category;
 	FVerseTextRange IdentifierNameRange;

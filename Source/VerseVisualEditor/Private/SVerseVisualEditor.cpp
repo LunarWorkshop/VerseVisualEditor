@@ -36,6 +36,7 @@
 #include "VerseExternalChange.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseIdentifier.h"
+#include "VerseSemanticWorkspace.h"
 #include "VerseSpecifier.h"
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
@@ -571,6 +572,11 @@ namespace
 
 void SVerseVisualEditor::Construct(const FArguments& InArgs)
 {
+	SemanticWorkspace = MakeUnique<FVerseSemanticWorkspace>();
+	// Capture whatever semantic program Solaris already owns. Even if a later
+	// private overlay fails, its compiled dependencies remain useful for search.
+	SemanticWorkspace->RefreshCompiledBaseline(
+		TConstArrayView<FVerseSemanticDocumentInput>());
 	RefreshFileTree();
 
 	ChildSlot
@@ -700,9 +706,73 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 				+ SVerticalBox::Slot()
 				.FillHeight(1.0f)
 				[
-					SAssignNew(ActiveDocumentBox, SBox)
+					SNew(SSplitter)
+					.Orientation(Orient_Vertical)
+					+ SSplitter::Slot()
+					.Value(0.82f)
+					.MinSize(100.0f)
+					[
+						SAssignNew(ActiveDocumentBox, SBox)
+					]
+					+ SSplitter::Slot()
+					.Value(0.18f)
+					.MinSize(64.0f)
+					[
+						SAssignNew(LocalCompilePanel, SBorder)
+						.Visibility_Lambda([this]()
+						{
+							return bLocalCompilePanelOpen
+								? EVisibility::Visible
+								: EVisibility::Collapsed;
+						})
+						.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+						.Padding(4.0f)
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
+								.Padding(4.0f, 1.0f)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("LocalCompilePanelTitle", "Local Compile Errors"))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								[
+									SNew(SButton)
+									.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+									.ContentPadding(FMargin(5.0f, 1.0f))
+									.ToolTipText(LOCTEXT("CloseLocalCompilePanelTooltip", "Close Local Compile Errors"))
+									.OnClicked(this, &SVerseVisualEditor::CloseLocalCompilePanel)
+									[
+										SNew(STextBlock)
+										.Text(FText::FromString(TEXT("\x00D7")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
+									]
+								]
+							]
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
+							.Padding(4.0f, 2.0f)
+							[
+								SNew(SScrollBox)
+								+ SScrollBox::Slot()
+								[
+									SNew(STextBlock)
+									.Text(this, &SVerseVisualEditor::GetLocalCompileDiagnosticsText)
+									.AutoWrapText(true)
+								]
+							]
+						]
 				]
 			]
+		]
 			+ SSplitter::Slot()
 			.Value(0.20f)
 			[
@@ -726,6 +796,7 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 	ProjectBuildCompleteHandle = CompilerModule.OnBuildComplete().AddSP(
 		this,
 		&SVerseVisualEditor::HandleProjectBuildComplete);
+	QueueSemanticAnalysis(false);
 	if (CompilationMode == EVerseCompilationMode::Continuous)
 	{
 		for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
@@ -1263,6 +1334,17 @@ void SVerseVisualEditor::Tick(
 	const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (SemanticWorkspace)
+	{
+		const EVerseSemanticWorkspaceState PreviousSemanticState =
+			SemanticWorkspace->GetState();
+		SemanticWorkspace->Tick(FPlatformTime::Seconds());
+		if (PreviousSemanticState != EVerseSemanticWorkspaceState::Failed
+			&& SemanticWorkspace->GetState() == EVerseSemanticWorkspaceState::Failed)
+		{
+			bLocalCompilePanelOpen = true;
+		}
+	}
 	const EVerseCompilationMode PreferredMode =
 		GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
 	if (PreferredMode != CompilationMode)
@@ -1278,6 +1360,66 @@ void SVerseVisualEditor::Tick(
 			StartCompilation(OpenDocument);
 		}
 	}
+}
+
+TArray<FVerseSemanticDocumentInput> SVerseVisualEditor::CollectSemanticDocumentInputs(
+	bool bOnlyCleanDocuments) const
+{
+	TArray<FVerseSemanticDocumentInput> Documents;
+	Documents.Reserve(OpenDocuments.Num());
+	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
+	{
+		if (!OpenDocument.IsValid()
+			|| !OpenDocument->Session.IsValid()
+			|| (bOnlyCleanDocuments && OpenDocument->Session->IsDirty()))
+		{
+			continue;
+		}
+
+		FVerseSemanticDocumentInput& Input = Documents.AddDefaulted_GetRef();
+		Input.FilePath = OpenDocument->FilePath;
+		Input.Source = OpenDocument->Session->GetCurrentUtf8();
+		Input.Revision = OpenDocument->Session->GetRevision();
+	}
+	return Documents;
+}
+
+void SVerseVisualEditor::QueueSemanticAnalysis(bool bDebounce)
+{
+	if (SemanticWorkspace)
+	{
+		SemanticWorkspace->RequestAnalysis(
+			CollectSemanticDocumentInputs(),
+			FPlatformTime::Seconds(),
+			bDebounce);
+	}
+}
+
+FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
+{
+	if (!SemanticWorkspace || SemanticWorkspace->GetDiagnostics().IsEmpty())
+	{
+		return LOCTEXT("NoLocalCompileErrors", "No local compile errors.");
+	}
+
+	TArray<FString> Lines;
+	Lines.Reserve(SemanticWorkspace->GetDiagnostics().Num());
+	for (const FVerseSemanticDiagnostic& Diagnostic : SemanticWorkspace->GetDiagnostics())
+	{
+		const TCHAR* Severity = Diagnostic.Severity == ELogVerbosity::Error
+			? TEXT("Error")
+			: Diagnostic.Severity == ELogVerbosity::Warning
+				? TEXT("Warning")
+				: TEXT("Info");
+		Lines.Add(FString::Printf(TEXT("%s: %s"), Severity, *Diagnostic.Message.ToString()));
+	}
+	return FText::FromString(FString::Join(Lines, TEXT("\n")));
+}
+
+FReply SVerseVisualEditor::CloseLocalCompilePanel()
+{
+	bLocalCompilePanelOpen = false;
+	return FReply::Handled();
 }
 
 TSharedRef<SWidget> SVerseVisualEditor::BuildToolbar()
@@ -1419,6 +1561,17 @@ void SVerseVisualEditor::HandleProjectBuildComplete(
 		: ProjectBuildWarningCount > 0
 			? EVerseProjectBuildState::Warnings
 			: EVerseProjectBuildState::Success;
+	if (SemanticWorkspace)
+	{
+		// A failed user-package build can still leave Solaris with a useful
+		// program containing compiled dependencies, native APIs, and intrinsics.
+		// Only a successful build may describe exact on-disk document revisions.
+		SemanticWorkspace->RefreshCompiledBaseline(
+			ProjectBuildErrorCount == 0
+				? CollectSemanticDocumentInputs(true)
+				: TArray<FVerseSemanticDocumentInput>());
+		QueueSemanticAnalysis(false);
+	}
 
 	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
 	{
@@ -1714,6 +1867,11 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
 	const FVerseDocument& Document =
 		*ActiveDocument->Session->GetParseSnapshot().GetDocument();
+	// Candidate discovery is read-only and degrades to the last successful local
+	// snapshot plus the Solaris baseline when this revision fails analysis.
+	// ApplyExpressionAction requires an exact snapshot only for actions that make
+	// semantic claims; editor-supported structural actions (currently Add and
+	// scoped identifiers) rely on current-range and prospective VST validation.
 	ExpressionActions = FVerseExpressionActionQuery::Build(
 		Tab.Parameters,
 		SocketDrag->Socket,
@@ -1783,6 +1941,18 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	{
 		return;
 	}
+	if (Action->Validation == EVerseExpressionActionValidation::ExactSemanticSnapshot)
+	{
+		const FText SemanticUnavailable = SemanticWorkspace
+			? SemanticWorkspace->GetMutationUnavailableReason(
+				ActiveDocument->FilePath,
+				ActiveDocument->Session->GetRevision())
+			: LOCTEXT("SemanticWorkspaceUnavailable", "Verse semantic analysis is unavailable.");
+		if (!SemanticUnavailable.IsEmpty())
+		{
+			return;
+		}
+	}
 	FText Error;
 	if (!TryApplyVerseExpressionAction(
 		*ActiveDocument->Session,
@@ -1795,6 +1965,7 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	}
 	ActiveDocument->LoadError = FText::GetEmpty();
 	ActiveDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
 	InvalidateCompilationResult(ActiveDocument);
 	if (CompilationMode == EVerseCompilationMode::Continuous)
 	{
@@ -1972,6 +2143,7 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 	CaptureActiveCanvasView();
 	OpenDocuments.Add(NewDocument);
 	ActiveDocument = MoveTemp(NewDocument);
+	QueueSemanticAnalysis(false);
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 }
@@ -2022,6 +2194,10 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	{
 		QueueCompilation(OpenDocument, true);
 	}
+	if (OpenDocuments.Contains(OpenDocument))
+	{
+		QueueSemanticAnalysis(false);
+	}
 	return true;
 }
 
@@ -2060,6 +2236,7 @@ FReply SVerseVisualEditor::CloseDocument(TSharedPtr<FOpenVerseDocument> OpenDocu
 	}
 	const int32 RemovedIndex = OpenDocuments.IndexOfByKey(OpenDocument);
 	OpenDocuments.Remove(OpenDocument);
+	QueueSemanticAnalysis(false);
 	if (ActiveDocument == OpenDocument)
 	{
 		ActiveDocument = OpenDocuments.IsEmpty()
@@ -2192,6 +2369,7 @@ void SVerseVisualEditor::SaveActiveDocumentAs()
 	ActiveDocument->LastKnownDiskBytes = ActiveDocument->Session->BuildCurrentFileBytes();
 	ActiveDocument->LoadError = FText::GetEmpty();
 	ActiveDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(false);
 	RefreshFileTree();
 	RebuildDocumentTabs();
 	RevealActiveDocumentInTree();
@@ -2657,6 +2835,7 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	}
 
 	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
 	InvalidateCompilationResult(OpenDocument);
 	if (CompilationMode == EVerseCompilationMode::Continuous)
 	{
@@ -2753,6 +2932,7 @@ void SVerseVisualEditor::HandleSpecifiersCommitted(
 	}
 
 	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
 	InvalidateCompilationResult(OpenDocument);
 	if (CompilationMode == EVerseCompilationMode::Continuous)
 	{

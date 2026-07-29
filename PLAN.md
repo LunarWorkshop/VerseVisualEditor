@@ -429,20 +429,113 @@ This step delivers the first complete edit-and-save workflow.
   from an identifier into an empty expression create an identifier reference;
   Step 13 will implement assignment-producing drags. Step 10 renders the typed
   endpoints but does not create unsupported syntax early.
-- Display the complete corresponding Verse source line as a read-only shorthand
+- Display the expression's exact source byte range as its read-only shorthand
   label. The source range remains authoritative for future localized editing;
   tiles do not keep serialized source copies.
 
-### 11. Expression search
+### 11. Expression search and compiler-driven semantics
 
-- Add a prominent creation control to empty expression positions.
-- Open a filterable, automatically focused expression menu.
-- Filter entries by expected type and current scope.
-- Initially populate the menu with valid identifiers.
-- Replace the empty expression with the selected expression type.
-- Allow a compatible identifier socket dragged into an empty expression to
-  create that identifier expression through a localized source replacement.
-- Allow later expression implementations to register their own entries.
+#### 11.1 Revision-specific semantic workspace (complete)
+
+- Treat the official Verse semantic program as the sole authority for callable
+  definitions, overloads, parameter and result types, effects, generics,
+  constraints, access, availability, and scope visibility.
+- Read the compiled-project baseline from the editor IDE owned by
+  `ISolarisLoadCompilerModule`; do not construct a second independent baseline
+  or modify the engine-owned semantic program.
+- Create a private Solaris development environment only for unsaved visual
+  editor revisions. Create an independently owned project source through
+  `ISolarisModule::CreateProjectSource`, then overlay open buffers with
+  `CSourceFileSnippet::SetModifiedText` so analysis uses the current UTF-8
+  without changing the main Compile Verse state. Do not use
+  `ISolIdeSourceProject::MakeShallowCopy` for these overlays: its packages and
+  snippets are shared with the source project, so modified text would leak into
+  the main Compile Verse inputs.
+- When an open file has no snippet in the engine-owned source project, create an
+  editor-only `FVerseProjectContainer` package and pass it through
+  `CreateProjectSource`'s `AdditionalPackages` input. Populate that in-memory
+  package with the current UTF-8 buffers, inherit the active user package's
+  scope, language version, and feature settings, and depend on every compatible
+  package already supplied by Solaris. This keeps unregistered plugin-private
+  files semantic and searchable without adding a shipped `VersePath`, changing
+  the main compiler project, or requiring the file to appear in Verse Explorer.
+- Run the private environment's `CProgramBuildManager` directly with
+  `_bSemanticAnalysisOnly`; skip linking, digest generation, and code
+  generation. Do not use `ISolarisIde::BuildAll` for this path because it is the
+  full editor-build wrapper and carries output/fingerprint assumptions that do
+  not apply to isolated live analysis.
+- Analyze after a successful project compilation and after a debounced valid
+  source edit. Publish an immutable semantic snapshot containing the project
+  VST, `CSemanticProgram`, diagnostics, and the exact document revisions it
+  describes.
+- Reject completed analysis for superseded revisions. The lightweight parser
+  remains responsible for immediate lossless source presentation while
+  semantic analysis is pending.
+- Give every expression action an explicit validation requirement. Structural
+  actions may mutate only after current-revision range checks and prospective
+  syntax/VST validation succeed. Actions bound to visibility, overloads, types,
+  access, or other semantic claims additionally require a semantic snapshot for
+  the exact current revision. A last-successful snapshot may provide discovery
+  information, but it must never authorize a semantic claim against newer
+  source.
+- If analysis fails, retain the current source and syntax-derived tiles and show
+  the diagnostics in a closable Local Compile Errors panel beneath only the
+  central editing space. Keep the panel closed by default and open it when a new
+  private analysis fails; never put these transient diagnostics in expression
+  search or Unreal's project-level Verse message log. Candidate discovery falls
+  back to the last successful local semantic snapshot together with the current
+  Solaris baseline, so compiled project APIs, native APIs, intrinsics, and
+  editor-supported syntax forms remain searchable. Never treat that fallback as
+  exact-revision proof for a source mutation.
+- Do not attempt in this step to make other Unreal tools consume unsaved visual
+  editor buffers. The private environment exists only for live analysis inside
+  this plugin.
+
+#### 11.2 Dynamic expression candidates
+
+- Add a prominent creation control to empty expression positions and retain the
+  automatically focused, filterable expression menu and frozen preview wire.
+- Replace the hand-built candidate registry with a semantic candidate provider
+  rooted at the active expression's VST node and current `CLogicalScope`.
+- Discover visible data and `CFunction` definitions through the compiler's
+  scope traversal or VerseAssist. Respect imports, access, shadowing,
+  availability versions, overloads, and the current package automatically.
+- Read parameter names and types, return types, effects, generic variables, and
+  constraints from `SSignature`. Use Verse type instantiation, constraint, and
+  subtype operations for socket compatibility; string spellings are for display
+  only and must not authorize a connection or source edit.
+- Discover intrinsic and user-defined operators from semantic function
+  definitions such as `operator'+'`. Do not register individual operators or
+  their overloads in the plugin.
+- For a drag from an output socket, create one action for every callable
+  parameter position that accepts the dragged value. Distinguish the bound
+  parameter when asymmetric or overloaded callables expose multiple valid
+  placements.
+- For an input-side search, include candidates whose resolved result satisfies
+  the requested socket type.
+- Automatically include newly added project functions, imported APIs, native
+  intrinsics, and new overloads without adding editor enum values or registry
+  entries.
+
+#### 11.3 Generic expression actions
+
+- Describe actions by editor-owned source forms such as identifier reference,
+  ordinary call, infix operator, and prefix operator. Store the selected
+  semantic definition, overload, bound parameter index, source spelling, and
+  syntax form; do not use an Add-specific action kind.
+- Preserve the dragged expression as the selected input. Fill other required
+  inputs only through the editor's type-directed default-literal factory. Do
+  not offer a candidate when every remaining required input cannot be populated
+  with source-safe syntax.
+- Scratch-parse and semantically analyze the complete prospective replacement
+  before changing the document. Rejection must not change source, revision,
+  dirty state, parsing, selection, or tiles.
+- Commit an accepted action through one localized source replacement, rebuild
+  syntax-derived representations, and schedule semantic analysis for the new
+  revision.
+- Allow compatible identifier drags and later expression implementations to
+  use this same candidate and action pipeline rather than registering parallel
+  search systems.
 
 ### 12. Literal expressions
 
@@ -453,84 +546,71 @@ This step delivers the first complete edit-and-save workflow.
 
 ### 13. Basic expressions
 
-- Begin with a read-only Add-expression slice. Recognize only the exact
-  two-operand VST shape `operand + operand`; preserve add chains, subtraction,
-  mixed add/sub chains, malformed shapes, and all other operators as unsupported
-  expressions until their own slices are implemented.
-- Replace flat expression metadata on clause items with a recursive,
-  revision-specific expression descriptor. Retain the expression kind, complete
-  range, operator-token range, optional type evidence, and ordered operand
-  descriptors. Keep trivia, separators, blank-line count, and final-value status
-  on the enclosing clause item because they describe the root expression's
-  statement-level occurrence.
-- Keep every operator and operand range source-exact and VST-derived. Identifier
-  operands become identifier expressions. Literals remain generic unsupported
-  expression tiles until Step 12, but their VST literal kind may provide local
-  type evidence without making them editable or re-parsing their text.
-- Introduce one reusable operator-signature and local-constraint model rather
-  than type-specific operator tile classes. It must support ordered variadic
-  operands, independent operand and result type variables, equality and operator
-  capability constraints, multiple candidate signatures, and unresolved,
-  locally inferred, and future compiler-resolved provenance.
-- Register only Add initially, using the Verse signatures
-  `(int, int, ...) -> int`, `(float, float, ...) -> float`, and
-  `([]T, []T, ...) -> []T`. Model Add as variadic internally even though the
-  initial VST recognizer accepts exactly two operands.
-- Conservatively bind an Add occurrence from declared parameter types,
-  recognized literal kinds, a compatible declared return type when the Add is
-  the function's final value, and already-resolved child expressions. All
-  evidence must select the same signature. Missing or conflicting evidence
-  leaves the occurrence unresolved and uses wildcard socket presentation; the
-  editor must never guess.
-- Decode source-backed type spellings only when comparison or display requires
-  them. Local constraints are responsive UI guidance, not a second Verse type
-  checker. Future semantic-compiler results will be the higher-authority source
-  for aliases, constrained types, imports, and overload resolution, and must be
-  able to replace a provisional result without changing operator or socket APIs.
-- Present the Add as the statement-level tile with its source shorthand, source
-  line range, execution input and output, two typed value inputs on the left,
-  and one typed result output on the right. Place the left operand above-left
-  and the right operand below-left as nested expression tiles with value outputs
-  but no execution pins. Connect both operands with the shared graph-wire widget.
-- If the Add is the function's final value, connect its result output to the
-  Return tile through the existing implicit-return behavior. Give value sockets
-  stable identities or indices so every operand socket can be addressed and
-  render every connected socket filled.
-- Keep the root Add in the function's vertical execution chain while arranging
-  its nested operand subtree around it. Preserve existing pan, zoom, clipping,
-  selection, source-range, and execution-wire behavior.
-- Keep this first slice read-only: do not add expression creation, pin
-  addition/removal, rewiring, or source mutation. When these become editable,
-  unresolved or incompatible connections are non-connectable, the proposed
-  localized replacement remains temporary UI state, and the complete candidate
-  source must parse successfully before the document revision can change.
-- Later, collapse a homogeneous source chain such as `A + B + C` into one
-  variadic Add tile. Partition mixed left-associative chains into maximal
-  homogeneous runs without changing evaluation order; for example,
-  `A + B - C - D + E` becomes Add(A, B), then Subtract(previous, C, D), then
-  Add(previous, E). Mixed runs remain separate tiles.
-- Add later arithmetic, comparison, Boolean, assignment, and other basic
-  operators through the same signature model. Do not assume every operator is
-  `(T, T) -> T`: the model must accommodate asymmetric inputs, results that
-  differ from operands, fixed-result operations, writable/reference
-  destinations, unary layouts, and multiple overload candidates.
-- Restrict later expression-search choices and compatible
-  identifier-to-destination assignment drags according to proven operand and
-  result constraints, using the same localized editing pipeline.
-- Test exact VST and source ranges, recursive operand order, trivia and byte
-  preservation, int/float/array Add resolution, return-context evidence,
-  unresolved and conflicting evidence, indexed sockets, child value wires,
-  filled connected pins, execution flow, and implicit returns. Verify that
-  chains and mixed operators remain unsupported in the initial slice and that
-  the variadic Add signature itself accepts an arbitrary same-typed operand
-  count for its later chain implementation.
+- Replace operation-specific expression classification with a finite set of
+  visual syntax shapes: unsupported, identifier, literal, call, binary
+  operator, unary operator, and later genuinely distinct layouts. These shapes
+  select editor presentation; they are not a catalog of Verse operations.
+- Retain the official VST node type and tags, complete source range,
+  operator-token range, and ordered operand ranges on each recursive,
+  revision-specific expression descriptor. Keep trivia, separators,
+  blank-line count, and final-value status on the enclosing clause item.
+- Represent an operator occurrence by its generic syntax shape, source token,
+  and resolved semantic `CFunction`. Remove `EVerseExpressionKind::Addition`;
+  adding a new operator or overload must not require a new expression enum
+  value.
+- Keep every expression and operand range source-exact and VST-derived. A tile
+  that displays expression source must decode only its own byte range.
+- Preserve unsupported tiles for VST forms without a visual renderer. The
+  official VST and semantic program may understand more expressions than the
+  visual editor currently presents.
+- Retain Add as the first binary-operator layout: place its operands above-left
+  and below-left, expose semantic parameter sockets on the left and its result
+  socket on the right, and draw all operand and return connections through the
+  shared graph connection layer.
+- Resolve Add overloads exclusively from the current semantic snapshot. Do not
+  hardcode int, float, array, string, or other Add signatures. Types newly
+  supported by the active Verse compiler must work automatically when the
+  generic binary layout can present them.
+- If Add is the function's final value, connect its result to the Return tile
+  through the existing implicit-return behavior. Keep stable socket identities,
+  filled connected sockets, execution flow, pan, zoom, clipping, selection, and
+  source-range behavior.
+- Generalize the same binary layout to arithmetic, comparison, Boolean,
+  assignment, and user-defined operators without assuming `(T, T) -> T`.
+  Semantic signatures must support asymmetric parameters, different result
+  types, reference destinations, unary operators, overloads, and generics.
+- Preserve evaluation order when later combining homogeneous operator chains.
+  Partition mixed left-associative chains into maximal homogeneous visual runs
+  without merging unlike operations.
+- Remove `EVerseOperatorKind`, `FVerseOperatorTyping`, the hardcoded Add
+  candidate, manual overload tables, string-based compatibility authorization,
+  and the manually declared `string + string` case unless the active compiler
+  actually exposes it.
+- Test exact VST and source ranges, official syntax identity, semantic
+  definition binding, recursive operand order, byte preservation, indexed
+  sockets, child wires, execution flow, and implicit returns. Verify compiler-
+  supplied int, float, and generic-array Add overloads; imported operators such
+  as vector or color Add; asymmetric and generic signatures; and absence of
+  overloads not provided by the active compiler.
+- Add fixture-defined functions and operators and verify they become searchable
+  without changing plugin enums, operator tables, or candidate registries.
+- Test unsaved semantic overlays, exact-revision publication, stale-result
+  rejection, failed-analysis behavior, and prospective syntax and semantic
+  validation. Preserve the existing localized-edit, UTF-8, save, and dirty-state
+  coverage.
 
 ### 14. Function calls
 
-- Add scope-aware function discovery to expression search.
-- Display and edit function arguments.
-- Enforce parameter and return types visually.
-- Add support for intrinsic functions.
+- Represent project functions, imported functions, native functions, and
+  intrinsics with one generic call descriptor bound to a semantic `CFunction`.
+- Reuse Step 11's scope-aware semantic discovery; do not create a second
+  function registry or special intrinsic path.
+- Display and edit arguments from the selected `SSignature`, including named,
+  asymmetric, overloaded, and generic parameters.
+- Render parameter and result sockets from compiler types and enforce
+  compatibility through the shared semantic candidate pipeline.
+- Generate and prospectively validate ordinary call source through the generic
+  expression action pipeline before committing a localized replacement.
 
 ### 15. Control expressions
 

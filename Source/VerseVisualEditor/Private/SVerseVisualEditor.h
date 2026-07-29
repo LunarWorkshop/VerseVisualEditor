@@ -32,6 +32,7 @@ class SHorizontalBox;
 class SOverlay;
 class SSearchBox;
 class SVerticalBox;
+class FVerseSemanticWorkspace;
 
 class SVerseVisualEditor final : public SCompoundWidget
 {
@@ -165,6 +166,11 @@ private:
 	void OpenExpressionSearch(FVerseDesktopPoint DesktopPosition);
 	void FinishExpressionSearch();
 	void ApplyExpressionAction(TSharedPtr<struct FVerseExpressionAction> Action);
+	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
+		bool bOnlyCleanDocuments = false) const;
+	void QueueSemanticAnalysis(bool bDebounce);
+	FText GetLocalCompileDiagnosticsText() const;
+	FReply CloseLocalCompilePanel();
 
 	void RegisterDirectoryWatcher();
 	void UnregisterDirectoryWatcher();
@@ -182,6 +188,7 @@ private:
 	TSharedPtr<FOpenVerseDocument> ActiveDocument;
 	TSharedPtr<SHorizontalBox> DocumentTabBar;
 	TSharedPtr<SBox> ActiveDocumentBox;
+	TSharedPtr<SWidget> LocalCompilePanel;
 	TSharedPtr<SBox> ScopeBreadcrumbBox;
 	TSharedPtr<SBox> DetailsPanelHost;
 	TSharedPtr<SDockTab> DetailsTab;
@@ -200,4 +207,6 @@ private:
 	TOptional<struct FVerseSocketDragStart> SocketDrag;
 	TArray<TSharedPtr<struct FVerseExpressionAction>> ExpressionActions;
 	TSharedPtr<class IMenu> ExpressionMenu;
+	TUniquePtr<FVerseSemanticWorkspace> SemanticWorkspace;
+	bool bLocalCompilePanelOpen = false;
 };
