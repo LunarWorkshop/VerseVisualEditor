@@ -15,6 +15,7 @@ enum class EVerseIntrinsicCallableForm : uint8
 enum class EVerseIntrinsicBlueprintLibrary : uint8
 {
 	None,
+	KismetArray,
 	KismetMath,
 	KismetString,
 };

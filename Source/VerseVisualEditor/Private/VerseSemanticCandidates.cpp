@@ -333,24 +333,46 @@ namespace
 			return;
 		}
 		const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
-		const bool bInfix = Function.GetProgram()._IntrinsicSymbols.IsOperatorOpName(
-			Function.GetName());
+		const bool bExtensionMethod = Function._ExtensionFieldAccessorKind ==
+			uLang::EExtensionFieldAccessorKind::ExtensionMethod;
+		const bool bInfix = !bExtensionMethod
+			&& Function.GetProgram()._IntrinsicSymbols.IsOperatorOpName(
+				Function.GetName());
 		const bool bPrefix = Function.GetProgram()._IntrinsicSymbols.IsPrefixOpName(
 			Function.GetName());
 		const bool bPostfix = Function.GetProgram()._IntrinsicSymbols.IsPostfixOpName(
 			Function.GetName());
 		const bool bOperator = bInfix || bPrefix || bPostfix;
+		// operator'()' is compiler plumbing for non-function invocation (array/map
+		// access), not an expression the user can create from the action menu.
+		if (Function.GetName() == Function.GetProgram()._IntrinsicSymbols._OpNameCall)
+		{
+			return;
+		}
 		const bool bUsesFailureCallSyntax =
 			Function._Signature.GetEffects()[uLang::EEffect::decides];
-		const FString Spelling = bOperator
-			? AffixSpelling(
+		FString Spelling;
+		if (bOperator)
+		{
+			Spelling = AffixSpelling(
 				Function,
 				bInfix
 					? uLang::CUTF8StringView("operator'")
 					: (bPrefix
 						? uLang::CUTF8StringView("prefix'")
-						: uLang::CUTF8StringView("postfix'")))
-			: ToFString(Function.AsNameStringView());
+						: uLang::CUTF8StringView("postfix'")));
+		}
+		else if (bExtensionMethod)
+		{
+			Spelling = ToFString(
+				Function.GetProgram()._IntrinsicSymbols.StripExtensionFieldOpName(
+					Function.GetName()));
+			Spelling.RemoveFromStart(TEXT("."));
+		}
+		else
+		{
+			Spelling = ToFString(Function.AsNameStringView());
+		}
 		if (Spelling.IsEmpty())
 		{
 			return;

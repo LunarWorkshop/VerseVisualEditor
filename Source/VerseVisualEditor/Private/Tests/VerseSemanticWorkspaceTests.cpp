@@ -320,6 +320,13 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Identifier;
 		}));
+	TestFalse(
+		TEXT("Compiler invocation plumbing is not offered as an expression action"),
+		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
+				&& Candidate.SourceSpelling == TEXT("()");
+		}));
 	const auto HasCategory = [&Candidates](const TCHAR* Spelling, const TCHAR* Category)
 	{
 		return Candidates.ContainsByPredicate(
@@ -343,6 +350,14 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		HasCategory(TEXT("Quotient"), TEXT("Math|Integer")));
 	TestTrue(TEXT("Integer ToString uses Blueprint's string category"),
 		HasCategory(TEXT("ToString"), TEXT("Utilities|String")));
+	TestTrue(TEXT("Array Find uses Blueprint's array category"),
+		HasCategory(TEXT("Find"), TEXT("Utilities|Array")));
+	TestTrue(TEXT("Array RemoveAllElements uses Blueprint's array category"),
+		HasCategory(TEXT("RemoveAllElements"), TEXT("Utilities|Array")));
+	TestTrue(TEXT("Array RemoveElement uses Blueprint's array category"),
+		HasCategory(TEXT("RemoveElement"), TEXT("Utilities|Array")));
+	TestTrue(TEXT("Array Slice uses Blueprint's array category"),
+		HasCategory(TEXT("Slice"), TEXT("Utilities|Array")));
 	TestTrue(TEXT("ToDiagnostic is grouped with string conversion"),
 		HasCategory(TEXT("ToDiagnostic"), TEXT("Utilities|String")));
 

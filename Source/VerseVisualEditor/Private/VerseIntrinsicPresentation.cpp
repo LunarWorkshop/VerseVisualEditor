@@ -1,5 +1,6 @@
 #include "VerseIntrinsicPresentation.h"
 
+#include "Kismet/KismetArrayLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 
@@ -8,6 +9,7 @@
 namespace
 {
 	constexpr const TCHAR* AnyType = TEXT("*");
+	constexpr const TCHAR* ArrayOfAnyType = TEXT("[]*");
 	constexpr const TCHAR* SameAsFirstType = TEXT("$0");
 
 	FString NormalizePresentationType(FString Type)
@@ -51,24 +53,53 @@ namespace
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("BitXor"), {TEXT("int"), TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Xor_IntInt), LOCTEXT("BitXorName", "Bitwise XOR"), LOCTEXT("IntegerCategory", "Math|Integer")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("BitNot"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Not_Int), LOCTEXT("BitNotName", "Bitwise NOT"), LOCTEXT("IntegerCategory", "Math|Integer")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Ceil"), {TEXT("float")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FCeil), LOCTEXT("CeilName", "Ceil"), LOCTEXT("FloatCategory", "Math|Float")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Ceil"), {TEXT("rational")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FCeil), LOCTEXT("CeilName", "Ceil"), LOCTEXT("FloatCategory", "Math|Float")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Floor"), {TEXT("float")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FFloor), LOCTEXT("FloorName", "Floor"), LOCTEXT("FloatCategory", "Math|Float")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Floor"), {TEXT("rational")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, FFloor), LOCTEXT("FloorName", "Floor"), LOCTEXT("FloatCategory", "Math|Float")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Mod"), {TEXT("int"), TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Percent_IntInt), LOCTEXT("ModName", "% (Integer)"), LOCTEXT("IntegerCategory", "Math|Integer")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Quotient"), {TEXT("int"), TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Divide_IntInt), LOCTEXT("QuotientName", "int / int"), LOCTEXT("IntegerCategory", "Math|Integer")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Sin"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, Sin), LOCTEXT("SinName", "Sin (Radians)"), LOCTEXT("TrigCategory", "Math|Trig")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("int")}, TEXT("string"), EVerseIntrinsicBlueprintLibrary::KismetString, GET_FUNCTION_NAME_CHECKED(UKismetStringLibrary, Conv_IntToString), LOCTEXT("IntToStringName", "To String (Integer)"), LOCTEXT("StringCategory", "Utilities|String")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("float")}, TEXT("string"), EVerseIntrinsicBlueprintLibrary::KismetString, GET_FUNCTION_NAME_CHECKED(UKismetStringLibrary, Conv_DoubleToString), LOCTEXT("FloatToStringName", "To String (Float)"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("int")}, TEXT("[]char"), EVerseIntrinsicBlueprintLibrary::KismetString, GET_FUNCTION_NAME_CHECKED(UKismetStringLibrary, Conv_IntToString), LOCTEXT("IntToStringName", "To String (Integer)"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("float")}, TEXT("[]char"), EVerseIntrinsicBlueprintLibrary::KismetString, GET_FUNCTION_NAME_CHECKED(UKismetStringLibrary, Conv_DoubleToString), LOCTEXT("FloatToStringName", "To String (Float)"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("char")}, TEXT("[]char"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("CharToStringName", "To String (Character)"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {TEXT("[]char")}, TEXT("[]char"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("StringToStringName", "To String (String)"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToString"), {AnyType}, TEXT("[]char"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("OtherToStringName", "To String"), LOCTEXT("StringCategory", "Utilities|String")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ToDiagnostic"), {}, TEXT("*"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ToDiagnosticName", "To Diagnostic"), LOCTEXT("StringCategory", "Utilities|String")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Sgn"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SignOfInteger), LOCTEXT("SignIntegerName", "Sign (Integer)"), LOCTEXT("IntegerCategory", "Math|Integer")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Sgn"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::KismetMath, GET_FUNCTION_NAME_CHECKED(UKismetMathLibrary, SignOfFloat), LOCTEXT("SignFloatName", "Sign (Float)"), LOCTEXT("FloatCategory", "Math|Float")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("MakeError"), {AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MakeErrorName", "Make Error"), LOCTEXT("ResultCategory", "Utilities|Result")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("MakeSuccess"), {AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MakeSuccessName", "Make Success"), LOCTEXT("ResultCategory", "Utilities|Result")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Find"), {ArrayOfAnyType, AnyType}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::KismetArray, GET_FUNCTION_NAME_CHECKED(UKismetArrayLibrary, Array_Find), LOCTEXT("ArrayFindName", "Find Item"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Last"), {ArrayOfAnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ArrayLastName", "Last"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("RemoveAllElements"), {ArrayOfAnyType, AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("RemoveAllElementsName", "Remove All Elements"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("RemoveFirstElement"), {ArrayOfAnyType, AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("RemoveFirstElementName", "Remove First Element"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("RemoveLastElement"), {ArrayOfAnyType, AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("RemoveLastElementName", "Remove Last Element"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Remove"), {ArrayOfAnyType, TEXT("int"), TEXT("int")}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ArrayRemoveName", "Remove"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("RemoveElement"), {ArrayOfAnyType, TEXT("int")}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("RemoveElementName", "Remove Element"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Slice"), {ArrayOfAnyType, TEXT("int")}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ArraySliceName", "Slice"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Slice"), {ArrayOfAnyType, TEXT("int"), TEXT("int")}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ArraySliceName", "Slice"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("Insert"), {ArrayOfAnyType, TEXT("int"), ArrayOfAnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ArrayInsertName", "Insert"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ReplaceAll"), {ArrayOfAnyType, ArrayOfAnyType, ArrayOfAnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ReplaceAllName", "Replace All"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ReplaceAllElements"), {ArrayOfAnyType, AnyType, AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ReplaceAllElementsName", "Replace All Elements"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ReplaceFirstElement"), {ArrayOfAnyType, AnyType, AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ReplaceFirstElementName", "Replace First Element"), LOCTEXT("ArrayCategory", "Utilities|Array")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::Ordinary, TEXT("ReplaceElement"), {ArrayOfAnyType, TEXT("int"), AnyType}, ArrayOfAnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("ReplaceElementName", "Replace Element"), LOCTEXT("ArrayCategory", "Utilities|Array")),
 
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("+"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("AddName", "Add"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("-"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("SubtractName", "Subtract"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {TEXT("int"), TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {TEXT("float"), TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {TEXT("int"), TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {TEXT("float"), TEXT("int")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("/"), {TEXT("int"), TEXT("int")}, TEXT("rational"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("DivideName", "Divide"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("/"), {TEXT("float"), TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("DivideName", "Divide"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("/"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("DivideName", "Divide"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">="), {AnyType, SameAsFirstType}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterEqualName", "Greater or Equal"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (!=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less (<)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal (<=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater (>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">="), {AnyType, SameAsFirstType}, SameAsFirstType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterEqualName", "Greater or Equal (>=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateIntName", "Negate Int"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateFloatName", "Negate Float"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 		};
@@ -83,6 +114,10 @@ namespace
 		if (Pattern == AnyType)
 		{
 			return true;
+		}
+		if (Pattern == ArrayOfAnyType)
+		{
+			return NormalizePresentationType(FString(Actual)).StartsWith(TEXT("[]"));
 		}
 		if (Pattern == SameAsFirstType)
 		{
@@ -132,6 +167,9 @@ const UFunction* ResolveVerseIntrinsicBlueprintFunction(
 	UClass* LibraryClass = nullptr;
 	switch (Descriptor.BlueprintLibrary)
 	{
+	case EVerseIntrinsicBlueprintLibrary::KismetArray:
+		LibraryClass = UKismetArrayLibrary::StaticClass();
+		break;
 	case EVerseIntrinsicBlueprintLibrary::KismetMath:
 		LibraryClass = UKismetMathLibrary::StaticClass();
 		break;

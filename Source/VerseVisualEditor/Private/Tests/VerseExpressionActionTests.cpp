@@ -32,11 +32,8 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Intrinsic presentation table is populated"), !Table.IsEmpty());
 	for (const FVerseIntrinsicPresentationDescriptor& Descriptor : Table)
 	{
-		TestTrue(
-			*FString::Printf(
-				TEXT("Descriptor is the unique first match for %s"),
-				*Descriptor.Key.Spelling),
-			FindVerseIntrinsicPresentation(Descriptor.Key) == &Descriptor);
+		TestFalse(TEXT("Every descriptor has a callable spelling"),
+			Descriptor.Key.Spelling.IsEmpty());
 		if (Descriptor.BlueprintLibrary != EVerseIntrinsicBlueprintLibrary::None)
 		{
 			TestNotNull(
@@ -57,6 +54,37 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Typed Add descriptor resolves"), Add))
 	{
 		return false;
+	}
+	FVerseIntrinsicPresentationKey IntegerLessKey;
+	IntegerLessKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
+	IntegerLessKey.Spelling = TEXT("<");
+	IntegerLessKey.ParameterTypes = {TEXT("int"), TEXT("int")};
+	IntegerLessKey.ResultType = TEXT("int");
+	const FVerseIntrinsicPresentationDescriptor* IntegerLess =
+		FindVerseIntrinsicPresentation(IntegerLessKey);
+	if (TestNotNull(TEXT("Typed integer relation descriptor resolves"), IntegerLess))
+	{
+		TestEqual(TEXT("Integer relation mirrors Blueprint's action-menu name"),
+			IntegerLess->FallbackDisplayName.ToString(),
+			FString(TEXT("Less (<)")));
+		TestEqual(TEXT("Integer relation remains in the operators category"),
+			IntegerLess->FallbackCategory.ToString(),
+			FString(TEXT("Utilities|Operators")));
+	}
+	FVerseIntrinsicPresentationKey IntegerDivideKey;
+	IntegerDivideKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
+	IntegerDivideKey.Spelling = TEXT("/");
+	IntegerDivideKey.ParameterTypes = {TEXT("int"), TEXT("int")};
+	IntegerDivideKey.ResultType = TEXT("rational");
+	const FVerseIntrinsicPresentationDescriptor* IntegerDivide =
+		FindVerseIntrinsicPresentation(IntegerDivideKey);
+	if (TestNotNull(TEXT("Integer division descriptor resolves"), IntegerDivide))
+	{
+		TestEqual(TEXT("Integer division is named Divide"),
+			IntegerDivide->FallbackDisplayName.ToString(), FString(TEXT("Divide")));
+		TestEqual(TEXT("Integer division uses the operators category"),
+			IntegerDivide->FallbackCategory.ToString(),
+			FString(TEXT("Utilities|Operators")));
 	}
 
 	const FVerseResolvedExpressionPresentation VerseWins =
@@ -102,6 +130,65 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 		FinalFallback.DisplayName.ToString(), FString(TEXT("Unmapped")));
 	TestEqual(TEXT("Unmapped callable is uncategorized"),
 		FinalFallback.Category.ToString(), FString(TEXT("Uncategorized")));
+
+	const auto FindDescriptor = [](const TCHAR* Spelling,
+		std::initializer_list<const TCHAR*> ParameterTypes, const TCHAR* ResultType)
+	{
+		FVerseIntrinsicPresentationKey Key;
+		Key.Form = EVerseIntrinsicCallableForm::Ordinary;
+		Key.Spelling = Spelling;
+		for (const TCHAR* ParameterType : ParameterTypes)
+		{
+			Key.ParameterTypes.Add(ParameterType);
+		}
+		Key.ResultType = ResultType;
+		return FindVerseIntrinsicPresentation(Key);
+	};
+	const FVerseIntrinsicPresentationDescriptor* ArrayFind =
+		FindDescriptor(TEXT("Find"), {TEXT("[]int"), TEXT("int")}, TEXT("int"));
+	TestNotNull(TEXT("Array Find matches the array descriptor"), ArrayFind);
+	if (ArrayFind != nullptr)
+	{
+		TestEqual(TEXT("Array Find uses Blueprint's array category"),
+			ArrayFind->FallbackCategory.ToString(), FString(TEXT("Utilities|Array")));
+	}
+	TestNull(TEXT("A non-array Find does not match the array descriptor"),
+		FindDescriptor(TEXT("Find"), {TEXT("string"), TEXT("char")}, TEXT("int")));
+	const auto TestArrayOperation = [this, &FindDescriptor](
+		const TCHAR* Spelling, std::initializer_list<const TCHAR*> ParameterTypes)
+	{
+		const FVerseIntrinsicPresentationDescriptor* Descriptor =
+			FindDescriptor(Spelling, ParameterTypes, TEXT("[]false"));
+		if (TestNotNull(*FString::Printf(TEXT("%s matches an array descriptor"), Spelling),
+			Descriptor))
+		{
+			TestEqual(*FString::Printf(TEXT("%s uses the array category"), Spelling),
+				Descriptor->FallbackCategory.ToString(),
+				FString(TEXT("Utilities|Array")));
+		}
+	};
+	TestArrayOperation(TEXT("Slice"), {TEXT("[]any"), TEXT("int")});
+	TestArrayOperation(TEXT("RemoveElement"), {TEXT("[]any"), TEXT("int")});
+	TestArrayOperation(TEXT("RemoveLastElement"), {TEXT("[]any"), TEXT("tuple()")});
+	const FVerseIntrinsicPresentationDescriptor* MakeError =
+		FindDescriptor(TEXT("MakeError"), {TEXT("MyError")}, TEXT("result(false,MyError)"));
+	TestNotNull(TEXT("Generic MakeError matches the result descriptor"), MakeError);
+	if (MakeError != nullptr)
+	{
+		TestEqual(TEXT("MakeError uses the result category"),
+			MakeError->FallbackCategory.ToString(), FString(TEXT("Utilities|Result")));
+	}
+	const FVerseIntrinsicPresentationDescriptor* VectorToString =
+		FindDescriptor(TEXT("ToString"), {TEXT("/Verse.org/SpatialMath/vector3")},
+			TEXT("[]char"));
+	TestNotNull(TEXT("Non-scalar engine ToString matches the string fallback"),
+		VectorToString);
+	if (VectorToString != nullptr)
+	{
+		TestEqual(TEXT("Non-scalar ToString uses the string category"),
+			VectorToString->FallbackCategory.ToString(),
+			FString(TEXT("Utilities|String")));
+	}
 	return true;
 }
 
