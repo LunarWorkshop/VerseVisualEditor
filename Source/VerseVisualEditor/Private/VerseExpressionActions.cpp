@@ -141,7 +141,8 @@ namespace
 		{
 			FExpressionCandidate& Candidate = Candidates.AddDefaulted_GetRef();
 			Candidate.Action = MakeShared<FVerseExpressionAction>();
-			Candidate.Action->Kind = EVerseExpressionActionKind::Identifier;
+			Candidate.Action->SourceForm =
+				EVerseExpressionSourceForm::IdentifierReference;
 			Candidate.Action->DisplayName = FText::FromString(
 				Document.DecodeOriginalRange(Parameter.NameRange));
 			Candidate.Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
@@ -154,7 +155,8 @@ namespace
 
 		FExpressionCandidate& Addition = Candidates.AddDefaulted_GetRef();
 		Addition.Action = MakeShared<FVerseExpressionAction>();
-		Addition.Action->Kind = EVerseExpressionActionKind::Addition;
+		Addition.Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
+		Addition.Action->SourceSpelling = TEXT("+");
 		Addition.Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
 		Addition.Action->Category = LOCTEXT("OperatorsCategory", "Operators");
 		Addition.PolymorphicOperator = EVerseOperatorKind::Addition;
@@ -194,9 +196,12 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 				{
 					continue;
 				}
+				Candidate.Action->BoundInputIndex = 0;
+				Candidate.Action->InputDefaultSources.Init(
+					FString(), Candidate.RequiredInputCount);
 				for (int32 Index = 1; Index < Candidate.RequiredInputCount; ++Index)
 				{
-					Candidate.Action->RemainingInputDefaultSources.Add(DefaultSource);
+					Candidate.Action->InputDefaultSources[Index] = DefaultSource;
 				}
 			}
 			Result.Add(MoveTemp(Candidate.Action));
@@ -236,26 +241,37 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 		switch (Candidate.Kind)
 		{
 		case EVerseSemanticCandidateKind::Identifier:
-			Action->Kind = EVerseExpressionActionKind::Identifier;
+			Action->SourceForm =
+				EVerseExpressionSourceForm::IdentifierReference;
 			Action->Validation =
 				EVerseExpressionActionValidation::ExactSemanticSnapshot;
 			Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
 			break;
 		case EVerseSemanticCandidateKind::Function:
-			Action->Kind = EVerseExpressionActionKind::Call;
+			Action->SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
 			Action->Category = LOCTEXT("FunctionsCategory", "Functions");
 			break;
 		case EVerseSemanticCandidateKind::InfixOperator:
-			if (Candidate.SourceSpelling != TEXT("+"))
-			{
-				continue;
-			}
-			Action->Kind = EVerseExpressionActionKind::Addition;
+			Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
 			Action->Validation =
 				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
+			Action->DisplayName = FText::Format(
+				LOCTEXT("InfixOperatorAction", "Operator ({0})"),
+				FText::FromString(Candidate.SourceSpelling));
+			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
+			break;
+		case EVerseSemanticCandidateKind::PrefixOperator:
+			Action->SourceForm = EVerseExpressionSourceForm::PrefixOperator;
+			Action->Validation =
+				EVerseExpressionActionValidation::StableSemanticSignature;
+			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
+			break;
+		case EVerseSemanticCandidateKind::PostfixOperator:
+			Action->SourceForm = EVerseExpressionSourceForm::PostfixOperator;
+			Action->Validation =
+				EVerseExpressionActionValidation::StableSemanticSignature;
 			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
 			break;
 		}
@@ -282,6 +298,7 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
+	const FVerseExpressionSemanticValidator& SemanticValidator,
 	FText& OutError)
 {
 	if (ExpressionRange.Revision != Session.GetRevision())
@@ -290,94 +307,101 @@ bool TryApplyVerseExpressionAction(
 		return false;
 	}
 	const TSharedRef<const FVerseDocument> Document = Session.GetParseSnapshot().GetDocument();
+	const FString Existing =
+		Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
 	FString Replacement;
-	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Identifier;
-	if (Action.Kind == EVerseExpressionActionKind::Identifier)
+	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Unsupported;
+	if (Action.SourceForm == EVerseExpressionSourceForm::IdentifierReference)
 	{
 		Replacement = Action.SourceSpelling.IsEmpty()
 			? Document->DecodeOriginalRange(Action.IdentifierNameRange)
 			: Action.SourceSpelling;
-	}
-	else if (Action.Kind == EVerseExpressionActionKind::Addition)
-	{
-		const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
-		if (Existing.IsEmpty())
-		{
-			OutError = LOCTEXT("EmptyAddOperand", "Add requires a valid source expression.");
-			return false;
-		}
-		TArray<FString> Inputs = Action.InputDefaultSources;
-		if (Inputs.IsEmpty())
-		{
-			Inputs = Action.RemainingInputDefaultSources;
-			Inputs.Insert(FString(), 0);
-		}
-		const bool bCreatesCompleteProducer =
-			Action.BoundInputIndex == INDEX_NONE
-			&& Action.InputDefaultSources.Num() == 2;
-		const int32 BoundIndex = bCreatesCompleteProducer
-			? INDEX_NONE
-			: (Action.BoundInputIndex == INDEX_NONE ? 0 : Action.BoundInputIndex);
-		if (Inputs.Num() != 2
-			|| (BoundIndex != INDEX_NONE && !Inputs.IsValidIndex(BoundIndex)))
-		{
-			OutError = LOCTEXT(
-				"MissingAddOperandDefault",
-				"Add requires a safe default for its unconnected operand.");
-			return false;
-		}
-		if (BoundIndex != INDEX_NONE)
-		{
-			Inputs[BoundIndex] = Existing;
-		}
-		if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
-		{
-			OutError = LOCTEXT(
-				"MissingAddOperandDefault",
-				"Add requires a safe default for its unconnected operand.");
-			return false;
-		}
-		Replacement = FString::Printf(
-			TEXT("%s + %s"),
-			*Inputs[0],
-			*Inputs[1]);
-		RequiredKind = EVerseExpressionKind::Addition;
+		RequiredKind = EVerseExpressionKind::Identifier;
 	}
 	else
 	{
-		const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
-		if (Action.SourceSpelling.IsEmpty()
-			|| (Action.BoundInputIndex != INDEX_NONE
-				&& !Action.InputDefaultSources.IsValidIndex(Action.BoundInputIndex)))
+		if (Action.SourceSpelling.IsEmpty())
 		{
-			OutError = LOCTEXT("InvalidCallAction", "The function action is incomplete.");
+			OutError = LOCTEXT(
+				"MissingExpressionSpelling",
+				"The selected expression has no source spelling.");
 			return false;
 		}
 		TArray<FString> Inputs = Action.InputDefaultSources;
 		if (Action.BoundInputIndex != INDEX_NONE)
 		{
-			if (Existing.IsEmpty())
+			if (!Inputs.IsValidIndex(Action.BoundInputIndex) || Existing.IsEmpty())
 			{
-				OutError = LOCTEXT("EmptyCallOperand", "The function requires a valid source expression.");
+				OutError = LOCTEXT(
+					"InvalidBoundExpressionInput",
+					"The selected expression cannot preserve the dragged input.");
 				return false;
 			}
 			Inputs[Action.BoundInputIndex] = Existing;
 		}
 		if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
 		{
-			OutError = LOCTEXT("MissingCallDefault", "The function requires an input with no safe default.");
+			OutError = LOCTEXT(
+				"MissingExpressionInputDefault",
+				"The selected expression has an input with no source-safe default.");
 			return false;
 		}
-		Replacement = Action.bUsesFailureCallSyntax
-			? FString::Printf(
-				TEXT("%s[%s]"),
-				*Action.SourceSpelling,
-				*FString::Join(Inputs, TEXT(", ")))
-			: FString::Printf(
-				TEXT("%s(%s)"),
-				*Action.SourceSpelling,
-				*FString::Join(Inputs, TEXT(", ")));
-		RequiredKind = EVerseExpressionKind::Unsupported;
+		switch (Action.SourceForm)
+		{
+		case EVerseExpressionSourceForm::OrdinaryCall:
+			Replacement = Action.bUsesFailureCallSyntax
+				? FString::Printf(
+					TEXT("%s[%s]"),
+					*Action.SourceSpelling,
+					*FString::Join(Inputs, TEXT(", ")))
+				: FString::Printf(
+					TEXT("%s(%s)"),
+					*Action.SourceSpelling,
+					*FString::Join(Inputs, TEXT(", ")));
+			break;
+		case EVerseExpressionSourceForm::InfixOperator:
+			if (Inputs.Num() != 2)
+			{
+				OutError = LOCTEXT(
+					"InvalidInfixInputs",
+					"An infix operator requires exactly two operands.");
+				return false;
+			}
+			Replacement = FString::Printf(
+				TEXT("%s %s %s"),
+				*Inputs[0], *Action.SourceSpelling, *Inputs[1]);
+			RequiredKind = Action.SourceSpelling == TEXT("+")
+				? EVerseExpressionKind::Addition
+				: EVerseExpressionKind::Unsupported;
+			break;
+		case EVerseExpressionSourceForm::PrefixOperator:
+			if (Inputs.Num() != 1)
+			{
+				OutError = LOCTEXT(
+					"InvalidPrefixInputs",
+					"A prefix operator requires exactly one operand.");
+				return false;
+			}
+			Replacement = FString::Printf(
+				TEXT("%s %s"), *Action.SourceSpelling, *Inputs[0]);
+			break;
+		case EVerseExpressionSourceForm::PostfixOperator:
+			if (Inputs.Num() != 1)
+			{
+				OutError = LOCTEXT(
+					"InvalidPostfixInputs",
+					"A postfix operator requires exactly one operand.");
+				return false;
+			}
+			Replacement = FString::Printf(
+				TEXT("%s%s"), *Inputs[0], *Action.SourceSpelling);
+			break;
+		default:
+			OutError = LOCTEXT(
+				"InvalidExpressionSourceForm",
+				"The selected expression source form is unsupported.");
+			return false;
+		}
 	}
 
 	FUtf8String ReplacementUtf8(Replacement);
@@ -407,6 +431,16 @@ bool TryApplyVerseExpressionAction(
 	if (!bRecognizedAtReplacement)
 	{
 		OutError = LOCTEXT("ExpressionRejected", "The expression would not produce a valid supported Verse structure.");
+		return false;
+	}
+	if (!SemanticValidator || !SemanticValidator(Candidate, OutError))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = LOCTEXT(
+				"ExpressionSemanticRejection",
+				"The expression would introduce a Verse semantic error.");
+		}
 		return false;
 	}
 	return Session.Replace(ExpressionRange, ReplacementUtf8, OutError);

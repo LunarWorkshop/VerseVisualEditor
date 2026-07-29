@@ -216,7 +216,9 @@ namespace
 				for (const uLang::CFunction* Function :
 					Scope.GetDefinitionsOfKind<uLang::CFunction>())
 				{
-					if (Program._IntrinsicSymbols.IsOperatorOpName(Function->GetName()))
+					if (Program._IntrinsicSymbols.IsOperatorOpName(Function->GetName())
+						|| Program._IntrinsicSymbols.IsPrefixOpName(Function->GetName())
+						|| Program._IntrinsicSymbols.IsPostfixOpName(Function->GetName()))
 					{
 						if (Function->TryMarkOverriddenAndConstrainedDefinitionsVisited(
 							VisitedDefinitions))
@@ -230,10 +232,11 @@ namespace
 		return Definitions;
 	}
 
-	FString OperatorSpelling(const uLang::CFunction& Function)
+	FString AffixSpelling(
+		const uLang::CFunction& Function,
+		uLang::CUTF8StringView Prefix)
 	{
 		const uLang::CUTF8StringView Name = Function.GetName().AsStringView();
-		static const uLang::CUTF8StringView Prefix("operator'");
 		if (!Name.StartsWith(Prefix) || Name.ByteLen() <= Prefix.ByteLen() + 1)
 		{
 			return FString();
@@ -282,12 +285,23 @@ namespace
 			return;
 		}
 		const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
-		const bool bOperator = Function.GetProgram()._IntrinsicSymbols.IsOperatorOpName(
+		const bool bInfix = Function.GetProgram()._IntrinsicSymbols.IsOperatorOpName(
 			Function.GetName());
+		const bool bPrefix = Function.GetProgram()._IntrinsicSymbols.IsPrefixOpName(
+			Function.GetName());
+		const bool bPostfix = Function.GetProgram()._IntrinsicSymbols.IsPostfixOpName(
+			Function.GetName());
+		const bool bOperator = bInfix || bPrefix || bPostfix;
 		const bool bUsesFailureCallSyntax =
 			Function._Signature.GetEffects()[uLang::EEffect::decides];
 		const FString Spelling = bOperator
-			? OperatorSpelling(Function)
+			? AffixSpelling(
+				Function,
+				bInfix
+					? uLang::CUTF8StringView("operator'")
+					: (bPrefix
+						? uLang::CUTF8StringView("prefix'")
+						: uLang::CUTF8StringView("postfix'")))
 			: ToFString(Function.AsNameStringView());
 		if (Spelling.IsEmpty())
 		{
@@ -302,9 +316,13 @@ namespace
 				return;
 			}
 			FVerseSemanticCandidate Candidate;
-			Candidate.Kind = bOperator
+			Candidate.Kind = bInfix
 				? EVerseSemanticCandidateKind::InfixOperator
-				: EVerseSemanticCandidateKind::Function;
+				: (bPrefix
+					? EVerseSemanticCandidateKind::PrefixOperator
+					: (bPostfix
+						? EVerseSemanticCandidateKind::PostfixOperator
+						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
@@ -332,9 +350,13 @@ namespace
 				continue;
 			}
 			FVerseSemanticCandidate Candidate;
-			Candidate.Kind = bOperator
+			Candidate.Kind = bInfix
 				? EVerseSemanticCandidateKind::InfixOperator
-				: EVerseSemanticCandidateKind::Function;
+				: (bPrefix
+					? EVerseSemanticCandidateKind::PrefixOperator
+					: (bPostfix
+						? EVerseSemanticCandidateKind::PostfixOperator
+						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;

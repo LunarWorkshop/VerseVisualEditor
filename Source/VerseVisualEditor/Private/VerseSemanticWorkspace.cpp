@@ -399,6 +399,53 @@ FText FVerseSemanticWorkspace::GetMutationUnavailableReason(
 		"Verse semantic information is not available for this document revision.");
 }
 
+bool FVerseSemanticWorkspace::ValidateProspectiveDocuments(
+	TConstArrayView<FVerseSemanticDocumentInput> Documents,
+	FText& OutError)
+{
+	FVerseSemanticAnalysisResult Prospective =
+		AnalyzeWithPrivateEnvironment(Documents);
+	if (Prospective.bSucceeded)
+	{
+		return true;
+	}
+	if (!Prospective.Snapshot.IsValid())
+	{
+		OutError = Prospective.Diagnostics.IsEmpty()
+			? LOCTEXT(
+				"ProspectiveSemanticUnavailable",
+				"The prospective expression could not be semantically analyzed.")
+			: Prospective.Diagnostics[0].Message;
+		return false;
+	}
+
+	// Existing unrelated errors must not disable safe expression editing. The
+	// replacement is rejected only when prospective analysis adds an error.
+	TMap<FString, int32> ExistingErrors;
+	for (const FVerseSemanticDiagnostic& Diagnostic : Diagnostics)
+	{
+		if (Diagnostic.Severity == ELogVerbosity::Error)
+		{
+			++ExistingErrors.FindOrAdd(Diagnostic.Message.ToString());
+		}
+	}
+	for (const FVerseSemanticDiagnostic& Diagnostic : Prospective.Diagnostics)
+	{
+		if (Diagnostic.Severity != ELogVerbosity::Error)
+		{
+			continue;
+		}
+		int32* Remaining = ExistingErrors.Find(Diagnostic.Message.ToString());
+		if (Remaining == nullptr || *Remaining <= 0)
+		{
+			OutError = Diagnostic.Message;
+			return false;
+		}
+		--*Remaining;
+	}
+	return true;
+}
+
 bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 	TConstArrayView<FVerseSemanticDocumentInput> Documents,
 	TSet<FString>& OutInMemoryDocumentKeys,

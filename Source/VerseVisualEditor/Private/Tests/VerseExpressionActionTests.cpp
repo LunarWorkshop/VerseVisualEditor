@@ -51,12 +51,14 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Identifiers are excluded from output-drag consumers"), !Actions.ContainsByPredicate(
 		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Action->Kind == EVerseExpressionActionKind::Identifier;
+			return Action->SourceForm
+				== EVerseExpressionSourceForm::IdentifierReference;
 		}));
 	const TSharedPtr<FVerseExpressionAction>* Add = Actions.FindByPredicate(
 		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Action->Kind == EVerseExpressionActionKind::Addition;
+			return Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+				&& Action->SourceSpelling == TEXT("+");
 		});
 	if (!TestNotNull(TEXT("Add action exists"), Add))
 	{
@@ -75,7 +77,8 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Polymorphic Add accepts float"), FloatConsumers.ContainsByPredicate(
 		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Action->Kind == EVerseExpressionActionKind::Addition;
+			return Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+				&& Action->SourceSpelling == TEXT("+");
 		}));
 	FVerseVisualSocket StringSocket;
 	StringSocket.IntrinsicTypeName = TEXT("string");
@@ -87,7 +90,8 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		StringConsumers.ContainsByPredicate(
 		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Action->Kind == EVerseExpressionActionKind::Addition;
+			return Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+				&& Action->SourceSpelling == TEXT("+");
 		}));
 	const TArray<TSharedPtr<FVerseExpressionAction>> IntProducers =
 		FVerseExpressionActionQuery::Build(
@@ -96,12 +100,35 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A matching identifier naturally appears as a producer"),
 		IntProducers.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Action->Kind == EVerseExpressionActionKind::Identifier
+			return Action->SourceForm
+					== EVerseExpressionSourceForm::IdentifierReference
 				&& Action->Validation == EVerseExpressionActionValidation::Structural
 				&& Action->DisplayName.ToString() == TEXT("Input");
 		}));
-	TestTrue(TEXT("Add applies after prospective structural validation"),
-		TryApplyVerseExpressionAction(Session, Identifier.Range, **Add, Error));
+	const FUtf8String BeforeRejectedAction = Session.GetCurrentUtf8();
+	const FVerseDocumentRevision BeforeRejectedRevision = Session.GetRevision();
+	TestFalse(TEXT("Semantic rejection prevents the localized replacement"),
+		TryApplyVerseExpressionAction(
+			Session,
+			Identifier.Range,
+			**Add,
+			[](const FUtf8String&, FText& OutError)
+			{
+				OutError = FText::FromString(TEXT("Expected semantic rejection"));
+				return false;
+			},
+			Error));
+	TestTrue(TEXT("Semantic rejection leaves source unchanged"),
+		Session.GetCurrentUtf8() == BeforeRejectedAction);
+	TestEqual(TEXT("Semantic rejection leaves revision unchanged"),
+		Session.GetRevision(), BeforeRejectedRevision);
+	TestTrue(TEXT("Add applies after prospective structural and semantic validation"),
+		TryApplyVerseExpressionAction(
+			Session,
+			Identifier.Range,
+			**Add,
+			[](const FUtf8String&, FText&) { return true; },
+			Error));
 	const FString Edited = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
 	TestTrue(TEXT("The original expression becomes the first operand"),
 		Edited.Contains(TEXT("Input + 0")));

@@ -15,11 +15,14 @@ namespace uLang
 	class CFunction;
 }
 
-enum class EVerseExpressionActionKind : uint8
+/** Editor-owned syntax shape; semantic operation identity remains compiler-owned. */
+enum class EVerseExpressionSourceForm : uint8
 {
-	Identifier,
-	Addition,
-	Call,
+	IdentifierReference,
+	OrdinaryCall,
+	InfixOperator,
+	PrefixOperator,
+	PostfixOperator,
 };
 
 enum class EVerseExpressionActionValidation : uint8
@@ -35,7 +38,8 @@ enum class EVerseExpressionActionValidation : uint8
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
-	EVerseExpressionActionKind Kind = EVerseExpressionActionKind::Identifier;
+	EVerseExpressionSourceForm SourceForm =
+		EVerseExpressionSourceForm::IdentifierReference;
 	EVerseExpressionActionValidation Validation =
 		EVerseExpressionActionValidation::Structural;
 	FText DisplayName;
@@ -49,9 +53,10 @@ struct FVerseExpressionAction
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
-	/** Source-safe defaults for required inputs not supplied by the initiating wire. */
-	TArray<FString> RemainingInputDefaultSources;
 };
+
+using FVerseExpressionSemanticValidator =
+	TFunction<bool(const FUtf8String& ProspectiveSource, FText& OutError)>;
 
 /** Discovers expression actions from the current lexical scope and the expression registry. */
 class FVerseExpressionActionQuery
@@ -77,4 +82,5 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
+	const FVerseExpressionSemanticValidator& SemanticValidator,
 	FText& OutError);

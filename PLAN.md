@@ -50,6 +50,9 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
   compiler-owned active scope, signatures, generic overloads, imported APIs,
   and intrinsic operators, with structural fallbacks when the current private
   semantic overlay fails.
+- Generic expression actions: complete; identifier references, calls, and
+  prefix, infix, and postfix operators use source-form descriptors, preserve
+  bound inputs, and require atomic prospective syntax and semantic validation.
 - Modules: complete; module tiles render VST-derived nested definitions and raw
   gaps recursively, display append specifiers, and retain independent source
   ranges at every nesting level.
@@ -521,7 +524,7 @@ This step delivers the first complete edit-and-save workflow.
   intrinsics, and new overloads without adding editor enum values or registry
   entries.
 
-#### 11.3 Generic expression actions
+#### 11.3 Generic expression actions (complete)
 
 - Describe actions by editor-owned source forms such as identifier reference,
   ordinary call, infix operator, and prefix operator. Store the selected
@@ -631,6 +634,7 @@ This step delivers the first complete edit-and-save workflow.
 - Dragging tabs left and right
 - Save the open function tabs
 - Zoom into the mouse pointer position
+- Inform the user that their open file is not registered with Solaris
 
 ### 1. Multi-selection and copying
 

@@ -11,14 +11,12 @@ CorpusModuleTwo := module:
             var IncrementAmount : int = 1
             Increment(Value : int)<computes> : int = Value + 1
             Double(Value : int)<computes> : int = Value * 2
-            OperationState := enum { Ready, Running, Complete }
         }
         CorpusClass222 := class:
             var Score : int = 100
             var Penalty : int = 5
             Decrement(Value : int)<computes> : int = Value - 1
             Triple(Value : int)<computes> : int = Value * 3
-            Difficulty := enum { Easy, Normal, Hard }
     }
 
 CorpusClassOne := class {}

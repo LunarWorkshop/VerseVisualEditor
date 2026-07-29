@@ -19,6 +19,8 @@ enum class EVerseSemanticCandidateKind : uint8
 	Identifier,
 	Function,
 	InfixOperator,
+	PrefixOperator,
+	PostfixOperator,
 };
 
 /** A compiler-owned expression candidate kept alive by its semantic snapshot. */

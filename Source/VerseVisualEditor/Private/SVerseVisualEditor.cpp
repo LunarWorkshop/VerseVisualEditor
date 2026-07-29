@@ -1961,10 +1961,41 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		}
 	}
 	FText Error;
+	const FVerseExpressionSemanticValidator SemanticValidator =
+		[this](const FUtf8String& ProspectiveSource, FText& OutError)
+		{
+			if (!SemanticWorkspace || !ActiveDocument.IsValid())
+			{
+				OutError = LOCTEXT(
+					"ProspectiveSemanticWorkspaceUnavailable",
+					"Verse semantic validation is unavailable.");
+				return false;
+			}
+			TArray<FVerseSemanticDocumentInput> Documents =
+				CollectSemanticDocumentInputs();
+			FVerseSemanticDocumentInput* EditedDocument =
+				Documents.FindByPredicate([this](const FVerseSemanticDocumentInput& Input)
+				{
+					return Input.FilePath.Equals(
+						ActiveDocument->FilePath, ESearchCase::IgnoreCase);
+				});
+			if (EditedDocument == nullptr)
+			{
+				OutError = LOCTEXT(
+					"ProspectiveSemanticDocumentUnavailable",
+					"The edited Verse document is unavailable for validation.");
+				return false;
+			}
+			EditedDocument->Source = ProspectiveSource;
+			++EditedDocument->Revision.Value;
+			return SemanticWorkspace->ValidateProspectiveDocuments(
+				Documents, OutError);
+		};
 	if (!TryApplyVerseExpressionAction(
 		*ActiveDocument->Session,
 		SocketDrag->Tile.Range,
 		*Action,
+		SemanticValidator,
 		Error))
 	{
 		ActiveDocument->LoadError = Error;

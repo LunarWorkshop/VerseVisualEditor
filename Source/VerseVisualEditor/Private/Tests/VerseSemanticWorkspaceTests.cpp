@@ -2,6 +2,7 @@
 
 #include "VerseSemanticWorkspace.h"
 #include "VerseDocument.h"
+#include "VerseDocumentSession.h"
 #include "VerseExpressionActions.h"
 #include "VerseSemanticCandidates.h"
 
@@ -341,17 +342,47 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				{InvalidExpressionBeginByte, 5}),
 			InvalidDocument.FilePath,
 			Workspace.GetCandidateSnapshots());
-	TestTrue(
-		TEXT("Failed local analysis still exposes callable actions to expression search"),
-		DegradedActions.ContainsByPredicate([](
+	const TSharedPtr<FVerseExpressionAction>* CallableAction =
+		DegradedActions.FindByPredicate([](
 			const TSharedPtr<FVerseExpressionAction>& Action)
 		{
 			return Action.IsValid()
-				&& Action->Kind == EVerseExpressionActionKind::Call
+				&& Action->SourceForm == EVerseExpressionSourceForm::OrdinaryCall
 				&& Action->SourceSpelling == TEXT("AcceptInt")
 				&& Action->Validation
 					== EVerseExpressionActionValidation::StableSemanticSignature;
-		}));
+		});
+	TestNotNull(
+		TEXT("Failed local analysis still exposes callable actions to expression search"),
+		CallableAction);
+	if (CallableAction != nullptr)
+	{
+		FVerseDocumentSession InvalidSession(InvalidParsedDocument.ToSharedRef());
+		const FVerseTextRange SessionExpressionRange(
+			InvalidSession.GetRevision(), {InvalidExpressionBeginByte, 5});
+		const bool bApplied = TryApplyVerseExpressionAction(
+			InvalidSession,
+			SessionExpressionRange,
+			**CallableAction,
+			[&Workspace, &InvalidDocument](
+				const FUtf8String& ProspectiveSource,
+				FText& OutError)
+		{
+			FVerseSemanticDocumentInput ProspectiveDocument = InvalidDocument;
+			ProspectiveDocument.Source = ProspectiveSource;
+			++ProspectiveDocument.Revision.Value;
+			return Workspace.ValidateProspectiveDocuments(
+				{ProspectiveDocument}, OutError);
+			},
+			DocumentError);
+		TestTrue(
+			TEXT("A generic call action passes prospective semantic validation"),
+			bApplied);
+		TestTrue(
+			TEXT("The generic call preserves the dragged expression as its bound input"),
+			FString(UTF8_TO_TCHAR(*InvalidSession.GetCurrentUtf8())).Contains(
+				TEXT("AcceptInt(Input)")));
+	}
 	return true;
 }
 

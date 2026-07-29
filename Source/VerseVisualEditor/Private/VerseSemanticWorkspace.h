@@ -123,6 +123,10 @@ public:
 	FText GetMutationUnavailableReason(
 		const FString& FilePath,
 		FVerseDocumentRevision Revision) const;
+	/** Validates prospective buffers without publishing them or changing workspace state. */
+	bool ValidateProspectiveDocuments(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents,
+		FText& OutError);
 
 private:
 	FVerseSemanticAnalysisResult AnalyzeWithPrivateEnvironment(
