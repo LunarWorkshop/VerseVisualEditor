@@ -16,11 +16,19 @@
 
 namespace
 {
-	FVerseSemanticDiagnostic MakeDiagnostic(FText Message, ELogVerbosity::Type Severity)
+	FVerseSemanticDiagnostic MakeDiagnostic(
+		FText Message,
+		ELogVerbosity::Type Severity,
+		FString FilePath = FString(),
+		FIntPoint RowSpan = FIntPoint(INDEX_NONE, INDEX_NONE),
+		FIntPoint ColumnSpan = FIntPoint(INDEX_NONE, INDEX_NONE))
 	{
 		FVerseSemanticDiagnostic Result;
 		Result.Message = MoveTemp(Message);
 		Result.Severity = Severity;
+		Result.FilePath = MoveTemp(FilePath);
+		Result.RowSpan = RowSpan;
+		Result.ColumnSpan = ColumnSpan;
 		return Result;
 	}
 
@@ -226,6 +234,12 @@ namespace
 	}
 }
 
+bool FVerseSemanticDiagnostic::AppliesToFile(const FString& CandidateFilePath) const
+{
+	return FilePath.IsEmpty()
+		|| MakeNormalizedPathKey(FilePath) == MakeNormalizedPathKey(CandidateFilePath);
+}
+
 FString FVerseSemanticSnapshot::MakeDocumentKey(const FString& FilePath)
 {
 	return MakeNormalizedPathKey(FilePath);
@@ -245,7 +259,20 @@ bool FVerseSemanticSnapshot::Describes(
 	FVerseDocumentRevision Revision) const
 {
 	const FVerseDocumentRevision* Found = DocumentRevisions.Find(MakeDocumentKey(FilePath));
-	return Found != nullptr && *Found == Revision;
+	if (Found == nullptr || *Found != Revision)
+	{
+		return false;
+	}
+	// A compiled engine baseline must not claim an unregistered editor-only file
+	// merely because that clean document happened to be open when the build ended.
+	// Testing snapshots intentionally have no VST and retain their explicit map semantics.
+	if (!ProjectVst.IsValid())
+	{
+		return true;
+	}
+	const FTCHARToUTF8 Utf8Path(*FilePath);
+	return ProjectVst->FindSnippetByFilePath(
+		uLang::CUTF8StringView(Utf8Path.Get(), Utf8Path.Length())) != nullptr;
 }
 
 TSharedRef<FVerseSemanticSnapshot> FVerseSemanticSnapshot::CreateForTesting(
@@ -478,7 +505,10 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 		{
 			OutDiagnostics.Add(MakeDiagnostic(
 				FText::FromString(Diagnostic.Info.Message),
-				Diagnostic.Info.Severity));
+				Diagnostic.Info.Severity,
+				Diagnostic.Location.FilePath,
+				Diagnostic.Location.RowSpan,
+				Diagnostic.Location.ColSpan));
 		});
 	const TOptional<TSharedRef<ISolIdeSourceProject>> IndependentProject =
 		ISolarisModule::Get().CreateProjectSource(
@@ -569,7 +599,14 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 	{
 		Result.Diagnostics.Add(MakeDiagnostic(
 			FText::FromString(UTF8_TO_TCHAR(Glitch->_Result._Message.AsCString())),
-			ToLogVerbosity(Glitch->_Result.GetInfo().Severity)));
+			ToLogVerbosity(Glitch->_Result.GetInfo().Severity),
+			UTF8_TO_TCHAR(Glitch->_Locus._SnippetPath.AsCString()),
+			FIntPoint(
+				Glitch->_Locus._Range.BeginRow() + 1,
+				Glitch->_Locus._Range.EndRow() + 1),
+			FIntPoint(
+				Glitch->_Locus._Range.BeginColumn() + 1,
+				Glitch->_Locus._Range.EndColumn() + 1)));
 	}
 	if (!BuildManager->GetProgramContext()._Program.IsValid()
 		|| !BuildManager->GetProjectVst().IsValid())

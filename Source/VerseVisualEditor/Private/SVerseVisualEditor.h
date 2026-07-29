@@ -169,6 +169,7 @@ private:
 	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
 		bool bOnlyCleanDocuments = false) const;
 	void QueueSemanticAnalysis(bool bDebounce);
+	bool HasLocalCompileDiagnosticsForActiveDocument() const;
 	FText GetLocalCompileDiagnosticsText() const;
 	FReply CloseLocalCompilePanel();
 

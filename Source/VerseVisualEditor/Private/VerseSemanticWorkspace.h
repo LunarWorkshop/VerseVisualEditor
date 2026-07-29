@@ -6,6 +6,7 @@
 #include "Containers/Utf8String.h"
 #include "Internationalization/Text.h"
 #include "Logging/LogVerbosity.h"
+#include "Math/IntPoint.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
 #include "VerseDocumentRevision.h"
@@ -31,6 +32,12 @@ struct FVerseSemanticDiagnostic
 {
 	FText Message;
 	ELogVerbosity::Type Severity = ELogVerbosity::Log;
+	FString FilePath;
+	/** One-based compiler source location; INDEX_NONE means unavailable. */
+	FIntPoint RowSpan = FIntPoint(INDEX_NONE, INDEX_NONE);
+	FIntPoint ColumnSpan = FIntPoint(INDEX_NONE, INDEX_NONE);
+
+	bool AppliesToFile(const FString& CandidateFilePath) const;
 };
 
 /** Immutable compiler-owned semantic state for a known set of document revisions. */

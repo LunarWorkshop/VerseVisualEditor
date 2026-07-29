@@ -153,6 +153,28 @@ bool FVerseSemanticWorkspaceFailureRetentionTest::RunTest(const FString& Paramet
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseSemanticDiagnosticFileOwnershipTest,
+	"VerseVisualEditor.Semantics.Workspace.DiagnosticsBelongToTheirDocument",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseSemanticDiagnosticFileOwnershipTest::RunTest(const FString& Parameters)
+{
+	FVerseSemanticDiagnostic Diagnostic;
+	Diagnostic.FilePath = TEXT("C:/Project/Folder/SemanticErrors.verse");
+	TestTrue(
+		TEXT("Normalized matching paths own their diagnostics"),
+		Diagnostic.AppliesToFile(TEXT("c:\\project\\folder\\SemanticErrors.verse")));
+	TestFalse(
+		TEXT("A diagnostic is not shown for a different document"),
+		Diagnostic.AppliesToFile(TEXT("C:/Project/Folder/GlobalScopeCorpus.verse")));
+	Diagnostic.FilePath.Reset();
+	TestTrue(
+		TEXT("Workspace-level diagnostics remain visible without a source file"),
+		Diagnostic.AppliesToFile(TEXT("C:/Project/Folder/GlobalScopeCorpus.verse")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseSemanticWorkspaceIsolatedCompilerTest,
 	"VerseVisualEditor.Semantics.Workspace.IsolatedCompilerOverlay",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -292,6 +314,15 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	{
 		return false;
 	}
+	TestTrue(
+		TEXT("Compiler diagnostics retain ownership of the invalid document"),
+		Workspace.GetDiagnostics().ContainsByPredicate(
+			[&InvalidDocument](const FVerseSemanticDiagnostic& Diagnostic)
+			{
+				return Diagnostic.Severity == ELogVerbosity::Error
+					&& !Diagnostic.FilePath.IsEmpty()
+					&& Diagnostic.AppliesToFile(InvalidDocument.FilePath);
+			}));
 	TestFalse(
 		TEXT("Failed local analysis cannot authorize exact semantic mutation"),
 		Workspace.HasExactSnapshot(InvalidDocument.FilePath, InvalidDocument.Revision));

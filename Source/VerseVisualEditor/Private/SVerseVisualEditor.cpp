@@ -1340,7 +1340,8 @@ void SVerseVisualEditor::Tick(
 			SemanticWorkspace->GetState();
 		SemanticWorkspace->Tick(FPlatformTime::Seconds());
 		if (PreviousSemanticState != EVerseSemanticWorkspaceState::Failed
-			&& SemanticWorkspace->GetState() == EVerseSemanticWorkspaceState::Failed)
+			&& SemanticWorkspace->GetState() == EVerseSemanticWorkspaceState::Failed
+			&& HasLocalCompileDiagnosticsForActiveDocument())
 		{
 			bLocalCompilePanelOpen = true;
 		}
@@ -1395,9 +1396,22 @@ void SVerseVisualEditor::QueueSemanticAnalysis(bool bDebounce)
 	}
 }
 
+bool SVerseVisualEditor::HasLocalCompileDiagnosticsForActiveDocument() const
+{
+	if (!SemanticWorkspace || !ActiveDocument.IsValid())
+	{
+		return false;
+	}
+	return SemanticWorkspace->GetDiagnostics().ContainsByPredicate(
+		[this](const FVerseSemanticDiagnostic& Diagnostic)
+		{
+			return Diagnostic.AppliesToFile(ActiveDocument->FilePath);
+		});
+}
+
 FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
 {
-	if (!SemanticWorkspace || SemanticWorkspace->GetDiagnostics().IsEmpty())
+	if (!SemanticWorkspace || !ActiveDocument.IsValid())
 	{
 		return LOCTEXT("NoLocalCompileErrors", "No local compile errors.");
 	}
@@ -1406,12 +1420,24 @@ FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
 	Lines.Reserve(SemanticWorkspace->GetDiagnostics().Num());
 	for (const FVerseSemanticDiagnostic& Diagnostic : SemanticWorkspace->GetDiagnostics())
 	{
+		if (!Diagnostic.AppliesToFile(ActiveDocument->FilePath))
+		{
+			continue;
+		}
 		const TCHAR* Severity = Diagnostic.Severity == ELogVerbosity::Error
 			? TEXT("Error")
 			: Diagnostic.Severity == ELogVerbosity::Warning
 				? TEXT("Warning")
 				: TEXT("Info");
-		Lines.Add(FString::Printf(TEXT("%s: %s"), Severity, *Diagnostic.Message.ToString()));
+		const FString Location = Diagnostic.RowSpan.X != INDEX_NONE
+			? FString::Printf(TEXT(" L%d"), Diagnostic.RowSpan.X)
+			: FString();
+		Lines.Add(FString::Printf(
+			TEXT("%s%s: %s"), Severity, *Location, *Diagnostic.Message.ToString()));
+	}
+	if (Lines.IsEmpty())
+	{
+		return LOCTEXT("NoLocalCompileErrors", "No local compile errors.");
 	}
 	return FText::FromString(FString::Join(Lines, TEXT("\n")));
 }
@@ -2247,6 +2273,10 @@ FReply SVerseVisualEditor::ActivateDocument(TSharedPtr<FOpenVerseDocument> OpenD
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 	RevealActiveDocumentInTree();
+	if (HasLocalCompileDiagnosticsForActiveDocument())
+	{
+		bLocalCompilePanelOpen = true;
+	}
 	return FReply::Handled();
 }
 
