@@ -1477,15 +1477,7 @@ void SVerseVisualEditor::Tick(
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 	if (SemanticWorkspace)
 	{
-		const EVerseSemanticWorkspaceState PreviousSemanticState =
-			SemanticWorkspace->GetState();
 		SemanticWorkspace->Tick(FPlatformTime::Seconds());
-		if (PreviousSemanticState != EVerseSemanticWorkspaceState::Failed
-			&& SemanticWorkspace->GetState() == EVerseSemanticWorkspaceState::Failed
-			&& HasLocalCompileDiagnosticsForActiveDocument())
-		{
-			bLocalCompilePanelOpen = true;
-		}
 	}
 	const EVerseCompilationMode PreferredMode =
 		GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
@@ -1539,42 +1531,20 @@ void SVerseVisualEditor::QueueSemanticAnalysis(bool bDebounce)
 
 bool SVerseVisualEditor::HasLocalCompileDiagnosticsForActiveDocument() const
 {
-	if (!SemanticWorkspace || !ActiveDocument.IsValid())
-	{
-		return false;
-	}
-	return SemanticWorkspace->GetDiagnostics().ContainsByPredicate(
-		[this](const FVerseSemanticDiagnostic& Diagnostic)
-		{
-			return Diagnostic.AppliesToFile(ActiveDocument->FilePath);
-		});
+	return ActiveDocument.IsValid() && !ActiveDocument->LoadError.IsEmpty();
 }
 
 FText SVerseVisualEditor::GetLocalCompileDiagnosticsText() const
 {
-	if (!SemanticWorkspace || !ActiveDocument.IsValid())
+	if (!ActiveDocument.IsValid())
 	{
 		return LOCTEXT("NoLocalCompileErrors", "No local compile errors.");
 	}
 
 	TArray<FString> Lines;
-	Lines.Reserve(SemanticWorkspace->GetDiagnostics().Num());
-	for (const FVerseSemanticDiagnostic& Diagnostic : SemanticWorkspace->GetDiagnostics())
+	if (!ActiveDocument->LoadError.IsEmpty())
 	{
-		if (!Diagnostic.AppliesToFile(ActiveDocument->FilePath))
-		{
-			continue;
-		}
-		const TCHAR* Severity = Diagnostic.Severity == ELogVerbosity::Error
-			? TEXT("Error")
-			: Diagnostic.Severity == ELogVerbosity::Warning
-				? TEXT("Warning")
-				: TEXT("Info");
-		const FString Location = Diagnostic.RowSpan.X != INDEX_NONE
-			? FString::Printf(TEXT(" L%d"), Diagnostic.RowSpan.X)
-			: FString();
-		Lines.Add(FString::Printf(
-			TEXT("%s%s: %s"), Severity, *Location, *Diagnostic.Message.ToString()));
+		Lines.Add(FString::Printf(TEXT("Error: %s"), *ActiveDocument->LoadError.ToString()));
 	}
 	if (Lines.IsEmpty())
 	{
@@ -2115,57 +2085,15 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	{
 		return;
 	}
-	if (Action->Validation == EVerseExpressionActionValidation::ExactSemanticSnapshot)
-	{
-		const FText SemanticUnavailable = SemanticWorkspace
-			? SemanticWorkspace->GetMutationUnavailableReason(
-				ActiveDocument->FilePath,
-				ActiveDocument->Session->GetRevision())
-			: LOCTEXT("SemanticWorkspaceUnavailable", "Verse semantic analysis is unavailable.");
-		if (!SemanticUnavailable.IsEmpty())
-		{
-			return;
-		}
-	}
 	FText Error;
-	const FVerseExpressionSemanticValidator SemanticValidator =
-		[this](const FUtf8String& ProspectiveSource, FText& OutError)
-		{
-			if (!SemanticWorkspace || !ActiveDocument.IsValid())
-			{
-				OutError = LOCTEXT(
-					"ProspectiveSemanticWorkspaceUnavailable",
-					"Verse semantic validation is unavailable.");
-				return false;
-			}
-			TArray<FVerseSemanticDocumentInput> Documents =
-				CollectSemanticDocumentInputs();
-			FVerseSemanticDocumentInput* EditedDocument =
-				Documents.FindByPredicate([this](const FVerseSemanticDocumentInput& Input)
-				{
-					return Input.FilePath.Equals(
-						ActiveDocument->FilePath, ESearchCase::IgnoreCase);
-				});
-			if (EditedDocument == nullptr)
-			{
-				OutError = LOCTEXT(
-					"ProspectiveSemanticDocumentUnavailable",
-					"The edited Verse document is unavailable for validation.");
-				return false;
-			}
-			EditedDocument->Source = ProspectiveSource;
-			++EditedDocument->Revision.Value;
-			return SemanticWorkspace->ValidateProspectiveDocuments(
-				Documents, OutError);
-		};
 	if (!TryApplyVerseExpressionAction(
 		*ActiveDocument->Session,
 		SocketDrag->Tile.Range,
 		*Action,
-		SemanticValidator,
 		Error))
 	{
 		ActiveDocument->LoadError = Error;
+		bLocalCompilePanelOpen = true;
 		return;
 	}
 	ActiveDocument->LoadError = FText::GetEmpty();
@@ -2771,7 +2699,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 
 	ReconcileFunctionTabs(*ActiveDocument);
-	const TWeakPtr<FOpenVerseDocument> WeakDocument = ActiveDocument;
 	const TOptional<FVerseTextRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
 		? TOptional<FVerseTextRange>(ActiveDocument->SelectedTile->Range)
 		: TOptional<FVerseTextRange>();
@@ -2908,25 +2835,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			.Padding(30.0f, 0.0f, 0.0f, 0.0f)
 			[
 				BuildFunctionTabBar(ActiveDocument)
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 0.0f)
-			[
-				SNew(STextBlock)
-					.Text_Lambda([WeakDocument]()
-					{
-						const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
-						return Document.IsValid() ? Document->LoadError : FText::GetEmpty();
-					})
-				.ColorAndOpacity(FLinearColor(1.0f, 0.55f, 0.0f))
-				.Visibility_Lambda([WeakDocument]()
-				{
-					const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
-						return Document.IsValid() && !Document->LoadError.IsEmpty()
-						? EVisibility::Visible
-						: EVisibility::Collapsed;
-				})
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)

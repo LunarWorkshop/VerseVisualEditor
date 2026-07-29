@@ -31,7 +31,7 @@ enum class EVerseExpressionActionValidation : uint8
 	Structural,
 	/** Compiler-owned callable signature is stable; local syntax validation still applies. */
 	StableSemanticSignature,
-	/** The action is bound to semantic claims that require the exact current snapshot. */
+	/** The action originated from the exact snapshot; applying it still validates syntax only. */
 	ExactSemanticSnapshot,
 };
 
@@ -58,9 +58,6 @@ struct FVerseExpressionAction
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 };
 
-using FVerseExpressionSemanticValidator =
-	TFunction<bool(const FUtf8String& ProspectiveSource, FText& OutError)>;
-
 /** Discovers expression actions from the current lexical scope and the expression registry. */
 class FVerseExpressionActionQuery
 {
@@ -85,5 +82,4 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
-	const FVerseExpressionSemanticValidator& SemanticValidator,
 	FText& OutError);

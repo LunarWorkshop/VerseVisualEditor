@@ -322,29 +322,11 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 			(*InputAction)->ResultTypeName,
 			FString(TEXT("int")));
 	}
-	const FUtf8String BeforeRejectedAction = Session.GetCurrentUtf8();
-	const FVerseDocumentRevision BeforeRejectedRevision = Session.GetRevision();
-	TestFalse(TEXT("Semantic rejection prevents the localized replacement"),
+	TestTrue(TEXT("Add applies after prospective structural validation"),
 		TryApplyVerseExpressionAction(
 			Session,
 			Identifier.Range,
 			**Add,
-			[](const FUtf8String&, FText& OutError)
-			{
-				OutError = FText::FromString(TEXT("Expected semantic rejection"));
-				return false;
-			},
-			Error));
-	TestTrue(TEXT("Semantic rejection leaves source unchanged"),
-		Session.GetCurrentUtf8() == BeforeRejectedAction);
-	TestEqual(TEXT("Semantic rejection leaves revision unchanged"),
-		Session.GetRevision(), BeforeRejectedRevision);
-	TestTrue(TEXT("Add applies after prospective structural and semantic validation"),
-		TryApplyVerseExpressionAction(
-			Session,
-			Identifier.Range,
-			**Add,
-			[](const FUtf8String&, FText&) { return true; },
 			Error));
 	const FString Edited = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
 	TestTrue(TEXT("The original expression becomes the first operand"),

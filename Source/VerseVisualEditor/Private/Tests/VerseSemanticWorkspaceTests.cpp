@@ -506,19 +506,9 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			InvalidSession,
 			SessionExpressionRange,
 			**CallableAction,
-			[&Workspace, &InvalidDocument](
-				const FUtf8String& ProspectiveSource,
-				FText& OutError)
-		{
-			FVerseSemanticDocumentInput ProspectiveDocument = InvalidDocument;
-			ProspectiveDocument.Source = ProspectiveSource;
-			++ProspectiveDocument.Revision.Value;
-			return Workspace.ValidateProspectiveDocuments(
-				{ProspectiveDocument}, OutError);
-			},
 			DocumentError);
 		TestTrue(
-			TEXT("A generic call action passes prospective semantic validation"),
+			TEXT("A generic call action applies despite unrelated semantic errors"),
 			bApplied);
 		TestTrue(
 			TEXT("The generic call preserves the dragged expression as its bound input"),

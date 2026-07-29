@@ -320,7 +320,6 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
-	const FVerseExpressionSemanticValidator& SemanticValidator,
 	FText& OutError)
 {
 	if (ExpressionRange.Revision != Session.GetRevision())
@@ -453,16 +452,6 @@ bool TryApplyVerseExpressionAction(
 	if (!bRecognizedAtReplacement)
 	{
 		OutError = LOCTEXT("ExpressionRejected", "The expression would not produce a valid supported Verse structure.");
-		return false;
-	}
-	if (!SemanticValidator || !SemanticValidator(Candidate, OutError))
-	{
-		if (OutError.IsEmpty())
-		{
-			OutError = LOCTEXT(
-				"ExpressionSemanticRejection",
-				"The expression would introduce a Verse semantic error.");
-		}
 		return false;
 	}
 	return Session.Replace(ExpressionRange, ReplacementUtf8, OutError);
