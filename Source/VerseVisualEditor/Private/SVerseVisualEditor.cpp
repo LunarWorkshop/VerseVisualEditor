@@ -7,6 +7,7 @@
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
 #include "DesktopPlatformModule.h"
+#include "EdGraph/EdGraphSchema.h"
 #include "Editor/UnrealEdEngine.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -29,6 +30,8 @@
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
+#include "SGraphActionMenu.h"
+#include "SGraphPalette.h"
 #include "UnrealEdGlobals.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
@@ -46,12 +49,12 @@
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
-#include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/STextBlock.h"
@@ -103,21 +106,59 @@ namespace
 	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
 
 	DECLARE_DELEGATE_OneParam(FOnVerseExpressionChosen, TSharedPtr<FVerseExpressionAction>);
+	FLinearColor GetBlueprintPinColor(const FString& VerseType);
+
+	enum class EVerseExpressionGrouping : uint8
+	{
+		Category,
+		Module,
+	};
+
+	EVerseExpressionGrouping LastExpressionGrouping =
+		EVerseExpressionGrouping::Category;
+
+	struct FVerseExpressionSchemaAction final : FEdGraphSchemaAction
+	{
+		static FName StaticGetTypeId()
+		{
+			static const FName TypeId(TEXT("FVerseExpressionSchemaAction"));
+			return TypeId;
+		}
+
+		virtual FName GetTypeId() const override { return StaticGetTypeId(); }
+
+		FVerseExpressionSchemaAction(
+			TSharedPtr<FVerseExpressionAction> InAction,
+			const FText& Grouping)
+			: FEdGraphSchemaAction(
+				Grouping,
+				InAction->DisplayName,
+				FText::GetEmpty(),
+				0,
+				FText::FromString(InAction->SourceSpelling))
+			, ExpressionAction(MoveTemp(InAction))
+		{
+		}
+
+		TSharedPtr<FVerseExpressionAction> ExpressionAction;
+	};
 
 	class SVerseExpressionSearch final : public SCompoundWidget
 	{
 	public:
 		SLATE_BEGIN_ARGS(SVerseExpressionSearch) {}
 			SLATE_ARGUMENT(TArray<TSharedPtr<FVerseExpressionAction>>, Actions)
-			SLATE_ARGUMENT(FText, DebugFilterText)
+			SLATE_ARGUMENT(FText, ContextDescription)
+			SLATE_ARGUMENT(FLinearColor, ContextTypeColor)
+			SLATE_ARGUMENT(const FSlateBrush*, ContextTypeIcon)
 			SLATE_EVENT(FOnVerseExpressionChosen, OnChosen)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			AllActions = InArgs._Actions;
-			FilteredActions = AllActions;
 			OnChosen = InArgs._OnChosen;
+			Grouping = LastExpressionGrouping;
 			ChildSlot
 			[
 				SNew(SBorder)
@@ -129,91 +170,169 @@ namespace
 					.HeightOverride(360.0f)
 					[
 						SNew(SVerticalBox)
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 2.0f, 2.0f, 5.0f)
 						[
-							SNew(STextBlock)
-							.Visibility(InArgs._DebugFilterText.IsEmpty()
-								? EVisibility::Collapsed
-								: EVisibility::HitTestInvisible)
-							.Text(InArgs._DebugFilterText)
-							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-							.ColorAndOpacity(FLinearColor(1.0f, 0.65f, 0.15f, 1.0f))
-						]
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
-						[
-							SAssignNew(SearchBox, SSearchBox)
-							.HintText(LOCTEXT("ExpressionSearchHint", "Search expressions"))
-							.OnTextChanged(this, &SVerseExpressionSearch::HandleFilterChanged)
-							.OnTextCommitted(this, &SVerseExpressionSearch::HandleFilterCommitted)
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 5.0f, 0.0f)
+							[
+								SNew(SImage)
+								.Image(InArgs._ContextTypeIcon)
+								.ColorAndOpacity(InArgs._ContextTypeColor)
+							]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(InArgs._ContextDescription)
+								.Font(FAppStyle::GetFontStyle("BlueprintEditor.ActionMenu.ContextDescriptionFont"))
+								.AutoWrapText(true)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[
+								SNew(SSegmentedControl<EVerseExpressionGrouping>)
+								.Value(Grouping)
+								.OnValueChanged(this, &SVerseExpressionSearch::HandleGroupingChanged)
+								+ SSegmentedControl<EVerseExpressionGrouping>::Slot(EVerseExpressionGrouping::Category)
+								.Text(LOCTEXT("GroupExpressionsByCategory", "Category"))
+								+ SSegmentedControl<EVerseExpressionGrouping>::Slot(EVerseExpressionGrouping::Module)
+								.Text(LOCTEXT("GroupExpressionsByModule", "Module"))
+							]
 						]
 						+ SVerticalBox::Slot().FillHeight(1.0f)
 						[
-							SAssignNew(ListView, SListView<TSharedPtr<FVerseExpressionAction>>)
-							.ListItemsSource(&FilteredActions)
-							.OnGenerateRow(this, &SVerseExpressionSearch::GenerateRow)
-							.OnMouseButtonDoubleClick(this, &SVerseExpressionSearch::Choose)
+							SAssignNew(ActionMenu, SGraphActionMenu)
+							.OnCollectAllActions(this, &SVerseExpressionSearch::CollectActions)
+							.OnActionSelected(this, &SVerseExpressionSearch::HandleActionSelected)
+							.OnActionDoubleClicked(this, &SVerseExpressionSearch::HandleActionDoubleClicked)
+							.OnCreateWidgetForAction(this, &SVerseExpressionSearch::CreateActionWidget)
+							.AlphaSortItems(true)
+							.SortItemsRecursively(true)
 						]
 					]
 				]
 			];
-			if (!FilteredActions.IsEmpty())
-			{
-				ListView->SetSelection(FilteredActions[0]);
-			}
+			RegisterActiveTimer(
+				0.0f,
+				FWidgetActiveTimerDelegate::CreateSP(
+					this, &SVerseExpressionSearch::FocusSearchBox));
 		}
 
-		TSharedPtr<SWidget> GetWidgetToFocus() const { return SearchBox; }
+		TSharedPtr<SWidget> GetWidgetToFocus() const
+		{
+			if (ActionMenu.IsValid())
+			{
+				return ActionMenu->GetFilterTextBox();
+			}
+			return nullptr;
+		}
 
 	private:
-		TSharedRef<ITableRow> GenerateRow(
-			TSharedPtr<FVerseExpressionAction> Action,
-			const TSharedRef<STableViewBase>& Owner)
+		EActiveTimerReturnType FocusSearchBox(double, float)
 		{
-			return SNew(STableRow<TSharedPtr<FVerseExpressionAction>>, Owner)
-			.Padding(FMargin(5.0f, 3.0f))
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
-					SNew(STextBlock).Text(Action->DisplayName)
-				]
-				+ SHorizontalBox::Slot().AutoWidth()
-				[
-					SNew(STextBlock)
-					.Text(Action->Category)
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-			];
+			if (!ActionMenu.IsValid())
+			{
+				return EActiveTimerReturnType::Continue;
+			}
+			FSlateApplication::Get().SetKeyboardFocus(
+				ActionMenu->GetFilterTextBox(), EFocusCause::SetDirectly);
+			return EActiveTimerReturnType::Stop;
 		}
 
-		void HandleFilterChanged(const FText& Text)
+		void CollectActions(FGraphActionListBuilderBase& OutActions) const
 		{
-			const FString Filter = Text.ToString();
-			FilteredActions.Reset();
 			for (const TSharedPtr<FVerseExpressionAction>& Action : AllActions)
 			{
-				if (Filter.IsEmpty() || Action->DisplayName.ToString().Contains(Filter, ESearchCase::IgnoreCase))
-				{
-					FilteredActions.Add(Action);
-				}
-			}
-			ListView->RequestListRefresh();
-			if (!FilteredActions.IsEmpty())
-			{
-				ListView->SetSelection(FilteredActions[0]);
+				const FText& ActionGrouping =
+					Grouping == EVerseExpressionGrouping::Module
+						? Action->ModuleCategory
+						: Action->Category;
+				OutActions.AddAction(MakeShared<FVerseExpressionSchemaAction>(
+					Action, ActionGrouping));
 			}
 		}
 
-		void HandleFilterCommitted(const FText&, ETextCommit::Type CommitType)
+		void HandleGroupingChanged(EVerseExpressionGrouping NewGrouping)
 		{
-			if (CommitType == ETextCommit::OnEnter)
+			Grouping = NewGrouping;
+			LastExpressionGrouping = NewGrouping;
+			if (ActionMenu.IsValid())
 			{
-				Choose(ListView->GetSelectedItems().IsEmpty() ? nullptr : ListView->GetSelectedItems()[0]);
+				ActionMenu->RefreshAllActions(false, false);
 			}
 		}
 
-		void Choose(TSharedPtr<FVerseExpressionAction> Action)
+		TSharedRef<SWidget> CreateActionWidget(
+			FCreateWidgetForActionData* const CreateData) const
 		{
+			const TSharedPtr<FEdGraphSchemaAction> SchemaAction = CreateData->Action;
+			const bool bIsVerseAction = SchemaAction.IsValid()
+				&& SchemaAction->GetTypeId()
+					== FVerseExpressionSchemaAction::StaticGetTypeId();
+			const TSharedPtr<FVerseExpressionAction> ExpressionAction = bIsVerseAction
+				? StaticCastSharedPtr<FVerseExpressionSchemaAction>(SchemaAction)->ExpressionAction
+				: nullptr;
+			const bool bIdentifier = ExpressionAction.IsValid()
+				&& ExpressionAction->SourceForm
+					== EVerseExpressionSourceForm::IdentifierReference;
+			const FSlateBrush* Icon = FAppStyle::GetBrush(bIdentifier
+				? TEXT("Kismet.AllClasses.VariableIcon")
+				: TEXT("Kismet.AllClasses.FunctionIcon"));
+			const FLinearColor IconColor = bIdentifier
+				? GetBlueprintPinColor(ExpressionAction->ResultTypeName)
+				: GetDefault<UGraphEditorSettings>()->PureFunctionCallNodeTitleColor;
+
+			return SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SBox)
+					.WidthOverride(16.0f)
+					.HeightOverride(16.0f)
+					[
+						SNew(SImage)
+						.Image(Icon)
+						.ColorAndOpacity(IconColor)
+					]
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(3.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(SchemaAction.IsValid()
+						? SchemaAction->GetMenuDescription()
+						: FText::GetEmpty())
+					.HighlightText(CreateData->HighlightText)
+					.ToolTipText(SchemaAction.IsValid()
+						? SchemaAction->GetTooltipDescription()
+						: FText::GetEmpty())
+				];
+		}
+
+		void HandleActionSelected(
+			const TArray<TSharedPtr<FEdGraphSchemaAction>>& SelectedActions,
+			ESelectInfo::Type SelectInfo)
+		{
+			if (SelectInfo == ESelectInfo::OnKeyPress && SelectedActions.Num() == 1)
+			{
+				Choose(SelectedActions[0]);
+			}
+		}
+
+		void HandleActionDoubleClicked(
+			const TArray<TSharedPtr<FEdGraphSchemaAction>>& SelectedActions)
+		{
+			if (SelectedActions.Num() == 1)
+			{
+				Choose(SelectedActions[0]);
+			}
+		}
+
+		void Choose(const TSharedPtr<FEdGraphSchemaAction>& SchemaAction)
+		{
+			if (!SchemaAction.IsValid()
+				|| SchemaAction->GetTypeId() != FVerseExpressionSchemaAction::StaticGetTypeId())
+			{
+				return;
+			}
+			const TSharedPtr<FVerseExpressionAction> Action =
+				StaticCastSharedPtr<FVerseExpressionSchemaAction>(SchemaAction)->ExpressionAction;
 			if (Action.IsValid() && OnChosen.IsBound())
 			{
 				OnChosen.Execute(Action);
@@ -221,10 +340,9 @@ namespace
 		}
 
 		TArray<TSharedPtr<FVerseExpressionAction>> AllActions;
-		TArray<TSharedPtr<FVerseExpressionAction>> FilteredActions;
-		TSharedPtr<SSearchBox> SearchBox;
-		TSharedPtr<SListView<TSharedPtr<FVerseExpressionAction>>> ListView;
+		TSharedPtr<SGraphActionMenu> ActionMenu;
 		FOnVerseExpressionChosen OnChosen;
+		EVerseExpressionGrouping Grouping = EVerseExpressionGrouping::Category;
 	};
 
 	FText FormatSourceLines(int32 FirstLine, int32 LastLine)
@@ -335,6 +453,29 @@ namespace
 		return TypeRange.IsSet()
 			? Document.DecodeOriginalRange(TypeRange).TrimStartAndEnd()
 			: IntrinsicTypeName.ToString();
+	}
+
+	FString GetActionMenuTypeName(const FString& VerseType)
+	{
+		const FString Trimmed = VerseType.TrimStartAndEnd();
+		const FString Lower = Trimmed.ToLower();
+		if (Lower == TEXT("int"))
+		{
+			return TEXT("integer");
+		}
+		if (Lower == TEXT("logic"))
+		{
+			return TEXT("boolean");
+		}
+		if (Lower == TEXT("char"))
+		{
+			return TEXT("character");
+		}
+		if (Lower == TEXT("actor"))
+		{
+			return TEXT("actor object reference");
+		}
+		return Lower.IsEmpty() ? TEXT("unknown") : Lower;
 	}
 
 	struct FBuiltFunctionGraphRow
@@ -1910,24 +2051,24 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 		SocketDrag->Tile.Range,
 		ActiveDocument->FilePath,
 		SemanticSnapshots);
-	FText DebugFilterText;
-	if (GetDefault<UVerseVisualEditorSettings>()->bShowExpressionSearchTypeDiagnostics)
-	{
-		const FString SocketType = GetVisualTypeName(
-			SocketDrag->Socket.TypeRange,
-			SocketDrag->Socket.IntrinsicTypeName,
-			Document);
-		DebugFilterText = SocketDrag->bOutput
-			? FText::Format(
-				LOCTEXT("ExpressionConsumerTypeDiagnostic", "Developer: required operand type = {0}"),
-				FText::FromString(SocketType))
-			: FText::Format(
-				LOCTEXT("ExpressionProducerTypeDiagnostic", "Developer: required result type = {0}"),
-				FText::FromString(SocketType));
-	}
+	const FString SocketType = GetVisualTypeName(
+		SocketDrag->Socket.TypeRange,
+		SocketDrag->Socket.IntrinsicTypeName,
+		Document);
+	const FText ContextDescription = FText::Format(
+		SocketDrag->bOutput
+			? LOCTEXT("ExpressionConsumerTypeContext", "Actions taking {0}")
+			: LOCTEXT("ExpressionProducerTypeContext", "Actions providing {0}"),
+		FText::FromString(GetActionMenuTypeName(SocketType)));
+	const FSlateBrush* ContextTypeIcon = FAppStyle::GetBrush(
+		SocketType.TrimStartAndEnd().StartsWith(TEXT("[]"))
+			? TEXT("Graph.ArrayPin.Connected")
+			: TEXT("Graph.Pin.Connected"));
 	TSharedRef<SVerseExpressionSearch> Search = SNew(SVerseExpressionSearch)
 		.Actions(ExpressionActions)
-		.DebugFilterText(DebugFilterText)
+		.ContextDescription(ContextDescription)
+		.ContextTypeColor(GetBlueprintPinColor(SocketType))
+		.ContextTypeIcon(ContextTypeIcon)
 		.OnChosen(FOnVerseExpressionChosen::CreateSP(this, &SVerseVisualEditor::ApplyExpressionAction));
 	ExpressionMenu = FSlateApplication::Get().PushMenu(
 		AsShared(), FWidgetPath(), Search, DesktopPosition.Value,

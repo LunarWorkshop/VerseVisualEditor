@@ -28,7 +28,4 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = Compilation, meta = (DisplayName = "Compilation Mode"))
 	EVerseCompilationMode CompilationMode = EVerseCompilationMode::Continuous;
 
-	/** Local diagnostic aid. Disabled by default and stored only in per-user editor config. */
-	UPROPERTY(config)
-	bool bShowExpressionSearchTypeDiagnostics = false;
 };

@@ -17,6 +17,7 @@ public class VerseVisualEditor : ModuleRules
 			"DeveloperSettings",
 			"Engine",
 			"EditorStyle",
+			"BlueprintGraph",
 			"GraphEditor",
 			"InputCore",
 			"MainFrame",

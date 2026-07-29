@@ -28,6 +28,12 @@ struct FVerseSemanticCandidate
 {
 	EVerseSemanticCandidateKind Kind = EVerseSemanticCandidateKind::Identifier;
 	FString DisplayName;
+	FText BlueprintDisplayName;
+	/** Category metadata resolved from the Verse definition, then intrinsic presentation. */
+	FText Category;
+	/** Semantic module hierarchy, independent of presentation category metadata. */
+	FText ModuleCategory;
+	FString ResultTypeName;
 	FString SourceSpelling;
 	bool bUsesFailureCallSyntax = false;
 	int32 BoundInputIndex = INDEX_NONE;

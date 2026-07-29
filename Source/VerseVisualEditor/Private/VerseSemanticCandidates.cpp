@@ -1,6 +1,7 @@
 #include "VerseSemanticCandidates.h"
 
 #include "VerseDocument.h"
+#include "VerseBlueprintCallablePresentation.h"
 #include "VerseSemanticWorkspace.h"
 #include "uLang/Semantics/DataDefinition.h"
 #include "uLang/Semantics/Expression.h"
@@ -136,6 +137,60 @@ namespace
 		const FUTF8ToTCHAR Converted(
 			reinterpret_cast<const ANSICHAR*>(Text.Data()), Text.ByteLen());
 		return FString(Converted.Length(), Converted.Get());
+	}
+
+	FText GetDefinitionCategory(const uLang::CDefinition& Definition)
+	{
+		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
+		const uLang::CClass* CategoryAttribute =
+			Program.FindDefinitionByVersePath<uLang::CClass>(
+				uLang::CUTF8StringView("/Verse.org/Simulation/category_attribute"));
+		if (CategoryAttribute == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
+		const uLang::TOptional<uLang::CUTF8String> Value =
+			Prototype->GetAttributes().GetAttributeTextValue(CategoryAttribute, Program);
+		return Value.IsSet()
+			? FText::FromString(ToFString(Value.GetValue()))
+			: FText::GetEmpty();
+	}
+
+	FText GetDefinitionDisplayName(const uLang::CDefinition& Definition)
+	{
+		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
+		const uLang::CClass* DisplayNameAttribute =
+			Program.FindDefinitionByVersePath<uLang::CClass>(
+				uLang::CUTF8StringView("/Verse.org/Simulation/display_name_attribute"));
+		if (DisplayNameAttribute == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
+		const uLang::TOptional<uLang::CUTF8String> Value =
+			Prototype->GetAttributes().GetAttributeTextValue(DisplayNameAttribute, Program);
+		return Value.IsSet()
+			? FText::FromString(ToFString(Value.GetValue()))
+			: FText::GetEmpty();
+	}
+
+	FText GetModuleCategory(const uLang::CDefinition& Definition)
+	{
+		const uLang::CModule* Module = Definition._EnclosingScope.GetModule();
+		if (Module == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		return FText::FromString(ToFString(Module->GetScopePath('|')));
+	}
+
+	bool IsIntrinsic(const uLang::CDefinition& Definition)
+	{
+		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
+		return Program._intrinsicClass != nullptr
+			&& Definition.GetPrototypeDefinition()->GetAttributes().HasAttributeClass(
+				Program._intrinsicClass, Program);
 	}
 
 	FString DefaultSourceForType(const uLang::CTypeBase& Type)
@@ -307,6 +362,29 @@ namespace
 		{
 			return;
 		}
+		const FText DefinitionCategory = GetDefinitionCategory(Function);
+		const FText DefinitionDisplayName = GetDefinitionDisplayName(Function);
+		const bool bIntrinsic = IsIntrinsic(Function);
+		const TOptional<FVerseBlueprintCallablePresentation> BlueprintPresentation =
+			bOperator
+				? TOptional<FVerseBlueprintCallablePresentation>()
+				: ResolveVerseBlueprintCallablePresentation(Spelling, *FunctionType);
+		const FText ResolvedCategory = !DefinitionCategory.IsEmpty()
+			? DefinitionCategory
+			: (BlueprintPresentation.IsSet()
+				? BlueprintPresentation->Category
+				: (Spelling == TEXT("ToDiagnostic")
+					? FText::FromString(TEXT("Utilities|String"))
+					: FText::GetEmpty()));
+		const FText ModuleCategory = GetModuleCategory(Function);
+		const FText ResolvedDisplayName = !DefinitionDisplayName.IsEmpty()
+			? DefinitionDisplayName
+			: (BlueprintPresentation.IsSet()
+				&& !BlueprintPresentation->ExplicitDisplayName.IsEmpty()
+					? BlueprintPresentation->ExplicitDisplayName
+					: (bIntrinsic && BlueprintPresentation.IsSet()
+						? BlueprintPresentation->IntrinsicFallbackDisplayName
+						: FText::GetEmpty()));
 
 		if (!bDraggingFromOutput)
 		{
@@ -324,10 +402,14 @@ namespace
 						? EVerseSemanticCandidateKind::PostfixOperator
 						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
+			Candidate.Category = ResolvedCategory;
+			Candidate.ModuleCategory = ModuleCategory;
+			Candidate.BlueprintDisplayName = ResolvedDisplayName;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
 			Candidate.Function = &Function;
 			Candidate.ResultType = &FunctionType->GetReturnType();
+			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			Candidate.Snapshot = Snapshot;
 			for (const uLang::CTypeBase* Param : Params)
 			{
@@ -358,11 +440,15 @@ namespace
 						? EVerseSemanticCandidateKind::PostfixOperator
 						: EVerseSemanticCandidateKind::Function));
 			Candidate.DisplayName = Spelling;
+			Candidate.Category = ResolvedCategory;
+			Candidate.ModuleCategory = ModuleCategory;
+			Candidate.BlueprintDisplayName = ResolvedDisplayName;
 			Candidate.SourceSpelling = Spelling;
 			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
 			Candidate.BoundInputIndex = BoundIndex;
 			Candidate.Function = &Function;
 			Candidate.ResultType = &FunctionType->GetReturnType();
+			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			Candidate.Snapshot = Snapshot;
 			bool bHasAllDefaults = true;
 			for (int32 ParamIndex = 0; ParamIndex < Params.Num(); ++ParamIndex)
@@ -450,9 +536,12 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 					FVerseSemanticCandidate& Candidate = Result.AddDefaulted_GetRef();
 					Candidate.Kind = EVerseSemanticCandidateKind::Identifier;
 					Candidate.DisplayName = ToFString(Data->AsNameStringView());
+					Candidate.Category = GetDefinitionCategory(*Data);
+					Candidate.ModuleCategory = GetModuleCategory(*Data);
 					Candidate.SourceSpelling = Candidate.DisplayName;
 					Candidate.DataDefinition = Data;
 					Candidate.ResultType = Data->GetType();
+					Candidate.ResultTypeName = ToFString(Data->GetType()->AsCode());
 					Candidate.Snapshot = Snapshot;
 				}
 			}

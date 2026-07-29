@@ -68,6 +68,22 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		TEXT("The editor-supported Add action uses structural validation"),
 		(*Add)->Validation,
 		EVerseExpressionActionValidation::Structural);
+	TestEqual(
+		TEXT("Operators use Blueprint's promotable operator category"),
+		(*Add)->Category.ToString(),
+		FString(TEXT("Utilities|Operators")));
+	TestEqual(
+		TEXT("Operators use Blueprint's action-menu display name"),
+		(*Add)->DisplayName.ToString(),
+		FString(TEXT("Add")));
+	TestEqual(
+		TEXT("Operators also have a module grouping"),
+		(*Add)->ModuleCategory.ToString(),
+		FString(TEXT("Verse")));
+	TestEqual(
+		TEXT("The Add icon carries its resolved result type"),
+		(*Add)->ResultTypeName,
+		FString(TEXT("int")));
 	FVerseVisualSocket FloatSocket;
 	FloatSocket.IntrinsicTypeName = TEXT("float");
 	const TArray<TSharedPtr<FVerseExpressionAction>> FloatConsumers =
@@ -103,8 +119,25 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 			return Action->SourceForm
 					== EVerseExpressionSourceForm::IdentifierReference
 				&& Action->Validation == EVerseExpressionActionValidation::Structural
-				&& Action->DisplayName.ToString() == TEXT("Input");
+				&& Action->DisplayName.ToString() == TEXT("Input")
+				&& Action->Category.ToString() == TEXT("Variables");
 		}));
+	const TSharedPtr<FVerseExpressionAction>* InputAction =
+		IntProducers.FindByPredicate([](
+			const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm
+					== EVerseExpressionSourceForm::IdentifierReference
+				&& Action->DisplayName.ToString() == TEXT("Input");
+		});
+	if (TestNotNull(TEXT("Input action is available for icon typing"), InputAction))
+	{
+		TestEqual(
+			TEXT("The identifier icon carries the identifier's value type"),
+			(*InputAction)->ResultTypeName,
+			FString(TEXT("int")));
+	}
 	const FUtf8String BeforeRejectedAction = Session.GetCurrentUtf8();
 	const FVerseDocumentRevision BeforeRejectedRevision = Session.GetRevision();
 	TestFalse(TEXT("Semantic rejection prevents the localized replacement"),

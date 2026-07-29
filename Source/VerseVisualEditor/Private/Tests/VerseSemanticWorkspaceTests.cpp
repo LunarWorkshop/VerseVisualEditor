@@ -230,7 +230,8 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		/ TEXT("VerseVisualEditor/Content/TestCorpus/PrivateSemanticOverlayOnly.verse"));
 	Document.Source = FUtf8String(UTF8TEXT(
 		"AcceptInt(Value : int)<computes> : int = Value\n"
-		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"));
+		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
+		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"));
 	Document.Revision.Value = 91;
 
 	TestFalse(TEXT("The test document is not registered by existing on-disk source"), FPaths::FileExists(Document.FilePath));
@@ -292,12 +293,86 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				&& Candidate.SourceSpelling == TEXT("AcceptInt")
 				&& Candidate.Function != nullptr;
 		}));
+	const FVerseSemanticCandidate* AbsoluteInteger = Candidates.FindByPredicate(
+		[](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::Function
+				&& Candidate.SourceSpelling == TEXT("Abs")
+				&& Candidate.BlueprintDisplayName.ToString()
+					== TEXT("Absolute (Integer)");
+		});
+	TestNotNull(
+		TEXT("Verse Abs(int) resolves to Blueprint's integer function presentation"),
+		AbsoluteInteger);
+	if (AbsoluteInteger != nullptr)
+	{
+		TestEqual(
+			TEXT("Absolute Integer uses Blueprint's Math Integer category"),
+			AbsoluteInteger->Category.ToString(),
+			FString(TEXT("Math|Integer")));
+		TestTrue(
+			TEXT("Absolute Integer retains its semantic module hierarchy"),
+			AbsoluteInteger->ModuleCategory.ToString().Contains(TEXT("Verse")));
+	}
 	TestFalse(
 		TEXT("Output-side filtering does not need an identifier exclusion rule"),
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Identifier;
 		}));
+	const auto HasCategory = [&Candidates](const TCHAR* Spelling, const TCHAR* Category)
+	{
+		return Candidates.ContainsByPredicate(
+			[Spelling, Category](const FVerseSemanticCandidate& Candidate)
+			{
+				return Candidate.SourceSpelling == Spelling
+					&& Candidate.Category.ToString() == Category;
+			});
+	};
+	TestTrue(TEXT("BitAnd uses Blueprint's integer category"),
+		HasCategory(TEXT("BitAnd"), TEXT("Math|Integer")));
+	TestTrue(TEXT("BitOr uses Blueprint's integer category"),
+		HasCategory(TEXT("BitOr"), TEXT("Math|Integer")));
+	TestTrue(TEXT("BitXor uses Blueprint's integer category"),
+		HasCategory(TEXT("BitXor"), TEXT("Math|Integer")));
+	TestTrue(TEXT("BitNot uses Blueprint's integer category"),
+		HasCategory(TEXT("BitNot"), TEXT("Math|Integer")));
+	TestTrue(TEXT("Mod uses Blueprint's integer category"),
+		HasCategory(TEXT("Mod"), TEXT("Math|Integer")));
+	TestTrue(TEXT("Quotient uses Blueprint's integer category"),
+		HasCategory(TEXT("Quotient"), TEXT("Math|Integer")));
+	TestTrue(TEXT("Integer ToString uses Blueprint's string category"),
+		HasCategory(TEXT("ToString"), TEXT("Utilities|String")));
+	TestTrue(TEXT("ToDiagnostic is grouped with string conversion"),
+		HasCategory(TEXT("ToDiagnostic"), TEXT("Utilities|String")));
+
+	const int32 FloatExpressionBeginByte =
+		SourceView.Find(UTF8TEXTVIEW("Input + 1.0"));
+	const TArray<FVerseSemanticCandidate> FloatCandidates =
+		FVerseSemanticCandidateProvider::Build(
+			CandidateSnapshots,
+			Document.FilePath,
+			FloatExpressionBeginByte,
+			true,
+			*ParsedDocument);
+	const auto HasFloatCategory = [&FloatCandidates](
+		const TCHAR* Spelling, const TCHAR* Category)
+	{
+		return FloatCandidates.ContainsByPredicate(
+			[Spelling, Category](const FVerseSemanticCandidate& Candidate)
+			{
+				return Candidate.SourceSpelling == Spelling
+					&& Candidate.Category.ToString() == Category;
+			});
+	};
+	TestTrue(TEXT("Ceil uses Blueprint's float category"),
+		HasFloatCategory(TEXT("Ceil"), TEXT("Math|Float")));
+	TestTrue(TEXT("Floor uses Blueprint's float category"),
+		HasFloatCategory(TEXT("Floor"), TEXT("Math|Float")));
+	TestTrue(TEXT("Sin uses Blueprint's trig category"),
+		HasFloatCategory(TEXT("Sin"), TEXT("Math|Trig")));
+	TestTrue(TEXT("Float ToString uses Blueprint's string category"),
+		HasFloatCategory(TEXT("ToString"), TEXT("Utilities|String")));
 
 	FVerseSemanticDocumentInput InvalidDocument = Document;
 	InvalidDocument.Source = FUtf8String(UTF8TEXT(
@@ -383,11 +458,32 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				&& Action->Validation
 					== EVerseExpressionActionValidation::StableSemanticSignature;
 		});
+	TestTrue(
+		TEXT("Integer unary minus uses Blueprint's Negate Int action name"),
+		DegradedActions.ContainsByPredicate([](
+			const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::PrefixOperator
+				&& Action->SourceSpelling == TEXT("-")
+				&& Action->DisplayName.ToString() == TEXT("Negate Int");
+		}));
 	TestNotNull(
 		TEXT("Failed local analysis still exposes callable actions to expression search"),
 		CallableAction);
 	if (CallableAction != nullptr)
 	{
+		TestEqual(
+			TEXT("A callable without display metadata keeps its Verse definition name"),
+			(*CallableAction)->DisplayName.ToString(),
+			FString(TEXT("AcceptInt")));
+		TestEqual(
+			TEXT("Callables without category metadata use the editor's fallback category"),
+			(*CallableAction)->Category.ToString(),
+			FString(TEXT("Uncategorized")));
+		TestFalse(
+			TEXT("Callable module grouping is kept separate from its category"),
+			(*CallableAction)->ModuleCategory.IsEmpty());
 		FVerseDocumentSession InvalidSession(InvalidParsedDocument.ToSharedRef());
 		const FVerseTextRange SessionExpressionRange(
 			InvalidSession.GetRevision(), {InvalidExpressionBeginByte, 5});

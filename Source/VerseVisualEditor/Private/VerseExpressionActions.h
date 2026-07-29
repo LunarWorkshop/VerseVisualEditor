@@ -44,6 +44,9 @@ struct FVerseExpressionAction
 		EVerseExpressionActionValidation::Structural;
 	FText DisplayName;
 	FText Category;
+	FText ModuleCategory;
+	/** Result/value type used to tint this action's Blueprint-style icon. */
+	FString ResultTypeName;
 	FVerseTextRange IdentifierNameRange;
 	/** Direct source spelling for compiler-discovered identifiers and callables. */
 	FString SourceSpelling;
