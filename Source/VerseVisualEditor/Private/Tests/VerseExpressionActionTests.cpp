@@ -178,6 +178,17 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("MakeError uses the result category"),
 			MakeError->FallbackCategory.ToString(), FString(TEXT("Utilities|Result")));
 	}
+	const FVerseIntrinsicPresentationDescriptor* FitsInPlayerMap =
+		FindDescriptor(TEXT("FitsInPlayerMap"), {TEXT("persistable")},
+			TEXT("persistable"));
+	TestNotNull(TEXT("FitsInPlayerMap matches the persistence descriptor"),
+		FitsInPlayerMap);
+	if (FitsInPlayerMap != nullptr)
+	{
+		TestEqual(TEXT("FitsInPlayerMap uses the persistence category"),
+			FitsInPlayerMap->FallbackCategory.ToString(),
+			FString(TEXT("Utilities|Persistence")));
+	}
 	const FVerseIntrinsicPresentationDescriptor* VectorToString =
 		FindDescriptor(TEXT("ToString"), {TEXT("/Verse.org/SpatialMath/vector3")},
 			TEXT("[]char"));
