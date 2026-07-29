@@ -67,6 +67,7 @@ enum class EVerseSemanticWorkspaceState : uint8
 struct FVerseSemanticAnalysisResult
 {
 	bool bSucceeded = false;
+	/** May contain useful compiler state even when local analysis reports errors. */
 	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
 	TArray<FVerseSemanticDiagnostic> Diagnostics;
 };
@@ -103,13 +104,17 @@ public:
 	TArray<TSharedPtr<const FVerseSemanticSnapshot>> GetCandidateSnapshots() const
 	{
 		TArray<TSharedPtr<const FVerseSemanticSnapshot>> Result;
+		if (DiscoverySnapshot.IsValid())
+		{
+			Result.Add(DiscoverySnapshot);
+		}
 		if (LastSuccessfulSnapshot.IsValid())
 		{
-			Result.Add(LastSuccessfulSnapshot);
+			Result.AddUnique(LastSuccessfulSnapshot);
 		}
 		if (CompiledBaseline.IsValid() && CompiledBaseline != LastSuccessfulSnapshot)
 		{
-			Result.Add(CompiledBaseline);
+			Result.AddUnique(CompiledBaseline);
 		}
 		return Result;
 	}
@@ -138,6 +143,8 @@ private:
 	TArray<FVerseSemanticDocumentInput> PendingDocuments;
 	EVerseSemanticWorkspaceState State = EVerseSemanticWorkspaceState::Unavailable;
 	TSharedPtr<const FVerseSemanticSnapshot> CompiledBaseline;
+	/** Latest partial or complete compiler state, used only for candidate discovery. */
+	TSharedPtr<const FVerseSemanticSnapshot> DiscoverySnapshot;
 	TSharedPtr<const FVerseSemanticSnapshot> LastSuccessfulSnapshot;
 	TSharedPtr<const FVerseSemanticSnapshot> MutationSnapshot;
 	TArray<FVerseSemanticDiagnostic> Diagnostics;

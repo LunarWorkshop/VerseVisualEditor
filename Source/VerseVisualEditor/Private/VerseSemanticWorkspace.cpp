@@ -282,6 +282,7 @@ void FVerseSemanticWorkspace::RequestAnalysis(
 	if (PendingDocuments.IsEmpty())
 	{
 		LastSuccessfulSnapshot = CompiledBaseline;
+		DiscoverySnapshot = CompiledBaseline;
 		MutationSnapshot = CompiledBaseline;
 		State = CompiledBaseline.IsValid()
 			? EVerseSemanticWorkspaceState::Ready
@@ -292,6 +293,7 @@ void FVerseSemanticWorkspace::RequestAnalysis(
 	if (CompiledBaselineDescribesAll(PendingDocuments))
 	{
 		LastSuccessfulSnapshot = CompiledBaseline;
+		DiscoverySnapshot = CompiledBaseline;
 		MutationSnapshot = CompiledBaseline;
 		PendingDocuments.Reset();
 		State = EVerseSemanticWorkspaceState::Ready;
@@ -345,6 +347,10 @@ void FVerseSemanticWorkspace::RefreshCompiledBaseline(
 	Snapshot->ProjectVst = BuildManager->GetProjectVst();
 	Snapshot->AddDocuments(CompiledDocuments);
 	CompiledBaseline = Snapshot;
+	if (!DiscoverySnapshot.IsValid())
+	{
+		DiscoverySnapshot = Snapshot;
+	}
 	PrivateIde.Reset();
 	PrivateProject.Reset();
 }
@@ -352,6 +358,7 @@ void FVerseSemanticWorkspace::RefreshCompiledBaseline(
 void FVerseSemanticWorkspace::InvalidateCompiledBaseline()
 {
 	CompiledBaseline.Reset();
+	DiscoverySnapshot.Reset();
 	MutationSnapshot.Reset();
 	PrivateIde.Reset();
 	PrivateProject.Reset();
@@ -517,8 +524,7 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 			FText::FromString(UTF8_TO_TCHAR(Glitch->_Result._Message.AsCString())),
 			ToLogVerbosity(Glitch->_Result.GetInfo().Severity)));
 	}
-	if (BuildResults.HasFailure()
-		|| !BuildManager->GetProgramContext()._Program.IsValid()
+	if (!BuildManager->GetProgramContext()._Program.IsValid()
 		|| !BuildManager->GetProjectVst().IsValid())
 	{
 		if (Result.Diagnostics.IsEmpty())
@@ -534,8 +540,18 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 	Snapshot->Program = BuildManager->GetProgramContext()._Program;
 	Snapshot->ProjectVst = BuildManager->GetProjectVst();
 	Snapshot->AddDocuments(Documents);
-	Result.bSucceeded = true;
 	Result.Snapshot = Snapshot;
+	if (BuildResults.HasFailure())
+	{
+		if (Result.Diagnostics.IsEmpty())
+		{
+			Result.Diagnostics.Add(MakeDiagnostic(
+				LOCTEXT("SemanticBuildFailed", "Verse semantic analysis failed."),
+				ELogVerbosity::Error));
+		}
+		return Result;
+	}
+	Result.bSucceeded = true;
 	return Result;
 }
 
@@ -549,6 +565,10 @@ bool FVerseSemanticWorkspace::TryPublishResult(
 	}
 	PendingDocuments.Reset();
 	Diagnostics = MoveTemp(Result.Diagnostics);
+	if (Result.Snapshot.IsValid())
+	{
+		DiscoverySnapshot = Result.Snapshot;
+	}
 	if (Result.bSucceeded && Result.Snapshot.IsValid())
 	{
 		LastSuccessfulSnapshot = MoveTemp(Result.Snapshot);

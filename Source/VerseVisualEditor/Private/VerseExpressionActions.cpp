@@ -233,15 +233,18 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 		Action->SemanticDataDefinition = Candidate.DataDefinition;
 		Action->SemanticFunction = Candidate.Function;
 		Action->SemanticSnapshot = Candidate.Snapshot;
-		Action->Validation = EVerseExpressionActionValidation::ExactSemanticSnapshot;
 		switch (Candidate.Kind)
 		{
 		case EVerseSemanticCandidateKind::Identifier:
 			Action->Kind = EVerseExpressionActionKind::Identifier;
+			Action->Validation =
+				EVerseExpressionActionValidation::ExactSemanticSnapshot;
 			Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
 			break;
 		case EVerseSemanticCandidateKind::Function:
 			Action->Kind = EVerseExpressionActionKind::Call;
+			Action->Validation =
+				EVerseExpressionActionValidation::StableSemanticSignature;
 			Action->Category = LOCTEXT("FunctionsCategory", "Functions");
 			break;
 		case EVerseSemanticCandidateKind::InfixOperator:
@@ -250,6 +253,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 				continue;
 			}
 			Action->Kind = EVerseExpressionActionKind::Addition;
+			Action->Validation =
+				EVerseExpressionActionValidation::StableSemanticSignature;
 			Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
 			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
 			break;

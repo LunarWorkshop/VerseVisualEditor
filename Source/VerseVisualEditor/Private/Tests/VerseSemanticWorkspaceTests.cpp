@@ -2,6 +2,7 @@
 
 #include "VerseSemanticWorkspace.h"
 #include "VerseDocument.h"
+#include "VerseExpressionActions.h"
 #include "VerseSemanticCandidates.h"
 
 #include "Misc/FileHelper.h"
@@ -273,6 +274,83 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Identifier;
+		}));
+
+	FVerseSemanticDocumentInput InvalidDocument = Document;
+	InvalidDocument.Source = FUtf8String(UTF8TEXT(
+		"AcceptInt(Value : int)<computes> : int = Value\n"
+		"BrokenValue : int = \"not an int\"\n"
+		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"));
+	InvalidDocument.Revision.Value = 92;
+	Workspace.RequestAnalysis({InvalidDocument}, 1.0, false);
+	Workspace.Tick(1.0);
+	if (!TestEqual(
+		TEXT("An unrelated local semantic error fails exact analysis"),
+		Workspace.GetState(),
+		EVerseSemanticWorkspaceState::Failed))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("Failed local analysis cannot authorize exact semantic mutation"),
+		Workspace.HasExactSnapshot(InvalidDocument.FilePath, InvalidDocument.Revision));
+
+	const TConstArrayView<uint8> InvalidBytes(
+		reinterpret_cast<const uint8*>(*InvalidDocument.Source),
+		InvalidDocument.Source.Len());
+	const TSharedPtr<const FVerseDocument> InvalidParsedDocument =
+		FVerseDocument::CreateFromBytes(InvalidBytes, DocumentError);
+	if (!TestTrue(
+		TEXT("Semantically invalid candidate source remains syntactically usable"),
+		InvalidParsedDocument.IsValid()))
+	{
+		return false;
+	}
+	const int32 InvalidExpressionBeginByte =
+		InvalidParsedDocument->GetOriginalUtf8View().Find(UTF8TEXTVIEW("Input + 1"));
+	const TArray<FVerseSemanticCandidate> DegradedCandidates =
+		FVerseSemanticCandidateProvider::Build(
+			Workspace.GetCandidateSnapshots(),
+			InvalidDocument.FilePath,
+			InvalidExpressionBeginByte,
+			true,
+			*InvalidParsedDocument);
+	TestTrue(
+		TEXT("Compiler Add remains discoverable after an unrelated local error"),
+		DegradedCandidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
+				&& Candidate.SourceSpelling == TEXT("+");
+		}));
+	TestTrue(
+		TEXT("Callable signatures remain discoverable after an unrelated local error"),
+		DegradedCandidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::Function
+				&& Candidate.SourceSpelling == TEXT("AcceptInt");
+		}));
+	FVerseVisualSocket OutputSocket;
+	const TArray<TSharedPtr<FVerseExpressionAction>> DegradedActions =
+		FVerseExpressionActionQuery::Build(
+			{},
+			OutputSocket,
+			true,
+			*InvalidParsedDocument,
+			FVerseTextRange(
+				InvalidDocument.Revision,
+				{InvalidExpressionBeginByte, 5}),
+			InvalidDocument.FilePath,
+			Workspace.GetCandidateSnapshots());
+	TestTrue(
+		TEXT("Failed local analysis still exposes callable actions to expression search"),
+		DegradedActions.ContainsByPredicate([](
+			const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->Kind == EVerseExpressionActionKind::Call
+				&& Action->SourceSpelling == TEXT("AcceptInt")
+				&& Action->Validation
+					== EVerseExpressionActionValidation::StableSemanticSignature;
 		}));
 	return true;
 }

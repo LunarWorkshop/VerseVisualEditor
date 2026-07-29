@@ -26,6 +26,8 @@ enum class EVerseExpressionActionValidation : uint8
 {
 	/** Current-revision ranges plus prospective syntax/VST validation are sufficient. */
 	Structural,
+	/** Compiler-owned callable signature is stable; local syntax validation still applies. */
+	StableSemanticSignature,
 	/** The action is bound to semantic claims that require the exact current snapshot. */
 	ExactSemanticSnapshot,
 };
