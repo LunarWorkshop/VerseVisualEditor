@@ -1872,11 +1872,18 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 	// ApplyExpressionAction requires an exact snapshot only for actions that make
 	// semantic claims; editor-supported structural actions (currently Add and
 	// scoped identifiers) rely on current-range and prospective VST validation.
+	const TArray<TSharedPtr<const FVerseSemanticSnapshot>> SemanticSnapshots =
+		SemanticWorkspace
+			? SemanticWorkspace->GetCandidateSnapshots()
+			: TArray<TSharedPtr<const FVerseSemanticSnapshot>>();
 	ExpressionActions = FVerseExpressionActionQuery::Build(
 		Tab.Parameters,
 		SocketDrag->Socket,
 		SocketDrag->bOutput,
-		Document);
+		Document,
+		SocketDrag->Tile.Range,
+		ActiveDocument->FilePath,
+		SemanticSnapshots);
 	FText DebugFilterText;
 	if (GetDefault<UVerseVisualEditorSettings>()->bShowExpressionSearchTypeDiagnostics)
 	{

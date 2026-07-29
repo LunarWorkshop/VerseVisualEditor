@@ -46,6 +46,10 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Nested-body range transition: complete; VST-derived clause descriptors retain
   complete definitions, exact interiors and punctuation, insertion anchors, and
   recursively lossless child coverage.
+- Dynamic expression candidates: complete; expression search now traverses the
+  compiler-owned active scope, signatures, generic overloads, imported APIs,
+  and intrinsic operators, with structural fallbacks when the current private
+  semantic overlay fails.
 - Modules: complete; module tiles render VST-derived nested definitions and raw
   gaps recursively, display append specifiers, and retain independent source
   ranges at every nesting level.
@@ -491,7 +495,7 @@ This step delivers the first complete edit-and-save workflow.
   editor buffers. The private environment exists only for live analysis inside
   this plugin.
 
-#### 11.2 Dynamic expression candidates
+#### 11.2 Dynamic expression candidates (complete)
 
 - Add a prominent creation control to empty expression positions and retain the
   automatically focused, filterable expression menu and frozen preview wire.

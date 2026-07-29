@@ -6,6 +6,8 @@
 #include "VerseOperatorTyping.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseSemanticCandidates.h"
+#include "VerseSemanticWorkspace.h"
 
 #define LOCTEXT_NAMESPACE "VerseExpressionActions"
 
@@ -203,6 +205,74 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 	return Result;
 }
 
+TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
+	TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
+	const FVerseVisualSocket& DraggedSocket,
+	bool bDraggingFromOutput,
+	const FVerseDocument& Document,
+	FVerseTextRange ExpressionRange,
+	const FString& FilePath,
+	TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> SemanticSnapshots)
+{
+	TArray<TSharedPtr<FVerseExpressionAction>> Result;
+	const TArray<FVerseSemanticCandidate> SemanticCandidates =
+		FVerseSemanticCandidateProvider::Build(
+			SemanticSnapshots,
+			FilePath,
+			ExpressionRange.BeginByte,
+			bDraggingFromOutput,
+			Document);
+	for (const FVerseSemanticCandidate& Candidate : SemanticCandidates)
+	{
+		TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
+		Action->DisplayName = FText::FromString(Candidate.DisplayName);
+		Action->SourceSpelling = Candidate.SourceSpelling;
+		Action->bUsesFailureCallSyntax = Candidate.bUsesFailureCallSyntax;
+		Action->BoundInputIndex = Candidate.BoundInputIndex;
+		Action->InputDefaultSources = Candidate.UnboundInputDefaults;
+		Action->SemanticDataDefinition = Candidate.DataDefinition;
+		Action->SemanticFunction = Candidate.Function;
+		Action->SemanticSnapshot = Candidate.Snapshot;
+		Action->Validation = EVerseExpressionActionValidation::ExactSemanticSnapshot;
+		switch (Candidate.Kind)
+		{
+		case EVerseSemanticCandidateKind::Identifier:
+			Action->Kind = EVerseExpressionActionKind::Identifier;
+			Action->Category = LOCTEXT("IdentifiersCategory", "Identifiers");
+			break;
+		case EVerseSemanticCandidateKind::Function:
+			Action->Kind = EVerseExpressionActionKind::Call;
+			Action->Category = LOCTEXT("FunctionsCategory", "Functions");
+			break;
+		case EVerseSemanticCandidateKind::InfixOperator:
+			if (Candidate.SourceSpelling != TEXT("+"))
+			{
+				continue;
+			}
+			Action->Kind = EVerseExpressionActionKind::Addition;
+			Action->DisplayName = LOCTEXT("AddAction", "Add (+)");
+			Action->Category = LOCTEXT("OperatorsCategory", "Operators");
+			break;
+		}
+		Result.Add(MoveTemp(Action));
+	}
+
+	const bool bHasExactSemanticSnapshot = SemanticSnapshots.ContainsByPredicate(
+		[&FilePath, Revision = ExpressionRange.Revision](
+			const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot)
+		{
+			return Snapshot.IsValid() && Snapshot->Describes(FilePath, Revision);
+		});
+	if (!bHasExactSemanticSnapshot)
+	{
+		// A failed unrelated semantic build must not disable source-safe actions.
+		// These fallback actions are authorized only by the prospective parser/VST
+		// validation in TryApplyVerseExpressionAction.
+		Result.Append(Build(Parameters, DraggedSocket, bDraggingFromOutput, Document));
+	}
+	return Result;
+}
+
 bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
@@ -219,9 +289,11 @@ bool TryApplyVerseExpressionAction(
 	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Identifier;
 	if (Action.Kind == EVerseExpressionActionKind::Identifier)
 	{
-		Replacement = Document->DecodeOriginalRange(Action.IdentifierNameRange);
+		Replacement = Action.SourceSpelling.IsEmpty()
+			? Document->DecodeOriginalRange(Action.IdentifierNameRange)
+			: Action.SourceSpelling;
 	}
-	else
+	else if (Action.Kind == EVerseExpressionActionKind::Addition)
 	{
 		const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
 		if (Existing.IsEmpty())
@@ -229,8 +301,31 @@ bool TryApplyVerseExpressionAction(
 			OutError = LOCTEXT("EmptyAddOperand", "Add requires a valid source expression.");
 			return false;
 		}
-		if (Action.RemainingInputDefaultSources.Num() != 1
-			|| Action.RemainingInputDefaultSources[0].IsEmpty())
+		TArray<FString> Inputs = Action.InputDefaultSources;
+		if (Inputs.IsEmpty())
+		{
+			Inputs = Action.RemainingInputDefaultSources;
+			Inputs.Insert(FString(), 0);
+		}
+		const bool bCreatesCompleteProducer =
+			Action.BoundInputIndex == INDEX_NONE
+			&& Action.InputDefaultSources.Num() == 2;
+		const int32 BoundIndex = bCreatesCompleteProducer
+			? INDEX_NONE
+			: (Action.BoundInputIndex == INDEX_NONE ? 0 : Action.BoundInputIndex);
+		if (Inputs.Num() != 2
+			|| (BoundIndex != INDEX_NONE && !Inputs.IsValidIndex(BoundIndex)))
+		{
+			OutError = LOCTEXT(
+				"MissingAddOperandDefault",
+				"Add requires a safe default for its unconnected operand.");
+			return false;
+		}
+		if (BoundIndex != INDEX_NONE)
+		{
+			Inputs[BoundIndex] = Existing;
+		}
+		if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
 		{
 			OutError = LOCTEXT(
 				"MissingAddOperandDefault",
@@ -239,9 +334,45 @@ bool TryApplyVerseExpressionAction(
 		}
 		Replacement = FString::Printf(
 			TEXT("%s + %s"),
-			*Existing,
-			*Action.RemainingInputDefaultSources[0]);
+			*Inputs[0],
+			*Inputs[1]);
 		RequiredKind = EVerseExpressionKind::Addition;
+	}
+	else
+	{
+		const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
+		if (Action.SourceSpelling.IsEmpty()
+			|| (Action.BoundInputIndex != INDEX_NONE
+				&& !Action.InputDefaultSources.IsValidIndex(Action.BoundInputIndex)))
+		{
+			OutError = LOCTEXT("InvalidCallAction", "The function action is incomplete.");
+			return false;
+		}
+		TArray<FString> Inputs = Action.InputDefaultSources;
+		if (Action.BoundInputIndex != INDEX_NONE)
+		{
+			if (Existing.IsEmpty())
+			{
+				OutError = LOCTEXT("EmptyCallOperand", "The function requires a valid source expression.");
+				return false;
+			}
+			Inputs[Action.BoundInputIndex] = Existing;
+		}
+		if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
+		{
+			OutError = LOCTEXT("MissingCallDefault", "The function requires an input with no safe default.");
+			return false;
+		}
+		Replacement = Action.bUsesFailureCallSyntax
+			? FString::Printf(
+				TEXT("%s[%s]"),
+				*Action.SourceSpelling,
+				*FString::Join(Inputs, TEXT(", ")))
+			: FString::Printf(
+				TEXT("%s(%s)"),
+				*Action.SourceSpelling,
+				*FString::Join(Inputs, TEXT(", ")));
+		RequiredKind = EVerseExpressionKind::Unsupported;
 	}
 
 	FUtf8String ReplacementUtf8(Replacement);

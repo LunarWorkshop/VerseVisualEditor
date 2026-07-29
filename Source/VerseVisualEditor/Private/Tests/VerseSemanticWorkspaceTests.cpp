@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseSemanticWorkspace.h"
+#include "VerseDocument.h"
+#include "VerseSemanticCandidates.h"
 
 #include "Misc/FileHelper.h"
 #include "Misc/AutomationTest.h"
@@ -203,6 +205,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		FPaths::ProjectPluginsDir()
 		/ TEXT("VerseVisualEditor/Content/TestCorpus/PrivateSemanticOverlayOnly.verse"));
 	Document.Source = FUtf8String(UTF8TEXT(
+		"AcceptInt(Value : int)<computes> : int = Value\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"));
 	Document.Revision.Value = 91;
 
@@ -223,6 +226,54 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("Overlay snapshot describes the exact private revision"), Workspace.HasExactSnapshot(Document.FilePath, Document.Revision));
 	TestTrue(TEXT("Overlay contributes to the semantic program"), Workspace.GetLastSuccessfulSnapshot()->GetProgram().IsValid());
 	TestTrue(TEXT("Overlay contributes to the project VST"), Workspace.GetLastSuccessfulSnapshot()->GetProjectVst().IsValid());
+
+	FText DocumentError;
+	const TConstArrayView<uint8> SourceBytes(
+		reinterpret_cast<const uint8*>(*Document.Source), Document.Source.Len());
+	const TSharedPtr<const FVerseDocument> ParsedDocument =
+		FVerseDocument::CreateFromBytes(SourceBytes, DocumentError);
+	if (!TestTrue(TEXT("Candidate test source creates a document"), ParsedDocument.IsValid()))
+	{
+		AddError(DocumentError.ToString());
+		return false;
+	}
+	const FUtf8StringView SourceView = ParsedDocument->GetOriginalUtf8View();
+	const int32 ExpressionBeginByte = SourceView.Find(UTF8TEXTVIEW("Input + 1"));
+	if (!TestTrue(TEXT("Candidate test locates its expression"), ExpressionBeginByte != INDEX_NONE))
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<const FVerseSemanticSnapshot>> CandidateSnapshots =
+		Workspace.GetCandidateSnapshots();
+	const TArray<FVerseSemanticCandidate> Candidates =
+		FVerseSemanticCandidateProvider::Build(
+			CandidateSnapshots,
+			Document.FilePath,
+			ExpressionBeginByte,
+			true,
+			*ParsedDocument);
+	TestTrue(
+		TEXT("Compiler intrinsics contribute the polymorphic Add overload for int"),
+		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
+				&& Candidate.SourceSpelling == TEXT("+")
+				&& Candidate.Function != nullptr;
+		}));
+	TestTrue(
+		TEXT("A function declared only in the private overlay is discovered dynamically"),
+		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::Function
+				&& Candidate.SourceSpelling == TEXT("AcceptInt")
+				&& Candidate.Function != nullptr;
+		}));
+	TestFalse(
+		TEXT("Output-side filtering does not need an identifier exclusion rule"),
+		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::Identifier;
+		}));
 	return true;
 }
 
