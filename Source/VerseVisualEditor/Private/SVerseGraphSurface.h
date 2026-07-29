@@ -8,6 +8,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class SScaleBox;
+class SBox;
 class SScrollBar;
 class SScrollBox;
 
@@ -59,6 +60,8 @@ public:
 	bool FocusWidget(const TSharedPtr<SWidget>& Widget, float Padding = 20.0f);
 	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
 	void EndConnectionPreview();
+	void SetContent(TSharedRef<SWidget> InContent);
+	void SetInitialAnchor(TSharedPtr<SWidget> InAnchor);
 	void SetConnections(TArray<FVerseGraphConnection> InConnections);
 
 	virtual void Tick(
@@ -113,6 +116,7 @@ private:
 	TSharedPtr<SScrollBox> HorizontalScrollBox;
 	TSharedPtr<SScrollBox> VerticalScrollBox;
 	TSharedPtr<SScaleBox> ScaleBox;
+	TSharedPtr<SBox> ContentHost;
 	TWeakPtr<SWidget> InitialAnchor;
 	TArray<FVerseGraphConnection> Connections;
 	TOptional<FVerseSocketDragStart> ConnectionDrag;

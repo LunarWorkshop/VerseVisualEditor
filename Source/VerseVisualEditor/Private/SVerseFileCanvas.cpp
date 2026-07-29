@@ -90,6 +90,26 @@ FVerseCanvasViewState SVerseFileCanvas::GetViewState() const
 	return GraphSurface.IsValid() ? GraphSurface->GetViewState() : FVerseCanvasViewState{};
 }
 
+void SVerseFileCanvas::RefreshContent(
+	TSharedRef<const FVerseDocumentSession> InSession,
+	TOptional<FVerseTextRange> SelectedRange,
+	TArray<FVerseCompilationDiagnostic> InDiagnostics)
+{
+	Snapshot.Emplace(InSession->GetParseSnapshot());
+	Tiles = InSession->GetTiles();
+	TileWidgets.Reset();
+	Diagnostics = MoveTemp(InDiagnostics);
+	Selection.Clear();
+	if (SelectedRange.IsSet())
+	{
+		Selection.Select(SelectedRange.GetValue());
+	}
+	if (GraphSurface.IsValid())
+	{
+		GraphSurface->SetContent(BuildTileRow());
+	}
+}
+
 bool SVerseFileCanvas::FocusTile(const FVerseVisualTile& Tile)
 {
 	TSharedPtr<SWidget> WidgetToFocus;

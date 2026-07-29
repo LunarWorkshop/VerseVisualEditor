@@ -2818,10 +2818,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	{
 		return;
 	}
-	CaptureActiveCanvasView();
-
 	if (!ActiveDocument.IsValid())
 	{
+		CaptureActiveCanvasView();
 		ScopeBreadcrumbBox.Reset();
 		RebuildProperties();
 		ActiveDocumentBox->SetContent(
@@ -2837,6 +2836,15 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	}
 
 	ReconcileFunctionTabs(*ActiveDocument);
+	const bool bShowingFunction =
+		ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex);
+	const bool bCanReuseCanvas = bShowingFunction
+		? ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex].FunctionCanvas.IsValid()
+		: ActiveDocument->FileCanvas.IsValid();
+	if (!bCanReuseCanvas)
+	{
+		CaptureActiveCanvasView();
+	}
 	const TOptional<FVerseTextRange> InitialSelectedRange = ActiveDocument->SelectedTile.IsSet()
 		? TOptional<FVerseTextRange>(ActiveDocument->SelectedTile->Range)
 		: TOptional<FVerseTextRange>();
@@ -2915,44 +2923,67 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				GetBlueprintPinColor(ReturnType), 2.0f, 0});
 		}
 
-		ActiveView = SAssignNew(
-			FunctionTab.FunctionCanvas,
-			SVerseFunctionCanvas,
-			FunctionTab.ViewState,
-			!FunctionTab.bHasViewState)
-			.InitialAnchor(FunctionEntryAnchor)
-			.Connections(GraphConnections)
-			.OnConnectionDropped(FOnVerseGraphConnectionDropped::CreateSP(
-				this, &SVerseVisualEditor::HandleConnectionDropped))
-			.OnConnectionCancelled(FSimpleDelegate::CreateSP(
-				this, &SVerseVisualEditor::HandleConnectionCancelled))
-			[
-				FunctionContent
-			];
+		if (FunctionTab.FunctionCanvas.IsValid())
+		{
+			FunctionTab.FunctionCanvas->RefreshContent(
+				FunctionContent,
+				MoveTemp(GraphConnections),
+				FunctionEntryAnchor);
+			ActiveView = FunctionTab.FunctionCanvas.ToSharedRef();
+		}
+		else
+		{
+			ActiveView = SAssignNew(
+				FunctionTab.FunctionCanvas,
+				SVerseFunctionCanvas,
+				FunctionTab.ViewState,
+				!FunctionTab.bHasViewState)
+				.InitialAnchor(FunctionEntryAnchor)
+				.Connections(GraphConnections)
+				.OnConnectionDropped(FOnVerseGraphConnectionDropped::CreateSP(
+					this, &SVerseVisualEditor::HandleConnectionDropped))
+				.OnConnectionCancelled(FSimpleDelegate::CreateSP(
+					this, &SVerseVisualEditor::HandleConnectionCancelled))
+				[
+					FunctionContent
+				];
+		}
 	}
 	else
 	{
-		ActiveView = SAssignNew(
-			ActiveDocument->FileCanvas,
-			SVerseFileCanvas,
-			ActiveDocument->Session.ToSharedRef(),
-			ActiveDocument->ViewState,
-			InitialSelectedRange,
-			FOnVerseTileSelected::CreateSP(
-				this,
-				&SVerseVisualEditor::HandleTileSelected,
-				ActiveDocument),
-			FSimpleDelegate::CreateSP(
-				this,
-				&SVerseVisualEditor::HandleTileSelectionCleared,
-				ActiveDocument))
-			.Diagnostics(ActiveDocument->bHasCompilationResult
-				? ActiveDocument->CompilationResult.Diagnostics
-				: TArray<FVerseCompilationDiagnostic>())
-			.OnFunctionOpened(FOnVerseFunctionOpened::CreateSP(
-				this,
-				&SVerseVisualEditor::OpenFunctionView,
-				ActiveDocument));
+		TArray<FVerseCompilationDiagnostic> Diagnostics = ActiveDocument->bHasCompilationResult
+			? ActiveDocument->CompilationResult.Diagnostics
+			: TArray<FVerseCompilationDiagnostic>();
+		if (ActiveDocument->FileCanvas.IsValid())
+		{
+			ActiveDocument->FileCanvas->RefreshContent(
+				ActiveDocument->Session.ToSharedRef(),
+				InitialSelectedRange,
+				MoveTemp(Diagnostics));
+			ActiveView = ActiveDocument->FileCanvas.ToSharedRef();
+		}
+		else
+		{
+			ActiveView = SAssignNew(
+				ActiveDocument->FileCanvas,
+				SVerseFileCanvas,
+				ActiveDocument->Session.ToSharedRef(),
+				ActiveDocument->ViewState,
+				InitialSelectedRange,
+				FOnVerseTileSelected::CreateSP(
+					this,
+					&SVerseVisualEditor::HandleTileSelected,
+					ActiveDocument),
+				FSimpleDelegate::CreateSP(
+					this,
+					&SVerseVisualEditor::HandleTileSelectionCleared,
+					ActiveDocument))
+				.Diagnostics(Diagnostics)
+				.OnFunctionOpened(FOnVerseFunctionOpened::CreateSP(
+					this,
+					&SVerseVisualEditor::OpenFunctionView,
+					ActiveDocument));
+		}
 	}
 	ActiveDocumentBox->SetContent(
 		SNew(SBorder)

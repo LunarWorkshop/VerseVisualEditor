@@ -17,6 +17,10 @@ public:
 
 	void Construct(const FArguments& InArgs, FVerseCanvasViewState InitialViewState, bool bCenterInitially);
 	FVerseCanvasViewState GetViewState() const;
+	void RefreshContent(
+		TSharedRef<SWidget> InContent,
+		TArray<FVerseGraphConnection> InConnections,
+		TSharedPtr<SWidget> InInitialAnchor);
 	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
 	void EndConnectionPreview();
 

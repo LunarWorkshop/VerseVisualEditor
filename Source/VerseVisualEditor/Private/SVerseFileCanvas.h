@@ -31,6 +31,10 @@ public:
 		FSimpleDelegate InOnSelectionCleared);
 
 	FVerseCanvasViewState GetViewState() const;
+	void RefreshContent(
+		TSharedRef<const FVerseDocumentSession> InSession,
+		TOptional<FVerseTextRange> SelectedRange,
+		TArray<FVerseCompilationDiagnostic> InDiagnostics);
 	void SelectTile(const FVerseVisualTile& Tile);
 	void ClearTileSelection();
 	/** Selects a tile and centers its widget, or its nearest rendered containing tile. */

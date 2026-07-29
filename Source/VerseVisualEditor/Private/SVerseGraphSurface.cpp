@@ -6,6 +6,7 @@
 #include "Styling/AppStyle.h"
 #include "VerseGraphBackground.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -105,7 +106,10 @@ void SVerseGraphSurface::Construct(
 							.HAlign(HAlign_Left)
 							.VAlign(VAlign_Top)
 							[
-								InArgs._Content.Widget
+								SAssignNew(ContentHost, SBox)
+								[
+									InArgs._Content.Widget
+								]
 							]
 						]
 					]
@@ -172,6 +176,20 @@ void SVerseGraphSurface::EndConnectionPreview()
 	ConnectionDrag.Reset();
 	bPreviewFrozen = false;
 	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SVerseGraphSurface::SetContent(TSharedRef<SWidget> InContent)
+{
+	if (ContentHost.IsValid())
+	{
+		ContentHost->SetContent(InContent);
+		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	}
+}
+
+void SVerseGraphSurface::SetInitialAnchor(TSharedPtr<SWidget> InAnchor)
+{
+	InitialAnchor = MoveTemp(InAnchor);
 }
 
 void SVerseGraphSurface::SetConnections(TArray<FVerseGraphConnection> InConnections)

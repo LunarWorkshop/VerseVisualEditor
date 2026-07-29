@@ -24,6 +24,19 @@ FVerseCanvasViewState SVerseFunctionCanvas::GetViewState() const
 	return Surface.IsValid() ? Surface->GetViewState() : FVerseCanvasViewState{};
 }
 
+void SVerseFunctionCanvas::RefreshContent(
+	TSharedRef<SWidget> InContent,
+	TArray<FVerseGraphConnection> InConnections,
+	TSharedPtr<SWidget> InInitialAnchor)
+{
+	if (Surface.IsValid())
+	{
+		Surface->SetContent(InContent);
+		Surface->SetInitialAnchor(MoveTemp(InInitialAnchor));
+		Surface->SetConnections(MoveTemp(InConnections));
+	}
+}
+
 FReply SVerseFunctionCanvas::BeginConnectionDrag(const FVerseSocketDragStart& DragStart)
 {
 	return Surface.IsValid() ? Surface->BeginConnectionDrag(DragStart) : FReply::Unhandled();
