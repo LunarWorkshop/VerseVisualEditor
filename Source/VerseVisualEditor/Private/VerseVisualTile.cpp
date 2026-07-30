@@ -74,6 +74,7 @@ namespace
 		Result.Range = MakeTextRange(Revision, Expression.Range);
 		Result.OperatorRange = MakeTextRange(Revision, Expression.OperatorRange);
 		Result.Kind = Expression.Kind;
+		Result.LiteralKind = Expression.LiteralKind;
 		Result.TypeRange = MakeTextRange(Revision, Expression.Type.SourceRange);
 		Result.IntrinsicTypeName = Expression.Type.IntrinsicName;
 		Result.TypeProvenance = Expression.Type.Provenance;
@@ -218,7 +219,9 @@ namespace
 		FVerseVisualTile Tile;
 		Tile.Kind = EVerseVisualTileKind::Expression;
 		Tile.ExpressionKind = Descriptor.Kind;
+		Tile.LiteralKind = Descriptor.LiteralKind;
 		Tile.Range = Descriptor.Range;
+		Tile.OperatorRange = Descriptor.OperatorRange;
 		Tile.NameRange = Descriptor.Kind == EVerseExpressionKind::Identifier
 			? Descriptor.Range
 			: FVerseTextRange();
@@ -257,10 +260,13 @@ namespace
 				bImplicitReturnValue));
 			for (FVerseVisualTile& Child : Tile.Children)
 			{
-				Child.ValueOutputs.Add(MakeSocket(
-					Child.TypeRange,
-					Child.IntrinsicTypeName,
-					true));
+				if (Child.LiteralKind == EVerseLiteralKind::None)
+				{
+					Child.ValueOutputs.Add(MakeSocket(
+						Child.TypeRange,
+						Child.IntrinsicTypeName,
+						true));
+				}
 			}
 		}
 		else if (Descriptor.Kind == EVerseExpressionKind::Identifier && bStatementLevel)
@@ -277,6 +283,22 @@ namespace
 				Tile.TypeRange,
 				Tile.IntrinsicTypeName,
 				true));
+		}
+
+		// Inline literal editing is a property of every input socket, independent
+		// of which expression kind created that input. Future calls and operators
+		// get the same behavior by exposing operands and corresponding inputs.
+		const int32 InputCount = FMath::Min(Tile.ValueInputs.Num(), Descriptor.Operands.Num());
+		for (int32 InputIndex = 0; InputIndex < InputCount; ++InputIndex)
+		{
+			const FVerseVisualExpressionDescriptor& Operand = Descriptor.Operands[InputIndex];
+			if (Operand.LiteralKind != EVerseLiteralKind::None)
+			{
+				FVerseVisualSocket& Input = Tile.ValueInputs[InputIndex];
+				Input.bConnected = false;
+				Input.InlineLiteralRange = Operand.Range;
+				Input.InlineLiteralKind = Operand.LiteralKind;
+			}
 		}
 		return Tile;
 	}

@@ -3,6 +3,7 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "GraphEditorSettings.h"
 #include "Rendering/DrawElements.h"
+#include "Settings/EditorStyleSettings.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "VerseDefinitionIcon.h"
@@ -10,6 +11,9 @@
 #include "VerseParseSnapshotBuilder.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SOverlay.h"
@@ -19,6 +23,13 @@
 
 namespace
 {
+	float GetVerseGraphMajorGridWidth()
+	{
+		const float GridSize = static_cast<float>(GetDefault<UEditorStyleSettings>()->GridSnapSize);
+		const float RulePeriod = FMath::Max(1.0f, FAppStyle::GetFloat(TEXT("Graph.Panel.GridRulePeriod")));
+		return GridSize * RulePeriod;
+	}
+
 	FLinearColor GetVerseTilePinColor(const FString& VerseType)
 	{
 		const UGraphEditorSettings* Settings = GetDefault<UGraphEditorSettings>();
@@ -116,8 +127,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	OnSelected = InArgs._OnSelected;
 	OnOpened = InArgs._OnOpened;
 	OnSocketDragStarted = InArgs._OnSocketDragStarted;
+	OnInlineLiteralCommitted = InArgs._OnInlineLiteralCommitted;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
 	bShowBody = InArgs._ShowBody;
+	bCollapsible = bShowBody && !(
+		Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.OperatorRange.IsSet());
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	if (Tile.bHasExecutionInput)
@@ -131,6 +146,9 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			.Connected(Tile.bExecutionInputConnected)
 		];
 	}
+	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.OperatorRange.IsSet();
+	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
 
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
@@ -148,6 +166,22 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				.BorderBackgroundColor(InArgs._TileColor)
 				.Padding(0.0f)
 				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Visibility(bOperatorTile && !OperatorLines.IsEmpty()
+							? EVisibility::Visible
+							: EVisibility::Collapsed)
+						.Text(OperatorLines)
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+						.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
+						.Margin(FMargin(5.0f, 2.0f, 0.0f, 0.0f))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -161,7 +195,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.Padding(InArgs._ArrowPadding)
 					[
 						SNew(SButton)
-						.Visibility(bShowBody ? EVisibility::Visible : EVisibility::Collapsed)
+						.Visibility(bCollapsible ? EVisibility::Visible : EVisibility::Collapsed)
 						.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 						.ContentPadding(0.0f)
 						.OnClicked(this, &SVerseTile::ToggleExpanded)
@@ -185,6 +219,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.VAlign(VAlign_Center)
 					[
 						BuildSocketColumn(Tile.ValueOutputs, true)
+					]
 					]
 				]
 			]
@@ -249,6 +284,34 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	const FText Type = GetTypeText();
 	const FText Lines = GetLineText();
 	TSharedRef<SVerticalBox> Header = SNew(SVerticalBox);
+	if (Tile.Kind == EVerseVisualTileKind::Expression && Tile.OperatorRange.IsSet())
+	{
+		Header->AddSlot()
+		.AutoHeight()
+		[
+			SNew(SBox)
+			.MinDesiredWidth(72.0f)
+			[
+				SNew(STextBlock)
+				.Text(Decode(Tile.OperatorRange))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+				.Justification(ETextJustify::Center)
+				.Margin(FMargin(0.0f, 2.0f))
+			]
+		];
+		if (!DiagnosticText.IsEmpty())
+		{
+			Header->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(DiagnosticText)
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+				.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
+				.AutoWrapText(true)
+			];
+		}
+		return Header;
+	}
 	Header->AddSlot()
 	.AutoHeight()
 	[
@@ -375,8 +438,97 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
 			];
 		};
+		auto AddInlineLiteral = [&]()
+		{
+			if (bOutput || !Socket.InlineLiteralRange.IsSet())
+			{
+				return;
+			}
+			const FString SourceText = Decode(Socket.InlineLiteralRange).ToString();
+			TSharedRef<SWidget> Editor = SNullWidget::NullWidget;
+			float EditorMinWidth = 30.0f;
+			switch (Socket.InlineLiteralKind)
+			{
+			case EVerseLiteralKind::Integer:
+			{
+				int64 Value = 0;
+				LexTryParseString(Value, *SourceText);
+				Editor = SNew(SSpinBox<int64>)
+					.MinDesiredWidth(0.0f)
+					.Value(Value)
+					.OnValueCommitted_Lambda(
+						[this, Range = Socket.InlineLiteralRange](int64 NewValue, ETextCommit::Type)
+						{
+							OnInlineLiteralCommitted.ExecuteIfBound(
+								Range,
+								FText::FromString(LexToString(NewValue)));
+						});
+				break;
+			}
+			case EVerseLiteralKind::Float:
+			{
+				double Value = 0.0;
+				LexTryParseString(Value, *SourceText);
+				EditorMinWidth = 32.0f;
+				Editor = SNew(SSpinBox<double>)
+					.MinDesiredWidth(0.0f)
+					.Value(Value)
+					.OnValueCommitted_Lambda(
+						[this, Range = Socket.InlineLiteralRange](double NewValue, ETextCommit::Type)
+						{
+							OnInlineLiteralCommitted.ExecuteIfBound(
+								Range,
+								FText::FromString(FString::SanitizeFloat(NewValue)));
+						});
+				break;
+			}
+			case EVerseLiteralKind::String:
+			case EVerseLiteralKind::Character:
+				EditorMinWidth = 38.0f;
+				Editor = SNew(SEditableTextBox)
+					.MinDesiredWidth(0.0f)
+					.Text(FText::FromString(SourceText))
+					.OnTextCommitted_Lambda(
+						[this, Range = Socket.InlineLiteralRange](const FText& NewText, ETextCommit::Type)
+						{
+							OnInlineLiteralCommitted.ExecuteIfBound(Range, NewText);
+						});
+				break;
+			case EVerseLiteralKind::Logic:
+				EditorMinWidth = 18.0f;
+				Editor = SNew(SCheckBox)
+					.IsChecked(SourceText.Equals(TEXT("true"), ESearchCase::IgnoreCase)
+						? ECheckBoxState::Checked
+						: ECheckBoxState::Unchecked)
+					.OnCheckStateChanged_Lambda(
+						[this, Range = Socket.InlineLiteralRange](ECheckBoxState NewState)
+						{
+							OnInlineLiteralCommitted.ExecuteIfBound(
+								Range,
+								NewState == ECheckBoxState::Checked
+									? FText::FromString(TEXT("true"))
+									: FText::FromString(TEXT("false")));
+						});
+				break;
+			case EVerseLiteralKind::None:
+			default:
+				return;
+			}
+			Row->AddSlot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(5.0f, 1.0f, 5.0f, 1.0f)
+			[
+				SNew(SBox)
+				.MinDesiredWidth(EditorMinWidth)
+				.MaxDesiredWidth(GetVerseGraphMajorGridWidth())
+				[
+					Editor
+				]
+			];
+		};
 		if (bOutput) { AddName(); AddPin(); }
-		else { AddPin(); AddName(); }
+		else { AddPin(); AddInlineLiteral(); AddName(); }
 		Column->AddSlot().AutoHeight().HAlign(bOutput ? HAlign_Right : HAlign_Left).Padding(0.0f, 1.0f)[Row];
 	}
 	return Column;
@@ -522,6 +674,10 @@ FReply SVerseTile::HandleHeaderMouseButtonDown(
 
 FReply SVerseTile::ToggleExpanded()
 {
+	if (!bCollapsible)
+	{
+		return FReply::Handled();
+	}
 	bExpanded = !bExpanded;
 	Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
 	return FReply::Handled();
@@ -534,12 +690,16 @@ const FSlateBrush* SVerseTile::GetExpansionImage() const
 
 const FSlateBrush* SVerseTile::GetHeaderBrush() const
 {
-	return bShowBody && bExpanded ? ExpandedHeaderBrush.Get() : CollapsedHeaderBrush.Get();
+	return bShowBody && (!bCollapsible || bExpanded)
+		? ExpandedHeaderBrush.Get()
+		: CollapsedHeaderBrush.Get();
 }
 
 EVisibility SVerseTile::GetBodyVisibility() const
 {
-	return bShowBody && bExpanded ? EVisibility::Visible : EVisibility::Collapsed;
+	return bShowBody && (!bCollapsible || bExpanded)
+		? EVisibility::Visible
+		: EVisibility::Collapsed;
 }
 
 FSlateColor SVerseTile::GetOutlineColor() const

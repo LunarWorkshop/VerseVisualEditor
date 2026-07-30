@@ -569,30 +569,82 @@ namespace VerseParseSnapshotBuilder
 		Result.Range = SourceIndex.ToRange(Node.Whence());
 		if (const Verse::Vst::Identifier* Identifier = Node.AsNullable<Verse::Vst::Identifier>())
 		{
-			Result.Kind = EVerseExpressionKind::Identifier;
 			const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
 			if (IdentifierLength > 0 && Result.Range.NumBytes >= IdentifierLength)
 			{
 				Result.Range = {Result.Range.EndByte() - IdentifierLength, IdentifierLength};
 			}
+			const FUtf8StringView IdentifierText = SourceIndex.GetSource().Mid(
+				Result.Range.BeginByte,
+				Result.Range.NumBytes);
+			if (IdentifierText == UTF8TEXTVIEW("true") || IdentifierText == UTF8TEXTVIEW("false"))
+			{
+				Result.LiteralKind = EVerseLiteralKind::Logic;
+				Result.Type = {{}, TEXT("logic"), EVerseTypeResolutionProvenance::LocallyInferred};
+				return Result;
+			}
+			Result.Kind = EVerseExpressionKind::Identifier;
 			Result.Type = FindIdentifierType(
-				SourceIndex.GetSource().Mid(Result.Range.BeginByte, Result.Range.NumBytes),
+				IdentifierText,
 				SourceIndex,
 				Parameters);
 			return Result;
 		}
 		if (Node.IsA<Verse::Vst::IntLiteral>())
 		{
+			Result.LiteralKind = EVerseLiteralKind::Integer;
 			Result.Type = {{}, TEXT("int"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
 		}
 		if (Node.IsA<Verse::Vst::FloatLiteral>())
 		{
+			Result.LiteralKind = EVerseLiteralKind::Float;
 			Result.Type = {{}, TEXT("float"), EVerseTypeResolutionProvenance::LocallyInferred};
+			return Result;
+		}
+		if (Node.IsA<Verse::Vst::StringLiteral>())
+		{
+			Result.LiteralKind = EVerseLiteralKind::String;
+			Result.Type = {{}, TEXT("string"), EVerseTypeResolutionProvenance::LocallyInferred};
+			return Result;
+		}
+		if (Node.IsA<Verse::Vst::CharLiteral>())
+		{
+			Result.LiteralKind = EVerseLiteralKind::Character;
+			Result.Type = {{}, TEXT("char"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
 		}
 
 		const Verse::Vst::BinaryOpAddSub* Add = Node.AsNullable<Verse::Vst::BinaryOpAddSub>();
+		if (Add != nullptr && Add->GetChildCount() == 2)
+		{
+			const Verse::Vst::Node& OperatorNode = *Add->GetChildren()[0];
+			const Verse::Vst::Node& OperandNode = *Add->GetChildren()[1];
+			const Verse::Vst::Operator* Operator = OperatorNode.AsNullable<Verse::Vst::Operator>();
+			if (OperatorNode.GetTag<Verse::Vst::BinaryOp::op>() == Verse::Vst::BinaryOp::op::Operator
+				&& OperandNode.GetTag<Verse::Vst::BinaryOp::op>() == Verse::Vst::BinaryOp::op::Operand
+				&& Operator != nullptr
+				&& Operator->GetSourceText().ByteLen() == 1
+				&& (Operator->GetSourceText()[0] == u'-' || Operator->GetSourceText()[0] == u'+'))
+			{
+				FVerseExpressionDescriptor SignedOperand =
+					BuildExpressionDescriptor(OperandNode, SourceIndex, Parameters);
+				if (SignedOperand.LiteralKind == EVerseLiteralKind::Integer
+					|| SignedOperand.LiteralKind == EVerseLiteralKind::Float)
+				{
+					const FVerseByteRange OperatorLocus = SourceIndex.ToRange(OperatorNode.Whence());
+					const int32 SignByte = FindLastByte(
+						SourceIndex.GetSource(),
+						static_cast<UTF8CHAR>(Operator->GetSourceText()[0]),
+						OperatorLocus.BeginByte,
+						OperatorLocus.EndByte());
+					SignedOperand.Range = SignByte != INDEX_NONE
+						? FVerseByteRange::FromBounds(SignByte, SignedOperand.Range.EndByte())
+						: Result.Range;
+					return SignedOperand;
+				}
+			}
+		}
 		if (Add == nullptr || Add->GetChildCount() != 3)
 		{
 			return Result;
@@ -612,7 +664,15 @@ namespace VerseParseSnapshotBuilder
 		}
 
 		Result.Kind = EVerseExpressionKind::Addition;
-		Result.OperatorRange = SourceIndex.ToRange(OperatorNode.Whence());
+		const FVerseByteRange OperatorLocus = SourceIndex.ToRange(OperatorNode.Whence());
+		const int32 PlusByte = FindLastByte(
+			SourceIndex.GetSource(),
+			static_cast<UTF8CHAR>('+'),
+			OperatorLocus.BeginByte,
+			OperatorLocus.EndByte());
+		Result.OperatorRange = PlusByte != INDEX_NONE
+			? FVerseByteRange::FromBounds(PlusByte, PlusByte + 1)
+			: OperatorLocus;
 		Result.Operands.Add(BuildExpressionDescriptor(Left, SourceIndex, Parameters));
 		Result.Operands.Add(BuildExpressionDescriptor(Right, SourceIndex, Parameters));
 		return Result;

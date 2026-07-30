@@ -409,7 +409,8 @@ namespace
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
-		FOnVerseSocketDragStarted OnSocketDragStarted)
+		FOnVerseSocketDragStarted OnSocketDragStarted,
+		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted)
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
@@ -443,6 +444,7 @@ namespace
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
 			.ShowBody(bExpression && !bIdentifier)
 			.OnSocketDragStarted(OnSocketDragStarted)
+			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
 			.BodyContent()
 			[
 				Body
@@ -492,11 +494,13 @@ namespace
 	FBuiltFunctionGraphRow BuildFunctionGraphRow(
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
-		FOnVerseSocketDragStarted OnSocketDragStarted)
+		FOnVerseSocketDragStarted OnSocketDragStarted,
+		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted)
 	{
 		constexpr float OperandColumnWidth = 190.0f;
 		constexpr float OperandWireSpace = 72.0f;
-		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(Tile, Document, OnSocketDragStarted);
+		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
+			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
 		if (Tile.ExpressionKind != EVerseExpressionKind::Addition || Tile.Children.Num() != 2)
 		{
 			return {
@@ -513,8 +517,22 @@ namespace
 				{}};
 		}
 
-		const TSharedRef<SVerseTile> LeftOperand = BuildFunctionGraphTile(Tile.Children[0], Document, OnSocketDragStarted);
-		const TSharedRef<SVerseTile> RightOperand = BuildFunctionGraphTile(Tile.Children[1], Document, OnSocketDragStarted);
+		TSharedPtr<SVerseTile> LeftOperand;
+		TSharedPtr<SVerseTile> RightOperand;
+		TSharedRef<SWidget> LeftPresentation = SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
+		TSharedRef<SWidget> RightPresentation = SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
+		if (Tile.Children[0].LiteralKind == EVerseLiteralKind::None)
+		{
+			LeftOperand = BuildFunctionGraphTile(
+				Tile.Children[0], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
+			LeftPresentation = LeftOperand.ToSharedRef();
+		}
+		if (Tile.Children[1].LiteralKind == EVerseLiteralKind::None)
+		{
+			RightOperand = BuildFunctionGraphTile(
+				Tile.Children[1], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
+			RightPresentation = RightOperand.ToSharedRef();
+		}
 		TSharedRef<SWidget> Subtree =
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
@@ -526,11 +544,11 @@ namespace
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
 					[
-						LeftOperand
+						LeftPresentation
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f).HAlign(HAlign_Right)
 					[
-						RightOperand
+						RightPresentation
 					]
 				]
 			]
@@ -546,10 +564,16 @@ namespace
 		const FString TypeName = GetVisualTypeName(Tile.TypeRange, Tile.IntrinsicTypeName, *Document);
 		const FLinearColor WireColor = GetBlueprintPinColor(TypeName);
 		TArray<FVerseGraphConnection> Connections;
-		Connections.Add({LeftOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(0),
-			EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
-		Connections.Add({RightOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(1),
-			EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+		if (LeftOperand.IsValid())
+		{
+			Connections.Add({LeftOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(0),
+				EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+		}
+		if (RightOperand.IsValid())
+		{
+			Connections.Add({RightOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(1),
+				EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+		}
 		return {Subtree, RootTile, MoveTemp(Connections)};
 	}
 
@@ -2247,6 +2271,51 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	RefreshActiveDocument();
 }
 
+void SVerseVisualEditor::HandleInlineLiteralCommitted(
+	FVerseTextRange LiteralRange,
+	FText NewSourceText,
+	TSharedPtr<FOpenVerseDocument> OpenDocument)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	const FString Replacement = NewSourceText.ToString();
+	const FTCHARToUTF8 ReplacementUtf8(*Replacement);
+	FText Error;
+	if (!OpenDocument->Session->Replace(
+		LiteralRange,
+		FUtf8StringView(
+			reinterpret_cast<const UTF8CHAR*>(ReplacementUtf8.Get()),
+			ReplacementUtf8.Length()),
+		Error))
+	{
+		OpenDocument->LoadError = Error;
+		if (OpenDocument == ActiveDocument)
+		{
+			bLocalCompilePanelOpen = true;
+			RefreshActiveDocument();
+		}
+		return;
+	}
+
+	OpenDocument->LoadError = FText::GetEmpty();
+	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
+	ReconcileFunctionTabs(*OpenDocument);
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
 void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item)
 {
 	if (Item.IsValid() && !Item->bIsDirectory)
@@ -2877,7 +2946,11 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(
 				Tile,
 				SourceDocument,
-				FOnVerseSocketDragStarted::CreateSP(this, &SVerseVisualEditor::BeginSocketDrag));
+				FOnVerseSocketDragStarted::CreateSP(this, &SVerseVisualEditor::BeginSocketDrag),
+				FOnVerseInlineLiteralCommitted::CreateSP(
+					this,
+					&SVerseVisualEditor::HandleInlineLiteralCommitted,
+					ActiveDocument));
 			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)

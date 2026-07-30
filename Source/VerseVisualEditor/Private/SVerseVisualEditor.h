@@ -166,6 +166,10 @@ private:
 	void OpenExpressionSearch(FVerseDesktopPoint DesktopPosition);
 	void FinishExpressionSearch();
 	void ApplyExpressionAction(TSharedPtr<struct FVerseExpressionAction> Action);
+	void HandleInlineLiteralCommitted(
+		FVerseTextRange LiteralRange,
+		FText NewSourceText,
+		TSharedPtr<FOpenVerseDocument> OpenDocument);
 	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
 		bool bOnlyCleanDocuments = false) const;
 	void QueueSemanticAnalysis(bool bDebounce);

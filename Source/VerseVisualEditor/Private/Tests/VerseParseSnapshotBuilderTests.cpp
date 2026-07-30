@@ -474,15 +474,25 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	if (const FVerseExpressionDescriptor* AddInt = FindOnlyExpression(UTF8TEXTVIEW("AddIntLiteral")))
 	{
 		TestEqual(TEXT("Identifier plus literal is Add"), AddInt->Kind, EVerseExpressionKind::Addition);
-		TestTrue(TEXT("Integer literal remains unsupported"),
+		TestTrue(TEXT("Integer literal retains literal identity while its expression kind remains generic"),
 			AddInt->Operands.Num() == 2
 			&& AddInt->Operands[1].Kind == EVerseExpressionKind::Unsupported
+			&& AddInt->Operands[1].LiteralKind == EVerseLiteralKind::Integer
 			&& AddInt->Operands[1].Type.IntrinsicName == TEXT("int"));
+	}
+	if (const FVerseExpressionDescriptor* AddNegativeInt = FindOnlyExpression(UTF8TEXTVIEW("AddNegativeIntLiteral")))
+	{
+		TestTrue(TEXT("Signed integer operand is retained as one source-exact literal"),
+			AddNegativeInt->Operands.Num() == 2
+			&& AddNegativeInt->Operands[1].LiteralKind == EVerseLiteralKind::Integer
+			&& AddNegativeInt->Operands[1].Type.IntrinsicName == TEXT("int")
+			&& Snapshot.GetSourceView(AddNegativeInt->Operands[1].Range) == UTF8TEXTVIEW("-12"));
 	}
 	if (const FVerseExpressionDescriptor* AddFloat = FindOnlyExpression(UTF8TEXTVIEW("AddFloat")))
 	{
 		TestTrue(TEXT("Float Add resolves from source-backed evidence"),
-			Snapshot.GetSourceView(AddFloat->Type.SourceRange) == UTF8TEXTVIEW("float"));
+			Snapshot.GetSourceView(AddFloat->Type.SourceRange) == UTF8TEXTVIEW("float")
+			&& AddFloat->Operands.Num() == 2);
 	}
 	if (const FVerseExpressionDescriptor* AddArray = FindOnlyExpression(UTF8TEXTVIEW("AddArray")))
 	{

@@ -20,6 +20,8 @@ struct FVerseVisualSocket
 	FVerseTextRange TypeRange;
 	bool bConnected = false;
 	FName IntrinsicTypeName;
+	FVerseTextRange InlineLiteralRange;
+	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
 };
 
 struct FVerseVisualExpressionDescriptor
@@ -27,6 +29,7 @@ struct FVerseVisualExpressionDescriptor
 	FVerseTextRange Range;
 	FVerseTextRange OperatorRange;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
@@ -71,6 +74,8 @@ struct FVerseVisualTile
 	int32 LastSourceLine = INDEX_NONE;
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
+	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	FVerseTextRange OperatorRange;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;

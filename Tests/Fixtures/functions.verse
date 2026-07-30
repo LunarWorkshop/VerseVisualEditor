@@ -12,6 +12,9 @@ ChooseLast(First : int, Last : float)<computes> : float =
 AddIntLiteral(Input : int)<computes> : int =
     Input + 1
 
+AddNegativeIntLiteral(Input : int)<computes> : int =
+    Input + -12
+
 AddFloat(Left : float, Right : float)<computes> : float =
     Left + Right
 

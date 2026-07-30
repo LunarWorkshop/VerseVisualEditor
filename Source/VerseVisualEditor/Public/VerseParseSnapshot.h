@@ -40,6 +40,16 @@ enum class EVerseExpressionKind : uint8
 	Addition,
 };
 
+enum class EVerseLiteralKind : uint8
+{
+	None,
+	Integer,
+	Float,
+	String,
+	Character,
+	Logic,
+};
+
 enum class EVerseTypeResolutionProvenance : uint8
 {
 	Unresolved,
@@ -67,6 +77,7 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 	FVerseByteRange Range;
 	FVerseByteRange OperatorRange;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	FVerseExpressionType Type;
 	TArray<FVerseExpressionDescriptor> Operands;
 };

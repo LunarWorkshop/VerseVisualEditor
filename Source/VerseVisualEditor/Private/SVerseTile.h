@@ -19,6 +19,7 @@ struct FVerseSocketDragStart
 };
 
 DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnVerseSocketDragStarted, const FVerseSocketDragStart&);
+DECLARE_DELEGATE_TwoParams(FOnVerseInlineLiteralCommitted, FVerseTextRange, FText);
 
 /** Canvas-independent rendering of every Verse visual tile kind. */
 class SVerseTile final : public SCompoundWidget
@@ -46,6 +47,7 @@ public:
 		SLATE_EVENT(FOnClicked, OnSelected)
 		SLATE_EVENT(FOnClicked, OnOpened)
 		SLATE_EVENT(FOnVerseSocketDragStarted, OnSocketDragStarted)
+		SLATE_EVENT(FOnVerseInlineLiteralCommitted, OnInlineLiteralCommitted)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
 
@@ -98,6 +100,7 @@ private:
 	FOnClicked OnSelected;
 	FOnClicked OnOpened;
 	FOnVerseSocketDragStarted OnSocketDragStarted;
+	FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
@@ -109,4 +112,5 @@ private:
 	TUniquePtr<FSlateRoundedBoxBrush> BodyBrush;
 	bool bExpanded = true;
 	bool bShowBody = true;
+	bool bCollapsible = true;
 };

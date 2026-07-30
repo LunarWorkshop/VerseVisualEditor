@@ -434,6 +434,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Function body expression uses the shared visual tile model"),
 			GraphTiles[1].Kind == EVerseVisualTileKind::Expression
 			&& GraphTiles[1].ExpressionKind == EVerseExpressionKind::Addition
+			&& GraphTiles[1].OperatorRange.IsSet()
+			&& Snapshot.GetDocument()->DecodeOriginalRange(GraphTiles[1].OperatorRange) == TEXT("+")
 			&& GraphTiles[1].bHasExecutionInput
 			&& GraphTiles[1].bHasExecutionOutput
 			&& GraphTiles[1].bExecutionInputConnected
@@ -477,12 +479,34 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		if (TestEqual(TEXT("Integer-literal Add graph has three root tiles"), IntGraph.Num(), 3)
 			&& TestEqual(TEXT("Integer-literal Add has two child operands"), IntGraph[1].Children.Num(), 2))
 		{
-			TestTrue(TEXT("Literal stays a generic expression with an int value output"),
+			TestTrue(TEXT("Literal is represented by an unconnected inline editor on its parent input"),
 				IntGraph[1].Children[1].ExpressionKind == EVerseExpressionKind::Unsupported
+				&& IntGraph[1].Children[1].LiteralKind == EVerseLiteralKind::Integer
 				&& IntGraph[1].Children[1].IntrinsicTypeName == TEXT("int")
-				&& IntGraph[1].Children[1].ValueOutputs.Num() == 1
-				&& IntGraph[1].Children[1].ValueOutputs[0].IntrinsicTypeName == TEXT("int")
-				&& IntGraph[1].Children[1].ValueOutputs[0].bConnected);
+				&& IntGraph[1].Children[1].ValueOutputs.IsEmpty()
+				&& IntGraph[1].ValueInputs.Num() == 2
+				&& !IntGraph[1].ValueInputs[1].bConnected
+				&& IntGraph[1].ValueInputs[1].InlineLiteralKind == EVerseLiteralKind::Integer
+				&& IntGraph[1].ValueInputs[1].InlineLiteralRange == IntGraph[1].Children[1].Range);
+		}
+	}
+
+	const FVerseVisualTile* NegativeIntLiteralFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("AddNegativeIntLiteral"));
+	if (TestNotNull(TEXT("Negative integer-literal Add visual tile exists"), NegativeIntLiteralFunction))
+	{
+		const TArray<FVerseVisualTile> NegativeIntGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*NegativeIntLiteralFunction, Snapshot);
+		if (TestEqual(TEXT("Negative integer-literal Add graph has three root tiles"), NegativeIntGraph.Num(), 3))
+		{
+			TestTrue(TEXT("Negative literal is represented by the parent's inline editor"),
+				NegativeIntGraph[1].ValueInputs.Num() == 2
+				&& !NegativeIntGraph[1].ValueInputs[1].bConnected
+				&& NegativeIntGraph[1].ValueInputs[1].InlineLiteralKind == EVerseLiteralKind::Integer
+				&& Snapshot.GetDocument()->DecodeOriginalRange(
+					NegativeIntGraph[1].ValueInputs[1].InlineLiteralRange) == TEXT("-12"));
 		}
 	}
 
