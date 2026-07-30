@@ -89,6 +89,21 @@ CorpusFunctionIf(Input : int)<computes> : float =
         return 42.0
     69.0
 
+CorpusFunctionFor(Input : int)<computes><reads><allocates><writes> : int =
+    var Result: int = 0
+    Values:[]float = array{1.0, 2.0, 3.0}
+    for (Value : Values):
+        set Result += 1
+    Result
+
+CorpusFunctionLoop(Input : int)<computes><reads><writes><allocates> : float =
+    var Variable:int = 0
+    loop:
+        set Variable += 1
+        if (Variable >= Input):
+            break
+    69.0
+
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"
 

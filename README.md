@@ -11,13 +11,17 @@ Blueprint and block-based programming tools like Scratch.
 You're used to coding in Blueprints and you want to keep doing it. This editor
 is designed to preserve that workflow as much as possible.
 
-But you also want to load any verse file, not just one made in a graph editor,
-make a change in a graph editor without affecting other lines of code, and
-merge your changes with those of other people.
+You can load any verse file, not just one made in a graph editor. You can edit
+code in the graph without affecting other lines.
 
-You can have your cake and eat it too with Verse Visual Editor. It offers a
-Blueprint-like coding interface while using only Verse files as the source of
-truth.
+When other people update the Verse code it automatically updates the graph.
+You can merge your changes with those of other people.
+
+You can see how Verse's failable blocks work and author <decides> code directly
+from the graph. You can write if and for expressions.
+
+You can write <suspends> functions natively and author sync/race/rush/etc
+code directly from the graph.
 
 ## Getting Started
 

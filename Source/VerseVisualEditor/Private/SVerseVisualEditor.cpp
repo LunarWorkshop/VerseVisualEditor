@@ -433,7 +433,7 @@ namespace
 		}
 		else if (bControl)
 		{
-			TileColor = FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("6a3083")));
+			TileColor = FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
 		}
 		else if (bIdentifier)
 		{
@@ -455,6 +455,28 @@ namespace
 					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
 				];
 		}
+		TArray<FText> ExecutionOutputLabels;
+		TArray<bool> ExecutionOutputConnectedStates;
+		if (bControl && Tile.ControlKind == EVerseControlKind::If)
+		{
+			ExecutionOutputLabels = {
+				LOCTEXT("IfCompletedOutput", "Completed"),
+				LOCTEXT("IfTrueOutput", "True"),
+				LOCTEXT("IfFalseOutput", "False")};
+			const bool bHasTrueBody = Tile.ControlRegions.ContainsByPredicate(
+				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body
+						&& Region.OperandCount > 0;
+				});
+			const bool bHasFalseBody = Tile.ControlRegions.ContainsByPredicate(
+				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Else
+						&& Region.OperandCount > 0;
+				});
+			ExecutionOutputConnectedStates = {true, bHasTrueBody, bHasFalseBody};
+		}
 		return SNew(SVerseTile)
 			.Tile(Tile)
 			.Document(Document)
@@ -464,6 +486,8 @@ namespace
 				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
 			.ShowBody(bExpression && !bIdentifier && !bControl)
+			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
+			.ExecutionOutputConnectedStates(MoveTemp(ExecutionOutputConnectedStates))
 			.OnSocketDragStarted(OnSocketDragStarted)
 			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
 			.BodyContent()
@@ -525,6 +549,163 @@ namespace
 		constexpr float OperandWireSpace = 72.0f;
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::If)
+		{
+			TArray<FVerseGraphConnection> Connections;
+			TSharedRef<SWidget> ConditionPresentation =
+				SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
+			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
+				Tile.ControlRegions.FindByPredicate(
+					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Condition
+							&& Region.OperandCount > 0;
+					});
+			if (ConditionRegion != nullptr
+				&& Tile.Children.IsValidIndex(ConditionRegion->FirstOperandIndex)
+				&& Tile.Children[ConditionRegion->FirstOperandIndex].LiteralKind
+					== EVerseLiteralKind::None)
+			{
+				FBuiltFunctionGraphRow ConditionRow = BuildFunctionGraphRow(
+					Tile.Children[ConditionRegion->FirstOperandIndex],
+					Document,
+					OnSocketDragStarted,
+					OnInlineLiteralCommitted);
+				ConditionPresentation = ConditionRow.Widget;
+				Connections.Append(ConditionRow.Connections);
+				const TSharedPtr<SWidget> ConditionOutput =
+					ConditionRow.RootTile->GetFirstValueOutputAnchor();
+				const TSharedPtr<SWidget> ConditionInput =
+					RootTile->GetFirstValueInputAnchor();
+				if (ConditionOutput.IsValid() && ConditionInput.IsValid())
+				{
+					Connections.Add({
+						ConditionOutput,
+						ConditionInput,
+						EVerseGraphConnectionAxis::Horizontal,
+						GetBlueprintPinColor(TEXT("logic")),
+						2.0f,
+						0});
+				}
+			}
+
+			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind, int32 OutputIndex)
+			{
+				TSharedRef<SVerticalBox> Branch = SNew(SVerticalBox);
+				const FVerseVisualExpressionDescriptor::FControlRegion* Region =
+					Tile.ControlRegions.FindByPredicate(
+						[RegionKind](const FVerseVisualExpressionDescriptor::FControlRegion& Candidate)
+						{
+							return Candidate.Kind == RegionKind;
+						});
+				TSharedPtr<SVerseTile> FirstTile;
+				TSharedPtr<SVerseTile> PreviousTile;
+				if (Region != nullptr)
+				{
+					for (int32 Offset = 0; Offset < Region->OperandCount; ++Offset)
+					{
+						const int32 ChildIndex = Region->FirstOperandIndex + Offset;
+						if (!Tile.Children.IsValidIndex(ChildIndex))
+						{
+							continue;
+						}
+						FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
+							Tile.Children[ChildIndex],
+							Document,
+							OnSocketDragStarted,
+							OnInlineLiteralCommitted);
+						Branch->AddSlot()
+						.AutoHeight()
+						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
+						[
+							ChildRow.Widget
+						];
+						Connections.Append(ChildRow.Connections);
+						if (!FirstTile.IsValid())
+						{
+							FirstTile = ChildRow.RootTile;
+						}
+						if (PreviousTile.IsValid())
+						{
+							Connections.Add({
+								PreviousTile->GetExecutionOutputAnchor(),
+								ChildRow.RootTile->GetExecutionInputAnchor(),
+								EVerseGraphConnectionAxis::Vertical,
+								FLinearColor::White,
+								2.5f,
+								0});
+						}
+						PreviousTile = ChildRow.RootTile;
+					}
+				}
+				if (FirstTile.IsValid())
+				{
+					Connections.Add({
+						RootTile->GetExecutionOutputAnchor(OutputIndex),
+						FirstTile->GetExecutionInputAnchor(),
+						EVerseGraphConnectionAxis::Vertical,
+						FLinearColor::White,
+						2.5f,
+						0,
+						FVector2D(0.5f, 8.0f / 48.0f),
+						FVector2D(0.5f, 24.0f / 32.0f)});
+				}
+				return Branch;
+			};
+
+			const TSharedRef<SVerticalBox> TrueBranch =
+				BuildExecutionBranch(EVerseControlRegionKind::Body, 1);
+			const TSharedRef<SVerticalBox> FalseBranch =
+				BuildExecutionBranch(EVerseControlRegionKind::Else, 2);
+			ConditionPresentation->SlatePrepass();
+			RootTile->SlatePrepass();
+			const float ConditionPresentationWidth =
+				static_cast<float>(ConditionPresentation->GetDesiredSize().X);
+			const float ExecutionSpineOffset = OperandColumnWidth + OperandWireSpace;
+			ConditionPresentation->SetRenderTransform(FSlateRenderTransform(
+				FVector2D(-ConditionPresentationWidth, 0.0f)));
+			const float BranchLeftPadding =
+				ExecutionSpineOffset + RootTile->GetDesiredSize().X + 24.0f;
+			return {
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Center)
+					.Padding(OperandColumnWidth, 0.0f, 0.0f, 0.0f)
+					[
+						ConditionPresentation
+					]
+					+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Top)
+					.Padding(ExecutionSpineOffset, 0.0f, 0.0f, 0.0f)
+					[
+						RootTile
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(BranchLeftPadding)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						TrueBranch
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(48.0f)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						FalseBranch
+					]
+				],
+				RootTile,
+				MoveTemp(Connections)};
+		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
 			TArray<FVerseGraphConnection> Connections;

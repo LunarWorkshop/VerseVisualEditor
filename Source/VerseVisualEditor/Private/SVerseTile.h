@@ -43,6 +43,8 @@ public:
 		SLATE_ARGUMENT(bool, ShowBody)
 		SLATE_ARGUMENT(bool, Compact)
 		SLATE_ARGUMENT(FText, DiagnosticText)
+		SLATE_ARGUMENT(TArray<FText>, ExecutionOutputLabels)
+		SLATE_ARGUMENT(TArray<bool>, ExecutionOutputConnectedStates)
 		SLATE_ATTRIBUTE(bool, IsSelected)
 		SLATE_EVENT(FOnClicked, OnSelected)
 		SLATE_EVENT(FOnClicked, OnOpened)
@@ -63,7 +65,12 @@ public:
 	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return GetValueInputAnchor(0); }
 	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
 	TSharedPtr<SWidget> GetExecutionInputAnchor() const { return ExecutionInputAnchor; }
-	TSharedPtr<SWidget> GetExecutionOutputAnchor() const { return ExecutionOutputAnchor; }
+	TSharedPtr<SWidget> GetExecutionOutputAnchor(int32 Index = 0) const
+	{
+		return ExecutionOutputAnchors.IsValidIndex(Index)
+			? ExecutionOutputAnchors[Index]
+			: nullptr;
+	}
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
 
@@ -107,7 +114,7 @@ private:
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
 	TSharedPtr<SWidget> ExecutionInputAnchor;
-	TSharedPtr<SWidget> ExecutionOutputAnchor;
+	TArray<TSharedPtr<SWidget>> ExecutionOutputAnchors;
 	TSharedPtr<SWidget> OperatorLineWidget;
 	TSharedPtr<SWidget> HeaderSocketRow;
 	TSharedPtr<SWidget> ValueInputColumn;

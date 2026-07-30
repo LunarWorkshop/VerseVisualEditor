@@ -546,6 +546,25 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			{
 				return Child.bHasExecutionInput && Child.bHasExecutionOutput;
 			}));
+		if (IfGraph.Num() == 3 && IfGraph[1].ControlRegions.Num() == 3)
+		{
+			const FVerseVisualTile& IfTile = IfGraph[1];
+			const int32 ConditionIndex = IfTile.ControlRegions[0].FirstOperandIndex;
+			TestTrue(TEXT("If exposes one connected Boolean condition input"),
+				IfTile.ValueInputs.Num() == 1
+				&& IfTile.ValueInputs[0].IntrinsicTypeName == TEXT("logic")
+				&& IfTile.ValueInputs[0].bConnected);
+			if (TestTrue(TEXT("If condition expression remains available"),
+				IfTile.Children.IsValidIndex(ConditionIndex)))
+			{
+				const FVerseVisualTile& Condition = IfTile.Children[ConditionIndex];
+				TestTrue(TEXT("If condition is a value expression rather than an execution body"),
+					!Condition.bHasExecutionInput
+					&& !Condition.bHasExecutionOutput
+					&& Condition.ValueOutputs.Num() == 1
+					&& Condition.ValueOutputs[0].bConnected);
+			}
+		}
 	}
 
 	const FVerseVisualTile* LocalFunction = VerseVisualTileTests::FindDefinition(

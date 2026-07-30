@@ -133,6 +133,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	bCollapsible = bShowBody && !(
 		Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.OperatorRange.IsSet());
+	const bool bHasLabeledExecutionOutputs = !InArgs._ExecutionOutputLabels.IsEmpty();
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	if (Tile.bHasExecutionInput)
@@ -235,6 +236,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					InArgs._BodyContent.Widget
 				]
 			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SBox)
+				.HeightOverride(bHasLabeledExecutionOutputs ? 32.0f : 0.0f)
+			]
 		]
 	;
 
@@ -257,14 +264,54 @@ void SVerseTile::Construct(const FArguments& InArgs)
 
 	if (Tile.bHasExecutionOutput)
 	{
+		const TArray<FText>& OutputLabels = InArgs._ExecutionOutputLabels;
+		const int32 OutputCount = FMath::Max(1, OutputLabels.Num());
+		TSharedRef<SHorizontalBox> OutputRow = SNew(SHorizontalBox);
+		for (int32 OutputIndex = 0; OutputIndex < OutputCount; ++OutputIndex)
+		{
+			const float OutputColumnWidth = OutputIndex == 0 ? 72.0f : 64.0f;
+			const bool bConnected = InArgs._ExecutionOutputConnectedStates.IsValidIndex(OutputIndex)
+				? InArgs._ExecutionOutputConnectedStates[OutputIndex]
+				: Tile.bExecutionOutputConnected;
+			TSharedPtr<SVerseTileExecutionPin> OutputAnchor;
+			OutputRow->AddSlot()
+			.AutoWidth()
+			[
+				SNew(SBox)
+				.WidthOverride(OutputColumnWidth)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					[
+						SNew(STextBlock)
+						.Visibility(OutputLabels.IsValidIndex(OutputIndex)
+							? EVisibility::Visible
+							: EVisibility::Collapsed)
+						.Text(OutputLabels.IsValidIndex(OutputIndex)
+							? OutputLabels[OutputIndex]
+							: FText::GetEmpty())
+						.TextStyle(FAppStyle::Get(), "Graph.Node.PinName")
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.HAlign(OutputIndex == 0 ? HAlign_Left : HAlign_Center)
+					.Padding(OutputIndex == 0
+						? FMargin(12.0f, 4.0f, 0.0f, 0.0f)
+						: FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+					[
+						SAssignNew(OutputAnchor, SVerseTileExecutionPin)
+						.Input(false)
+						.Connected(bConnected)
+					]
+				]
+			];
+			ExecutionOutputAnchors.Add(OutputAnchor);
+		}
 		TileAndOutput->AddSlot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Bottom)
-		.Padding(12.0f, 0.0f, 0.0f, 0.0f)
 		[
-			SAssignNew(ExecutionOutputAnchor, SVerseTileExecutionPin)
-			.Input(false)
-			.Connected(Tile.bExecutionOutputConnected)
+			OutputRow
 		];
 	}
 
@@ -712,7 +759,9 @@ const FSlateBrush* SVerseTile::GetIcon() const
 	if (Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control)
 	{
-		return FAppStyle::GetBrush("GraphEditor.StateMachine_16x");
+		return FAppStyle::GetBrush(Tile.ControlKind == EVerseControlKind::If
+			? "GraphEditor.Branch_16x"
+			: "GraphEditor.StateMachine_16x");
 	}
 	return nullptr;
 }

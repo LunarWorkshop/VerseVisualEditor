@@ -279,15 +279,63 @@ namespace
 		{
 			Tile.ControlRegions.Add(Region);
 		}
-		for (const FVerseVisualExpressionDescriptor& Operand : Descriptor.Operands)
+		for (int32 OperandIndex = 0; OperandIndex < Descriptor.Operands.Num(); ++OperandIndex)
 		{
+			const FVerseVisualExpressionDescriptor& Operand = Descriptor.Operands[OperandIndex];
+			const bool bConditionOperand = Descriptor.Kind == EVerseExpressionKind::Control
+				&& Descriptor.ControlRegions.ContainsByPredicate(
+					[OperandIndex](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Condition
+							&& OperandIndex >= Region.FirstOperandIndex
+							&& OperandIndex < Region.FirstOperandIndex + Region.OperandCount;
+					});
 			Tile.Children.Add(MakeExpressionTile(
 				Operand,
 				Snapshot,
-				Descriptor.Kind == EVerseExpressionKind::Control,
+				Descriptor.Kind == EVerseExpressionKind::Control && !bConditionOperand,
 				false));
 		}
-		if (IsVerseOperatorExpression(Descriptor.Kind) || Descriptor.Kind == EVerseExpressionKind::Call)
+		if (Descriptor.Kind == EVerseExpressionKind::Control
+			&& Descriptor.ControlKind == EVerseControlKind::If)
+		{
+			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
+				Descriptor.ControlRegions.FindByPredicate(
+					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Condition
+							&& Region.OperandCount > 0;
+					});
+			if (ConditionRegion != nullptr
+				&& Tile.Children.IsValidIndex(ConditionRegion->FirstOperandIndex))
+			{
+				const FVerseVisualExpressionDescriptor& Condition =
+					Descriptor.Operands[ConditionRegion->FirstOperandIndex];
+				FVerseVisualSocket& Input = Tile.ValueInputs.AddDefaulted_GetRef();
+				Input.IntrinsicTypeName = TEXT("logic");
+				Input.bConnected = Condition.LiteralKind == EVerseLiteralKind::None;
+				if (Condition.LiteralKind != EVerseLiteralKind::None)
+				{
+					Input.InlineLiteralRange = Condition.Range;
+					Input.InlineLiteralKind = Condition.LiteralKind;
+				}
+				else
+				{
+					FVerseVisualTile& ConditionTile =
+						Tile.Children[ConditionRegion->FirstOperandIndex];
+					if (ConditionTile.ValueOutputs.IsEmpty())
+					{
+						ConditionTile.ValueOutputs.Add(MakeSocket({}, TEXT("logic"), true));
+					}
+					else
+					{
+						ConditionTile.ValueOutputs[0].bConnected = true;
+						ConditionTile.ValueOutputs[0].IntrinsicTypeName = TEXT("logic");
+					}
+				}
+			}
+		}
+		else if (IsVerseOperatorExpression(Descriptor.Kind) || Descriptor.Kind == EVerseExpressionKind::Call)
 		{
 			for (const FVerseVisualExpressionDescriptor& Operand : Descriptor.Operands)
 			{
