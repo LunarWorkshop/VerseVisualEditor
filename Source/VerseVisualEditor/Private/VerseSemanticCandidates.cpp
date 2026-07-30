@@ -1,8 +1,6 @@
 #include "VerseSemanticCandidates.h"
 
 #include "VerseDocument.h"
-#include "VerseBlueprintCallablePresentation.h"
-#include "VerseIntrinsicPresentation.h"
 #include "VerseSemanticWorkspace.h"
 #include "VerseVisualTile.h"
 #include "uLang/Semantics/DataDefinition.h"
@@ -314,97 +312,6 @@ namespace
 		}
 	}
 
-	FText GetDefinitionCategory(const uLang::CDefinition& Definition)
-	{
-		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
-		const uLang::CClass* CategoryAttribute =
-			Program.FindDefinitionByVersePath<uLang::CClass>(
-				uLang::CUTF8StringView("/Verse.org/Simulation/category_attribute"));
-		if (CategoryAttribute == nullptr)
-		{
-			return FText::GetEmpty();
-		}
-		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
-		const uLang::TOptional<uLang::CUTF8String> Value =
-			Prototype->GetAttributes().GetAttributeTextValue(CategoryAttribute, Program);
-		return Value.IsSet()
-			? FText::FromString(ToFString(Value.GetValue()))
-			: FText::GetEmpty();
-	}
-
-	FText GetDefinitionDisplayName(const uLang::CDefinition& Definition)
-	{
-		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
-		const uLang::CClass* DisplayNameAttribute =
-			Program.FindDefinitionByVersePath<uLang::CClass>(
-				uLang::CUTF8StringView("/Verse.org/Simulation/display_name_attribute"));
-		if (DisplayNameAttribute == nullptr)
-		{
-			return FText::GetEmpty();
-		}
-		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
-		const uLang::TOptional<uLang::CUTF8String> Value =
-			Prototype->GetAttributes().GetAttributeTextValue(DisplayNameAttribute, Program);
-		return Value.IsSet()
-			? FText::FromString(ToFString(Value.GetValue()))
-			: FText::GetEmpty();
-	}
-
-	FText GetModuleCategory(const uLang::CDefinition& Definition)
-	{
-		const uLang::CModule* Module = Definition._EnclosingScope.GetModule();
-		if (Module == nullptr)
-		{
-			return FText::GetEmpty();
-		}
-		return FText::FromString(ToFString(Module->GetScopePath('|')));
-	}
-
-	FString DefaultSourceForType(const uLang::CTypeBase& Type)
-	{
-		using namespace uLang;
-		switch (Type.GetNormalType().GetKind())
-		{
-		case ETypeKind::Int:
-			return TEXT("0");
-		case ETypeKind::Float:
-			return TEXT("0.0");
-		case ETypeKind::Logic:
-		case ETypeKind::True:
-		case ETypeKind::False:
-			return TEXT("false");
-		case ETypeKind::Array:
-			return TEXT("array{}");
-		default:
-			break;
-		}
-		const FString TypeCode = ToFString(Type.AsCode());
-		return TypeCode == TEXT("string") ? TEXT("\"\"") : FString();
-	}
-
-	void AddSignatureParameterMetadata(
-		const uLang::CFunction& Function,
-		int32 ParameterCount,
-		FVerseSemanticCandidate& Candidate)
-	{
-		const uLang::SSignature::ParamDefinitions& Definitions =
-			Function._Signature.GetParams();
-		for (int32 Index = 0; Index < ParameterCount; ++Index)
-		{
-			const uLang::CDataDefinition* Definition = Definitions.IsValidIndex(Index)
-				? Definitions[Index]
-				: nullptr;
-			const uLang::CDefinition* NameDefinition = Definition != nullptr
-				&& Definition->_ImplicitParam != nullptr
-				? static_cast<const uLang::CDefinition*>(Definition->_ImplicitParam)
-				: static_cast<const uLang::CDefinition*>(Definition);
-			Candidate.InputNames.Add(NameDefinition != nullptr
-				? ToFString(NameDefinition->AsNameStringView())
-				: FString());
-			Candidate.NamedInputs.Add(Definition != nullptr && Definition->_bNamed);
-		}
-	}
-
 	void CollectUsingScope(
 		const uLang::CLogicalScope& Scope,
 		TSet<const uLang::CLogicalScope*>& VisitedScopes,
@@ -477,18 +384,6 @@ namespace
 		return Definitions;
 	}
 
-	FString AffixSpelling(
-		const uLang::CFunction& Function,
-		uLang::CUTF8StringView Prefix)
-	{
-		const uLang::CUTF8StringView Name = Function.GetName().AsStringView();
-		if (!Name.StartsWith(Prefix) || Name.ByteLen() <= Prefix.ByteLen() + 1)
-		{
-			return FString();
-		}
-		return ToFString(Name.SubView(Prefix.ByteLen(), Name.ByteLen() - Prefix.ByteLen() - 1));
-	}
-
 	bool IsVisibleAtCurrentPackageVersion(
 		const uLang::CDefinition& Definition,
 		const uLang::CScope& ActiveScope,
@@ -539,79 +434,19 @@ namespace
 			Function.GetName());
 		const bool bPostfix = Function.GetProgram()._IntrinsicSymbols.IsPostfixOpName(
 			Function.GetName());
-		const bool bOperator = bInfix || bPrefix || bPostfix;
 		// operator'()' is compiler plumbing for non-function invocation (array/map
 		// access), not an expression the user can create from the action menu.
 		if (Function.GetName() == Function.GetProgram()._IntrinsicSymbols._OpNameCall)
 		{
 			return;
 		}
-		const bool bUsesFailureCallSyntax =
-			Function._Signature.GetEffects()[uLang::EEffect::decides];
-		FString Spelling;
-		if (bOperator)
-		{
-			Spelling = AffixSpelling(
-				Function,
-				bInfix
-					? uLang::CUTF8StringView("operator'")
-					: (bPrefix
-						? uLang::CUTF8StringView("prefix'")
-						: uLang::CUTF8StringView("postfix'")));
-		}
-		else if (bExtensionMethod)
-		{
-			Spelling = ToFString(
-				Function.GetProgram()._IntrinsicSymbols.StripExtensionFieldOpName(
-					Function.GetName()));
-			Spelling.RemoveFromStart(TEXT("."));
-		}
-		else
-		{
-			Spelling = ToFString(Function.AsNameStringView());
-		}
-		if (Spelling.IsEmpty())
-		{
-			return;
-		}
-		const FText DefinitionCategory = GetDefinitionCategory(Function);
-		const FText DefinitionDisplayName = GetDefinitionDisplayName(Function);
-		FVerseIntrinsicPresentationKey PresentationKey;
-		PresentationKey.Form = bInfix
-			? EVerseIntrinsicCallableForm::InfixOperator
+		const EVerseSemanticCandidateKind Kind = bInfix
+			? EVerseSemanticCandidateKind::InfixOperator
 			: (bPrefix
-				? EVerseIntrinsicCallableForm::PrefixOperator
+				? EVerseSemanticCandidateKind::PrefixOperator
 				: (bPostfix
-					? EVerseIntrinsicCallableForm::PostfixOperator
-					: EVerseIntrinsicCallableForm::Ordinary));
-		PresentationKey.Spelling = Spelling;
-		for (const uLang::CTypeBase* Param : Params)
-		{
-			PresentationKey.ParameterTypes.Add(ToFString(Param->AsCode()));
-		}
-		PresentationKey.ResultType = ToFString(FunctionType->GetReturnType().AsCode());
-		const FVerseIntrinsicPresentationDescriptor* IntrinsicPresentation =
-			FindVerseIntrinsicPresentation(PresentationKey);
-		const TOptional<FVerseBlueprintCallablePresentation> BlueprintPresentation =
-			bOperator && (IntrinsicPresentation == nullptr
-				|| IntrinsicPresentation->BlueprintLibrary ==
-					EVerseIntrinsicBlueprintLibrary::None)
-				? TOptional<FVerseBlueprintCallablePresentation>()
-				: ResolveVerseBlueprintCallablePresentation(
-					Spelling, *FunctionType, IntrinsicPresentation);
-		const FVerseResolvedExpressionPresentation ResolvedPresentation =
-			ResolveVerseExpressionPresentation(
-				DefinitionDisplayName,
-				DefinitionCategory,
-				BlueprintPresentation.IsSet()
-					? BlueprintPresentation->ExplicitDisplayName
-					: FText::GetEmpty(),
-				BlueprintPresentation.IsSet()
-					? BlueprintPresentation->Category
-					: FText::GetEmpty(),
-				IntrinsicPresentation,
-				Spelling);
-		const FText ModuleCategory = GetModuleCategory(Function);
+					? EVerseSemanticCandidateKind::PostfixOperator
+					: EVerseSemanticCandidateKind::Function));
 
 		if (!bDraggingFromOutput)
 		{
@@ -621,33 +456,10 @@ namespace
 				return;
 			}
 			FVerseSemanticCandidate Candidate;
-			Candidate.Kind = bInfix
-				? EVerseSemanticCandidateKind::InfixOperator
-				: (bPrefix
-					? EVerseSemanticCandidateKind::PrefixOperator
-					: (bPostfix
-						? EVerseSemanticCandidateKind::PostfixOperator
-						: EVerseSemanticCandidateKind::Function));
-			Candidate.DisplayName = Spelling;
-			Candidate.Category = ResolvedPresentation.Category;
-			Candidate.ModuleCategory = ModuleCategory;
-			Candidate.PresentationDisplayName = ResolvedPresentation.DisplayName;
-			Candidate.SourceSpelling = Spelling;
-			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
+			Candidate.Kind = Kind;
 			Candidate.Function = &Function;
-			Candidate.ResultType = &FunctionType->GetReturnType();
-			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
+			Candidate.InstantiatedFunctionType = FunctionType;
 			Candidate.Snapshot = Snapshot;
-			AddSignatureParameterMetadata(Function, Params.Num(), Candidate);
-			for (const uLang::CTypeBase* Param : Params)
-			{
-				FString Default = DefaultSourceForType(*Param);
-				if (Default.IsEmpty())
-				{
-					return;
-				}
-				Candidate.UnboundInputDefaults.Add(MoveTemp(Default));
-			}
 			Out.Add(MoveTemp(Candidate));
 			return;
 		}
@@ -660,45 +472,12 @@ namespace
 				continue;
 			}
 			FVerseSemanticCandidate Candidate;
-			Candidate.Kind = bInfix
-				? EVerseSemanticCandidateKind::InfixOperator
-				: (bPrefix
-					? EVerseSemanticCandidateKind::PrefixOperator
-					: (bPostfix
-						? EVerseSemanticCandidateKind::PostfixOperator
-						: EVerseSemanticCandidateKind::Function));
-			Candidate.DisplayName = Spelling;
-			Candidate.Category = ResolvedPresentation.Category;
-			Candidate.ModuleCategory = ModuleCategory;
-			Candidate.PresentationDisplayName = ResolvedPresentation.DisplayName;
-			Candidate.SourceSpelling = Spelling;
-			Candidate.bUsesFailureCallSyntax = bUsesFailureCallSyntax;
+			Candidate.Kind = Kind;
 			Candidate.BoundInputIndex = BoundIndex;
 			Candidate.Function = &Function;
-			Candidate.ResultType = &FunctionType->GetReturnType();
-			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
+			Candidate.InstantiatedFunctionType = FunctionType;
 			Candidate.Snapshot = Snapshot;
-			AddSignatureParameterMetadata(Function, Params.Num(), Candidate);
-			bool bHasAllDefaults = true;
-			for (int32 ParamIndex = 0; ParamIndex < Params.Num(); ++ParamIndex)
-			{
-				if (ParamIndex == BoundIndex)
-				{
-					Candidate.UnboundInputDefaults.Add(FString());
-					continue;
-				}
-				FString Default = DefaultSourceForType(*Params[ParamIndex]);
-				if (Default.IsEmpty())
-				{
-					bHasAllDefaults = false;
-					break;
-				}
-				Candidate.UnboundInputDefaults.Add(MoveTemp(Default));
-			}
-			if (bHasAllDefaults)
-			{
-				Out.Add(MoveTemp(Candidate));
-			}
+			Out.Add(MoveTemp(Candidate));
 
 			// Homogeneous overloads do not need indistinguishable left/right rows.
 			if (Params.Num() == 2
@@ -708,6 +487,28 @@ namespace
 				break;
 			}
 		}
+	}
+
+	FString SemanticCandidateKey(const FVerseSemanticCandidate& Candidate)
+	{
+		const uLang::CDefinition* Definition = Candidate.Function != nullptr
+			? static_cast<const uLang::CDefinition*>(Candidate.Function)
+			: static_cast<const uLang::CDefinition*>(Candidate.DataDefinition);
+		const FString Name = Definition != nullptr
+			? ToFString(Definition->GetName().AsStringView())
+			: FString();
+		const FString ScopePath = Definition != nullptr
+			? ToFString(Definition->_EnclosingScope.GetScopePath('/'))
+			: FString();
+		const FString Signature = Candidate.InstantiatedFunctionType != nullptr
+			? ToFString(Candidate.InstantiatedFunctionType->AsCode())
+			: (Candidate.DataDefinition != nullptr
+				? ToFString(Candidate.DataDefinition->GetType()->AsCode())
+				: FString());
+		return FString::Printf(
+			TEXT("%d|%s|%s|%d|%s"),
+			static_cast<int32>(Candidate.Kind), *ScopePath, *Name,
+			Candidate.BoundInputIndex, *Signature);
 	}
 }
 
@@ -764,13 +565,7 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 				{
 					FVerseSemanticCandidate& Candidate = Result.AddDefaulted_GetRef();
 					Candidate.Kind = EVerseSemanticCandidateKind::Identifier;
-					Candidate.DisplayName = ToFString(Data->AsNameStringView());
-					Candidate.Category = GetDefinitionCategory(*Data);
-					Candidate.ModuleCategory = GetModuleCategory(*Data);
-					Candidate.SourceSpelling = Candidate.DisplayName;
 					Candidate.DataDefinition = Data;
-					Candidate.ResultType = Data->GetType();
-					Candidate.ResultTypeName = ToFString(Data->GetType()->AsCode());
 					Candidate.Snapshot = Snapshot;
 				}
 			}
@@ -785,13 +580,7 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 			for (int32 Index = Result.Num() - 1; Index >= Before; --Index)
 			{
 				const FVerseSemanticCandidate& Candidate = Result[Index];
-				const FString Signature = Candidate.Function
-					&& Candidate.Function->_Signature.GetFunctionType()
-						? ToFString(Candidate.Function->_Signature.GetFunctionType()->AsCode())
-						: FString();
-				const FString Key = FString::Printf(
-					TEXT("%d|%s|%d|%s"), static_cast<int32>(Candidate.Kind),
-					*Candidate.SourceSpelling, Candidate.BoundInputIndex, *Signature);
+				const FString Key = SemanticCandidateKey(Candidate);
 				if (Seen.Contains(Key))
 				{
 					Result.RemoveAt(Index);

@@ -242,7 +242,6 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		{
 			return Action->SourceForm
 					== EVerseExpressionSourceForm::IdentifierReference
-				&& Action->Validation == EVerseExpressionActionValidation::Structural
 				&& Action->DisplayName.ToString() == TEXT("Input")
 				&& Action->Category.ToString() == TEXT("Variables");
 		}));

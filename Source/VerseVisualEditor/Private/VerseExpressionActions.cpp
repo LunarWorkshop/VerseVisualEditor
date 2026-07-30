@@ -1,17 +1,258 @@
 #include "VerseExpressionActions.h"
 
 #include "Internationalization/Text.h"
+#include "VerseBlueprintCallablePresentation.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
 #include "VerseFunctionNavigation.h"
+#include "VerseIntrinsicPresentation.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseSemanticCandidates.h"
 #include "VerseSemanticWorkspace.h"
+#include "uLang/Semantics/DataDefinition.h"
+#include "uLang/Semantics/SemanticFunction.h"
+#include "uLang/Semantics/SemanticProgram.h"
+#include "uLang/Semantics/SemanticTypes.h"
+#include "uLang/Semantics/TypeVariable.h"
 
 #define LOCTEXT_NAMESPACE "VerseExpressionActions"
 
 namespace
 {
+	FString SemanticTextToString(uLang::CUTF8StringView Text)
+	{
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Text.Data()), Text.ByteLen());
+		return FString(Converted.Length(), Converted.Get());
+	}
+
+	FText GetDefinitionCategory(const uLang::CDefinition& Definition)
+	{
+		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
+		const uLang::CClass* CategoryAttribute =
+			Program.FindDefinitionByVersePath<uLang::CClass>(
+				uLang::CUTF8StringView("/Verse.org/Simulation/category_attribute"));
+		if (CategoryAttribute == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
+		const uLang::TOptional<uLang::CUTF8String> Value =
+			Prototype->GetAttributes().GetAttributeTextValue(CategoryAttribute, Program);
+		return Value.IsSet()
+			? FText::FromString(SemanticTextToString(Value.GetValue()))
+			: FText::GetEmpty();
+	}
+
+	FText GetDefinitionDisplayName(const uLang::CDefinition& Definition)
+	{
+		const uLang::CSemanticProgram& Program = Definition._EnclosingScope.GetProgram();
+		const uLang::CClass* DisplayNameAttribute =
+			Program.FindDefinitionByVersePath<uLang::CClass>(
+				uLang::CUTF8StringView("/Verse.org/Simulation/display_name_attribute"));
+		if (DisplayNameAttribute == nullptr)
+		{
+			return FText::GetEmpty();
+		}
+		const uLang::CDefinition* Prototype = Definition.GetPrototypeDefinition();
+		const uLang::TOptional<uLang::CUTF8String> Value =
+			Prototype->GetAttributes().GetAttributeTextValue(DisplayNameAttribute, Program);
+		return Value.IsSet()
+			? FText::FromString(SemanticTextToString(Value.GetValue()))
+			: FText::GetEmpty();
+	}
+
+	FText GetModuleCategory(const uLang::CDefinition& Definition)
+	{
+		const uLang::CModule* Module = Definition._EnclosingScope.GetModule();
+		return Module != nullptr
+			? FText::FromString(SemanticTextToString(Module->GetScopePath('|')))
+			: FText::GetEmpty();
+	}
+
+	FString DefaultSourceForType(const uLang::CTypeBase& Type)
+	{
+		using namespace uLang;
+		switch (Type.GetNormalType().GetKind())
+		{
+		case ETypeKind::Int:
+			return TEXT("0");
+		case ETypeKind::Float:
+			return TEXT("0.0");
+		case ETypeKind::Logic:
+		case ETypeKind::True:
+		case ETypeKind::False:
+			return TEXT("false");
+		case ETypeKind::Array:
+			return TEXT("array{}");
+		default:
+			break;
+		}
+		return SemanticTextToString(Type.AsCode()) == TEXT("string") ? TEXT("\"\"") : FString();
+	}
+
+	FString AffixSpelling(
+		const uLang::CFunction& Function,
+		uLang::CUTF8StringView Prefix)
+	{
+		const uLang::CUTF8StringView Name = Function.GetName().AsStringView();
+		if (!Name.StartsWith(Prefix) || Name.ByteLen() <= Prefix.ByteLen() + 1)
+		{
+			return FString();
+		}
+		return SemanticTextToString(
+			Name.SubView(Prefix.ByteLen(), Name.ByteLen() - Prefix.ByteLen() - 1));
+	}
+
+	TSharedPtr<FVerseExpressionAction> BuildSemanticExpressionAction(
+		const FVerseSemanticCandidate& Candidate)
+	{
+		TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
+		Action->BoundInputIndex = Candidate.BoundInputIndex;
+
+		if (Candidate.Kind == EVerseSemanticCandidateKind::Identifier)
+		{
+			if (Candidate.DataDefinition == nullptr || Candidate.DataDefinition->GetType() == nullptr)
+			{
+				return nullptr;
+			}
+			Action->SourceForm = EVerseExpressionSourceForm::IdentifierReference;
+			Action->SourceSpelling = SemanticTextToString(
+				Candidate.DataDefinition->AsNameStringView());
+			Action->DisplayName = FText::FromString(Action->SourceSpelling);
+			Action->Category = LOCTEXT("VariablesCategory", "Variables");
+			Action->ModuleCategory = GetModuleCategory(*Candidate.DataDefinition);
+			Action->ResultTypeName = SemanticTextToString(
+				Candidate.DataDefinition->GetType()->AsCode());
+			return Action;
+		}
+
+		const uLang::CFunction* Function = Candidate.Function;
+		const uLang::CFunctionType* FunctionType = Candidate.InstantiatedFunctionType;
+		if (Function == nullptr || FunctionType == nullptr)
+		{
+			return nullptr;
+		}
+
+		EVerseIntrinsicCallableForm PresentationForm = EVerseIntrinsicCallableForm::Ordinary;
+		switch (Candidate.Kind)
+		{
+		case EVerseSemanticCandidateKind::Function:
+			Action->SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
+			break;
+		case EVerseSemanticCandidateKind::InfixOperator:
+			Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
+			PresentationForm = EVerseIntrinsicCallableForm::InfixOperator;
+			break;
+		case EVerseSemanticCandidateKind::PrefixOperator:
+			Action->SourceForm = EVerseExpressionSourceForm::PrefixOperator;
+			PresentationForm = EVerseIntrinsicCallableForm::PrefixOperator;
+			break;
+		case EVerseSemanticCandidateKind::PostfixOperator:
+			Action->SourceForm = EVerseExpressionSourceForm::PostfixOperator;
+			PresentationForm = EVerseIntrinsicCallableForm::PostfixOperator;
+			break;
+		default:
+			return nullptr;
+		}
+
+		const bool bOperator = Candidate.Kind != EVerseSemanticCandidateKind::Function;
+		const bool bExtensionMethod = Function->_ExtensionFieldAccessorKind ==
+			uLang::EExtensionFieldAccessorKind::ExtensionMethod;
+		if (bOperator)
+		{
+			Action->SourceSpelling = AffixSpelling(
+				*Function,
+				Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
+					? uLang::CUTF8StringView("operator'")
+					: (Candidate.Kind == EVerseSemanticCandidateKind::PrefixOperator
+						? uLang::CUTF8StringView("prefix'")
+						: uLang::CUTF8StringView("postfix'")));
+		}
+		else if (bExtensionMethod)
+		{
+			Action->SourceSpelling = SemanticTextToString(
+				Function->GetProgram()._IntrinsicSymbols.StripExtensionFieldOpName(
+					Function->GetName()));
+			Action->SourceSpelling.RemoveFromStart(TEXT("."));
+		}
+		else
+		{
+			Action->SourceSpelling = SemanticTextToString(Function->AsNameStringView());
+		}
+		if (Action->SourceSpelling.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
+		FVerseIntrinsicPresentationKey PresentationKey;
+		PresentationKey.Form = PresentationForm;
+		PresentationKey.Spelling = Action->SourceSpelling;
+		for (const uLang::CTypeBase* Param : Params)
+		{
+			PresentationKey.ParameterTypes.Add(SemanticTextToString(Param->AsCode()));
+		}
+		PresentationKey.ResultType = SemanticTextToString(
+			FunctionType->GetReturnType().AsCode());
+		const FVerseIntrinsicPresentationDescriptor* IntrinsicPresentation =
+			FindVerseIntrinsicPresentation(PresentationKey);
+		const TOptional<FVerseBlueprintCallablePresentation> BlueprintPresentation =
+			bOperator && (IntrinsicPresentation == nullptr
+				|| IntrinsicPresentation->BlueprintLibrary ==
+					EVerseIntrinsicBlueprintLibrary::None)
+				? TOptional<FVerseBlueprintCallablePresentation>()
+				: ResolveVerseBlueprintCallablePresentation(
+					Action->SourceSpelling, *FunctionType, IntrinsicPresentation);
+		const FVerseResolvedExpressionPresentation Presentation =
+			ResolveVerseExpressionPresentation(
+				GetDefinitionDisplayName(*Function),
+				GetDefinitionCategory(*Function),
+				BlueprintPresentation.IsSet()
+					? BlueprintPresentation->ExplicitDisplayName
+					: FText::GetEmpty(),
+				BlueprintPresentation.IsSet()
+					? BlueprintPresentation->Category
+					: FText::GetEmpty(),
+				IntrinsicPresentation,
+				Action->SourceSpelling);
+		Action->DisplayName = Presentation.DisplayName;
+		Action->Category = Presentation.Category;
+		Action->ModuleCategory = GetModuleCategory(*Function);
+		Action->ResultTypeName = PresentationKey.ResultType;
+		Action->bUsesFailureCallSyntax =
+			Function->_Signature.GetEffects()[uLang::EEffect::decides];
+
+		const uLang::SSignature::ParamDefinitions& Definitions =
+			Function->_Signature.GetParams();
+		for (int32 Index = 0; Index < Params.Num(); ++Index)
+		{
+			const uLang::CDataDefinition* Definition = Definitions.IsValidIndex(Index)
+				? Definitions[Index]
+				: nullptr;
+			const uLang::CDefinition* NameDefinition = Definition != nullptr
+				&& Definition->_ImplicitParam != nullptr
+				? static_cast<const uLang::CDefinition*>(Definition->_ImplicitParam)
+				: static_cast<const uLang::CDefinition*>(Definition);
+			Action->InputNames.Add(NameDefinition != nullptr
+				? SemanticTextToString(NameDefinition->AsNameStringView())
+				: FString());
+			Action->NamedInputs.Add(Definition != nullptr && Definition->_bNamed);
+			if (Index == Candidate.BoundInputIndex)
+			{
+				Action->InputDefaultSources.Add(FString());
+				continue;
+			}
+			FString Default = DefaultSourceForType(*Params[Index]);
+			if (Default.IsEmpty())
+			{
+				return nullptr;
+			}
+			Action->InputDefaultSources.Add(MoveTemp(Default));
+		}
+		return Action;
+	}
+
 	FString NormalizeActionType(FString Type)
 	{
 		Type.TrimStartAndEndInline();
@@ -147,58 +388,15 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 			Document);
 	for (const FVerseSemanticCandidate& Candidate : SemanticCandidates)
 	{
-		TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
-		Action->DisplayName = FText::FromString(Candidate.DisplayName);
-		Action->SourceSpelling = Candidate.SourceSpelling;
-		Action->bUsesFailureCallSyntax = Candidate.bUsesFailureCallSyntax;
-		Action->BoundInputIndex = Candidate.BoundInputIndex;
-		Action->InputDefaultSources = Candidate.UnboundInputDefaults;
-		Action->InputNames = Candidate.InputNames;
-		Action->NamedInputs = Candidate.NamedInputs;
-		Action->SemanticDataDefinition = Candidate.DataDefinition;
-		Action->SemanticFunction = Candidate.Function;
-		Action->SemanticSnapshot = Candidate.Snapshot;
-		Action->ResultTypeName = Candidate.ResultTypeName;
-		Action->ModuleCategory = Candidate.ModuleCategory.IsEmpty()
-			? LOCTEXT("CurrentModuleCategory", "Current Module")
-			: Candidate.ModuleCategory;
-		switch (Candidate.Kind)
+		TSharedPtr<FVerseExpressionAction> Action =
+			BuildSemanticExpressionAction(Candidate);
+		if (!Action.IsValid())
 		{
-		case EVerseSemanticCandidateKind::Identifier:
-			Action->SourceForm =
-				EVerseExpressionSourceForm::IdentifierReference;
-			Action->Validation =
-				EVerseExpressionActionValidation::ExactSemanticSnapshot;
-			Action->Category = LOCTEXT("VariablesCategory", "Variables");
-			break;
-		case EVerseSemanticCandidateKind::Function:
-			Action->SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
-			Action->Validation =
-				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = Candidate.PresentationDisplayName;
-			Action->Category = Candidate.Category;
-			break;
-		case EVerseSemanticCandidateKind::InfixOperator:
-			Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
-			Action->Validation =
-				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = Candidate.PresentationDisplayName;
-			Action->Category = Candidate.Category;
-			break;
-		case EVerseSemanticCandidateKind::PrefixOperator:
-			Action->SourceForm = EVerseExpressionSourceForm::PrefixOperator;
-			Action->Validation =
-				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = Candidate.PresentationDisplayName;
-			Action->Category = Candidate.Category;
-			break;
-		case EVerseSemanticCandidateKind::PostfixOperator:
-			Action->SourceForm = EVerseExpressionSourceForm::PostfixOperator;
-			Action->Validation =
-				EVerseExpressionActionValidation::StableSemanticSignature;
-			Action->DisplayName = Candidate.PresentationDisplayName;
-			Action->Category = Candidate.Category;
-			break;
+			continue;
+		}
+		if (Action->ModuleCategory.IsEmpty())
+		{
+			Action->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 		}
 		Result.Add(MoveTemp(Action));
 	}

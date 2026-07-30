@@ -55,13 +55,13 @@ CorpusFunctionSubtract1(Input : int)<computes> : int =
 CorpusFunctionMultiply1(Input : int)<computes> : int =
     Input * 1
 
-CorpusFunctionDivide1(Input : int)<computes> : int =
+CorpusFunctionDivide1(Input : int)<decides> : rational =
     Input / 1
 
-CorpusFunctionGreater1(Input : int)<computes> : bool =
+CorpusFunctionGreater1(Input : int)<decides> : void =
     Input > 1
 
-CorpusFunctionGreaterOrEqual1(Input : int)<computes> : bool =
+CorpusFunctionGreaterOrEqual1(Input : int)<decides> : void =
     Input >= 1
 
 CorpusFunctionConstant(Input : int)<computes> : int =
@@ -72,17 +72,17 @@ CorpusFunctionConstantAssigned(Input : int)<computes> : int =
     Constant: int = Input
     Input + Constant
 
-CorpusFunctionVariable(Input : int)<computes> : int =
+CorpusFunctionVariable(Input : int)<allocates><reads> : int =
     var Variable: int = 1
     Input + Variable
 
-CorpusFunctionVariableAssigned(Input : int)<computes> : int =
+CorpusFunctionVariableAssigned(Input : int)<allocates><reads><writes> : int =
     var Variable: int = Input
-    set Input = Input + 1
+    set Variable = Input + 1
     Input + Variable
 
-CorpusFunctionCall(Input : int)<computes> : bool =
-    Ciel(Input)
+CorpusFunctionCall(Input : int)<computes> : int =
+    Ceil(Input)
 
 CorpusFunctionIf(Input : int)<computes> : float =
     if (Input >= 1):

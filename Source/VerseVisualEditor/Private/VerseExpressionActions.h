@@ -9,12 +9,6 @@ class FVerseDocument;
 class FVerseDocumentSession;
 class FVerseSemanticSnapshot;
 
-namespace uLang
-{
-	class CDataDefinition;
-	class CFunction;
-}
-
 /** Editor-owned syntax shape; semantic operation identity remains compiler-owned. */
 enum class EVerseExpressionSourceForm : uint8
 {
@@ -25,23 +19,11 @@ enum class EVerseExpressionSourceForm : uint8
 	PostfixOperator,
 };
 
-enum class EVerseExpressionActionValidation : uint8
-{
-	/** Current-revision ranges plus prospective syntax/VST validation are sufficient. */
-	Structural,
-	/** Compiler-owned callable signature is stable; local syntax validation still applies. */
-	StableSemanticSignature,
-	/** The action originated from the exact snapshot; applying it still validates syntax only. */
-	ExactSemanticSnapshot,
-};
-
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
 	EVerseExpressionSourceForm SourceForm =
 		EVerseExpressionSourceForm::IdentifierReference;
-	EVerseExpressionActionValidation Validation =
-		EVerseExpressionActionValidation::Structural;
 	FText DisplayName;
 	FText Category;
 	FText ModuleCategory;
@@ -55,9 +37,6 @@ struct FVerseExpressionAction
 	TArray<FString> InputDefaultSources;
 	TArray<FString> InputNames;
 	TArray<bool> NamedInputs;
-	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
-	const uLang::CFunction* SemanticFunction = nullptr;
-	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 };
 
 /** Discovers expression actions from the current lexical scope and the expression registry. */

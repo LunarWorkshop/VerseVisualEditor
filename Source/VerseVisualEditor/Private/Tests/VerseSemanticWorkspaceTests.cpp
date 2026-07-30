@@ -12,6 +12,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+#include "uLang/Semantics/SemanticFunction.h"
+#include "uLang/Semantics/SemanticProgram.h"
 
 namespace VerseSemanticWorkspaceTests
 {
@@ -287,6 +289,12 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			ExpressionBeginByte,
 			true,
 			*ParsedDocument);
+	FVerseVisualSocket OutputSocket;
+	const TArray<TSharedPtr<FVerseExpressionAction>> Actions =
+		FVerseExpressionActionQuery::Build(
+			{}, OutputSocket, true, *ParsedDocument,
+			FVerseTextRange(Document.Revision, {ExpressionBeginByte, 9}),
+			Document.FilePath, CandidateSnapshots);
 	const FVerseParseSnapshot SyntaxSnapshot =
 		FVerseParseSnapshotBuilder::Build(ParsedDocument.ToSharedRef());
 	const TArray<FVerseVisualTile> SyntaxTiles =
@@ -345,33 +353,35 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
-				&& Candidate.SourceSpelling == TEXT("+")
-				&& Candidate.Function != nullptr;
+				&& Candidate.Function != nullptr
+				&& Candidate.InstantiatedFunctionType != nullptr
+				&& Candidate.BoundInputIndex != INDEX_NONE
+				&& Candidate.Snapshot.IsValid();
 		}));
 	const FVerseSemanticCandidate* AcceptIntCandidate = Candidates.FindByPredicate(
 		[](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Function
-				&& Candidate.SourceSpelling == TEXT("AcceptInt")
-				&& Candidate.Function != nullptr;
+				&& Candidate.Function != nullptr
+				&& Candidate.Function->AsNameStringView()
+					== uLang::CUTF8StringView("AcceptInt")
+				&& Candidate.InstantiatedFunctionType != nullptr;
 		});
 	TestNotNull(
 		TEXT("A function declared only in the private overlay is discovered dynamically"),
 		AcceptIntCandidate);
 	if (AcceptIntCandidate != nullptr)
 	{
-		TestTrue(TEXT("Function candidates retain selected-signature parameter metadata"),
-			AcceptIntCandidate->InputNames.Num() == 1
-			&& AcceptIntCandidate->InputNames[0] == TEXT("Value")
-			&& AcceptIntCandidate->NamedInputs.Num() == 1
-			&& !AcceptIntCandidate->NamedInputs[0]);
+		TestTrue(TEXT("Raw function candidates retain compiler-owned match state"),
+			AcceptIntCandidate->BoundInputIndex != INDEX_NONE
+			&& AcceptIntCandidate->Snapshot.IsValid());
 	}
-	const FVerseSemanticCandidate* AbsoluteInteger = Candidates.FindByPredicate(
-		[](const FVerseSemanticCandidate& Candidate)
+	const TSharedPtr<FVerseExpressionAction>* AbsoluteInteger = Actions.FindByPredicate(
+		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
-			return Candidate.Kind == EVerseSemanticCandidateKind::Function
-				&& Candidate.SourceSpelling == TEXT("Abs")
-				&& Candidate.PresentationDisplayName.ToString()
+			return Action.IsValid()
+				&& Action->SourceSpelling == TEXT("Abs")
+				&& Action->DisplayName.ToString()
 					== TEXT("Absolute (Integer)");
 		});
 	TestNotNull(
@@ -381,11 +391,11 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	{
 		TestEqual(
 			TEXT("Absolute Integer uses Blueprint's Math Integer category"),
-			AbsoluteInteger->Category.ToString(),
+			(*AbsoluteInteger)->Category.ToString(),
 			FString(TEXT("Math|Integer")));
 		TestTrue(
 			TEXT("Absolute Integer retains its semantic module hierarchy"),
-			AbsoluteInteger->ModuleCategory.ToString().Contains(TEXT("Verse")));
+			(*AbsoluteInteger)->ModuleCategory.ToString().Contains(TEXT("Verse")));
 	}
 	TestFalse(
 		TEXT("Output-side filtering does not need an identifier exclusion rule"),
@@ -397,16 +407,18 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		TEXT("Compiler invocation plumbing is not offered as an expression action"),
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
-			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
-				&& Candidate.SourceSpelling == TEXT("()");
+			return Candidate.Function != nullptr
+				&& Candidate.Function->GetName()
+					== Candidate.Function->GetProgram()._IntrinsicSymbols._OpNameCall;
 		}));
-	const auto HasCategory = [&Candidates](const TCHAR* Spelling, const TCHAR* Category)
+	const auto HasCategory = [&Actions](const TCHAR* Spelling, const TCHAR* Category)
 	{
-		return Candidates.ContainsByPredicate(
-			[Spelling, Category](const FVerseSemanticCandidate& Candidate)
+		return Actions.ContainsByPredicate(
+			[Spelling, Category](const TSharedPtr<FVerseExpressionAction>& Action)
 			{
-				return Candidate.SourceSpelling == Spelling
-					&& Candidate.Category.ToString() == Category;
+				return Action.IsValid()
+					&& Action->SourceSpelling == Spelling
+					&& Action->Category.ToString() == Category;
 			});
 	};
 	TestTrue(TEXT("BitAnd uses Blueprint's integer category"),
@@ -436,21 +448,20 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 
 	const int32 FloatExpressionBeginByte =
 		SourceView.Find(UTF8TEXTVIEW("Input + 1.0"));
-	const TArray<FVerseSemanticCandidate> FloatCandidates =
-		FVerseSemanticCandidateProvider::Build(
-			CandidateSnapshots,
-			Document.FilePath,
-			FloatExpressionBeginByte,
-			true,
-			*ParsedDocument);
-	const auto HasFloatCategory = [&FloatCandidates](
+	const TArray<TSharedPtr<FVerseExpressionAction>> FloatActions =
+		FVerseExpressionActionQuery::Build(
+			{}, OutputSocket, true, *ParsedDocument,
+			FVerseTextRange(Document.Revision, {FloatExpressionBeginByte, 11}),
+			Document.FilePath, CandidateSnapshots);
+	const auto HasFloatCategory = [&FloatActions](
 		const TCHAR* Spelling, const TCHAR* Category)
 	{
-		return FloatCandidates.ContainsByPredicate(
-			[Spelling, Category](const FVerseSemanticCandidate& Candidate)
+		return FloatActions.ContainsByPredicate(
+			[Spelling, Category](const TSharedPtr<FVerseExpressionAction>& Action)
 			{
-				return Candidate.SourceSpelling == Spelling
-					&& Candidate.Category.ToString() == Category;
+				return Action.IsValid()
+					&& Action->SourceSpelling == Spelling
+					&& Action->Category.ToString() == Category;
 			});
 	};
 	TestTrue(TEXT("Ceil uses Blueprint's float category"),
@@ -533,16 +544,17 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		DegradedCandidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
-				&& Candidate.SourceSpelling == TEXT("+");
+				&& Candidate.Function != nullptr;
 		}));
 	TestTrue(
 		TEXT("Callable signatures remain discoverable after an unrelated local error"),
 		DegradedCandidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Function
-				&& Candidate.SourceSpelling == TEXT("AcceptInt");
+				&& Candidate.Function != nullptr
+				&& Candidate.Function->AsNameStringView()
+					== uLang::CUTF8StringView("AcceptInt");
 		}));
-	FVerseVisualSocket OutputSocket;
 	const TArray<TSharedPtr<FVerseExpressionAction>> DegradedActions =
 		FVerseExpressionActionQuery::Build(
 			{},
@@ -560,9 +572,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		{
 			return Action.IsValid()
 				&& Action->SourceForm == EVerseExpressionSourceForm::OrdinaryCall
-				&& Action->SourceSpelling == TEXT("AcceptInt")
-				&& Action->Validation
-					== EVerseExpressionActionValidation::StableSemanticSignature;
+				&& Action->SourceSpelling == TEXT("AcceptInt");
 		});
 	TestTrue(
 		TEXT("Integer unary minus uses Blueprint's Negate Int action name"),

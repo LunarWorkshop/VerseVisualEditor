@@ -12,7 +12,7 @@ namespace uLang
 {
 	class CDataDefinition;
 	class CFunction;
-	class CTypeBase;
+	class CFunctionType;
 }
 
 enum class EVerseSemanticCandidateKind : uint8
@@ -28,22 +28,12 @@ enum class EVerseSemanticCandidateKind : uint8
 struct FVerseSemanticCandidate
 {
 	EVerseSemanticCandidateKind Kind = EVerseSemanticCandidateKind::Identifier;
-	FString DisplayName;
-	FText PresentationDisplayName;
-	/** Category resolved by the shared Verse/UFunction/intrinsic precedence policy. */
-	FText Category;
-	/** Semantic module hierarchy, independent of presentation category metadata. */
-	FText ModuleCategory;
-	FString ResultTypeName;
-	FString SourceSpelling;
-	bool bUsesFailureCallSyntax = false;
-	int32 BoundInputIndex = INDEX_NONE;
-	TArray<FString> UnboundInputDefaults;
-	TArray<FString> InputNames;
-	TArray<bool> NamedInputs;
 	const uLang::CDataDefinition* DataDefinition = nullptr;
 	const uLang::CFunction* Function = nullptr;
-	const uLang::CTypeBase* ResultType = nullptr;
+	/** The instantiated overload selected while matching the dragged socket. */
+	const uLang::CFunctionType* InstantiatedFunctionType = nullptr;
+	int32 BoundInputIndex = INDEX_NONE;
+	/** Owns the compiler program containing the pointers above. */
 	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
 };
 
