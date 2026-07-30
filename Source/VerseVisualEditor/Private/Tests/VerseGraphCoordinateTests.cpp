@@ -77,4 +77,33 @@ bool FVerseGraphScaleRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphCursorAnchoredZoomTest,
+	"VerseVisualEditor.Graph.Coordinates.CursorAnchoredZoom",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphCursorAnchoredZoomTest::RunTest(const FString& Parameters)
+{
+	const FVerseCanvasPoint Cursor(FVector2D(420.0f, 275.0f));
+	const FVector2D Padding(760.0f, 560.0f);
+	const FVector2D InitialScroll(915.0f, 680.0f);
+	const float InitialZoom = 1.0f;
+	const FVerseGraphPoint AnchoredGraphPoint = VerseCanvasToGraph(
+		Cursor,
+		FVerseCanvasPoint(Padding - InitialScroll),
+		InitialZoom);
+	for (const float NewZoom : {0.5f, 2.0f})
+	{
+		const FVector2D NewScroll = VerseScrollOffsetForZoomAnchor(
+			Cursor, InitialScroll, Padding, InitialZoom, NewZoom);
+		const FVerseCanvasPoint Reprojected = VerseGraphToCanvas(
+			AnchoredGraphPoint,
+			FVerseCanvasPoint(Padding - NewScroll),
+			NewZoom);
+		TestEqual(TEXT("Zoom keeps the anchored graph point beneath the cursor"),
+			Reprojected.Value, Cursor.Value);
+	}
+	return true;
+}
+
 #endif

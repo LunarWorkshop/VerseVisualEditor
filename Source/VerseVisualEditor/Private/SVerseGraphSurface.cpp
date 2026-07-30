@@ -463,8 +463,22 @@ FReply SVerseGraphSurface::OnMouseWheel(
 		MinimumZoom, MaximumZoom);
 	if (!FMath::IsNearlyEqual(NewZoom, Zoom))
 	{
+		const FVerseCanvasPoint Cursor = VerseDesktopToCanvas(
+			MyGeometry,
+			FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()));
+		const FMargin PanPadding = GetPanPadding();
+		const FVector2D AnchoredScrollOffset = VerseScrollOffsetForZoomAnchor(
+			Cursor,
+			FVector2D(
+				HorizontalScrollBox->GetScrollOffset(),
+				VerticalScrollBox->GetScrollOffset()),
+			FVector2D(PanPadding.Left, PanPadding.Top),
+			Zoom,
+			NewZoom);
 		Zoom = NewZoom;
 		ScaleBox->SetUserSpecifiedScale(Zoom);
+		HorizontalScrollBox->SetScrollOffset(FMath::Max(0.0, AnchoredScrollOffset.X));
+		VerticalScrollBox->SetScrollOffset(FMath::Max(0.0, AnchoredScrollOffset.Y));
 		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}
 	return FReply::Handled();

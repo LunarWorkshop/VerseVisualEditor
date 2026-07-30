@@ -56,3 +56,17 @@ inline FVerseGraphPoint VerseCanvasToGraph(
 {
 	return FVerseGraphPoint((CanvasPoint.Value - GraphOrigin.Value) / Zoom);
 }
+
+/** Returns the scroll offset that keeps the same graph point under the cursor. */
+inline FVector2D VerseScrollOffsetForZoomAnchor(
+	FVerseCanvasPoint Cursor,
+	FVector2D CurrentScrollOffset,
+	FVector2D PanPadding,
+	float OldZoom,
+	float NewZoom)
+{
+	const FVerseCanvasPoint OldGraphOrigin(PanPadding - CurrentScrollOffset);
+	const FVerseGraphPoint AnchoredGraphPoint = VerseCanvasToGraph(
+		Cursor, OldGraphOrigin, OldZoom);
+	return PanPadding + AnchoredGraphPoint.Value * NewZoom - Cursor.Value;
+}
