@@ -599,7 +599,7 @@ This step delivers the first complete edit-and-save workflow.
   validation. Preserve the existing localized-edit, UTF-8, save, and dirty-state
   coverage.
 
-### 14. Function calls
+### 14. Function calls (complete)
 
 - Represent project functions, imported functions, native functions, and
   intrinsics with one generic call descriptor bound to a semantic `CFunction`.
@@ -612,9 +612,10 @@ This step delivers the first complete edit-and-save workflow.
 - Generate and prospectively validate ordinary call source through the generic
   expression action pipeline before committing a localized replacement.
 
-### 15. Control expressions
+### 15. Control expressions (complete)
 
-- Add branching and looping constructs such as `if`, `for`, and `while`.
+- Add branching and looping constructs such as `if`, `for`, and `loop`
+  (`while` is not a Verse syntax form).
 - Represent each body with its own automatically created tile region.
 - Display main and nested execution paths distinctly.
 - Preserve and expose supported formatting variations.

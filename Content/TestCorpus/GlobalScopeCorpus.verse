@@ -31,6 +31,12 @@ CorpusInterfaceTwo := interface {}
 CorpusEnumOne := enum { First, Second }
 CorpusEnumTwo := enum { Alpha, Beta }
 
+MapRangeUnclamped(Value: float, InLow: float, InHigh: float, OutLow: float, OutHigh: float) : float =
+    Denom: float = InHigh - InLow;
+    if (Denom = 0.0):
+        return OutLow;
+    OutLow + (OutHigh - OutLow) * ((Value - InLow) / Denom);
+
 CorpusFunctionEmpty() : void = {
 }
 
@@ -57,6 +63,31 @@ CorpusFunctionGreater1(Input : int)<computes> : bool =
 
 CorpusFunctionGreaterOrEqual1(Input : int)<computes> : bool =
     Input >= 1
+
+CorpusFunctionConstant(Input : int)<computes> : int =
+    Constant: int = 1
+    Input + Constant
+
+CorpusFunctionConstantAssigned(Input : int)<computes> : int =
+    Constant: int = Input
+    Input + Constant
+
+CorpusFunctionVariable(Input : int)<computes> : int =
+    var Variable: int = 1
+    Input + Variable
+
+CorpusFunctionVariableAssigned(Input : int)<computes> : int =
+    var Variable: int = Input
+    set Input = Input + 1
+    Input + Variable
+
+CorpusFunctionCall(Input : int)<computes> : bool =
+    Ciel(Input)
+
+CorpusFunctionIf(Input : int)<computes> : float =
+    if (Input >= 1):
+        return 42.0
+    69.0
 
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"

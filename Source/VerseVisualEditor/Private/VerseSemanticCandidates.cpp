@@ -11,6 +11,7 @@
 #include "uLang/Semantics/SemanticProgram.h"
 #include "uLang/Semantics/SemanticScope.h"
 #include "uLang/Semantics/SemanticTypes.h"
+#include "uLang/Semantics/TypeVariable.h"
 #include "uLang/Semantics/VisitSet.h"
 #include "uLang/SourceProject/UploadedAtFNVersion.h"
 #include "uLang/Syntax/VstNode.h"
@@ -260,6 +261,11 @@ namespace
 				Tile.ValueOutputs.Reset();
 			}
 		}
+		if (Tile.ExpressionKind != EVerseExpressionKind::Call
+			&& !IsVerseOperatorExpression(Tile.ExpressionKind))
+		{
+			return;
+		}
 
 		const uLang::CExprInvocation* Invocation = FindMappedInvocation(*Node);
 		if (Invocation == nullptr)
@@ -276,9 +282,25 @@ namespace
 		if (const uLang::CFunctionType* FunctionType = Invocation->GetResolvedCalleeType())
 		{
 			const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
+			const uLang::SSignature::ParamDefinitions* ParamDefinitions =
+				Tile.SemanticFunction != nullptr
+				? &Tile.SemanticFunction->_Signature.GetParams()
+				: nullptr;
 			for (int32 Index = 0; Index < Tile.ValueInputs.Num() && Index < Params.Num(); ++Index)
 			{
-				Tile.ValueInputs[Index].SemanticTypeName = ToFString(Params[Index]->AsCode());
+				FVerseVisualSocket& Input = Tile.ValueInputs[Index];
+				Input.SemanticTypeName = ToFString(Params[Index]->AsCode());
+				const uLang::CDataDefinition* Param = ParamDefinitions != nullptr
+					&& ParamDefinitions->IsValidIndex(Index)
+					? (*ParamDefinitions)[Index]
+					: nullptr;
+				const uLang::CDefinition* NameDefinition = Param != nullptr
+					&& Param->_ImplicitParam != nullptr
+					? static_cast<const uLang::CDefinition*>(Param->_ImplicitParam)
+					: static_cast<const uLang::CDefinition*>(Param);
+				Input.SemanticName = NameDefinition != nullptr
+					? ToFString(NameDefinition->AsNameStringView())
+					: FString();
 			}
 			Tile.SemanticTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
@@ -358,6 +380,29 @@ namespace
 		}
 		const FString TypeCode = ToFString(Type.AsCode());
 		return TypeCode == TEXT("string") ? TEXT("\"\"") : FString();
+	}
+
+	void AddSignatureParameterMetadata(
+		const uLang::CFunction& Function,
+		int32 ParameterCount,
+		FVerseSemanticCandidate& Candidate)
+	{
+		const uLang::SSignature::ParamDefinitions& Definitions =
+			Function._Signature.GetParams();
+		for (int32 Index = 0; Index < ParameterCount; ++Index)
+		{
+			const uLang::CDataDefinition* Definition = Definitions.IsValidIndex(Index)
+				? Definitions[Index]
+				: nullptr;
+			const uLang::CDefinition* NameDefinition = Definition != nullptr
+				&& Definition->_ImplicitParam != nullptr
+				? static_cast<const uLang::CDefinition*>(Definition->_ImplicitParam)
+				: static_cast<const uLang::CDefinition*>(Definition);
+			Candidate.InputNames.Add(NameDefinition != nullptr
+				? ToFString(NameDefinition->AsNameStringView())
+				: FString());
+			Candidate.NamedInputs.Add(Definition != nullptr && Definition->_bNamed);
+		}
 	}
 
 	void CollectUsingScope(
@@ -593,6 +638,7 @@ namespace
 			Candidate.ResultType = &FunctionType->GetReturnType();
 			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			Candidate.Snapshot = Snapshot;
+			AddSignatureParameterMetadata(Function, Params.Num(), Candidate);
 			for (const uLang::CTypeBase* Param : Params)
 			{
 				FString Default = DefaultSourceForType(*Param);
@@ -632,6 +678,7 @@ namespace
 			Candidate.ResultType = &FunctionType->GetReturnType();
 			Candidate.ResultTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			Candidate.Snapshot = Snapshot;
+			AddSignatureParameterMetadata(Function, Params.Num(), Candidate);
 			bool bHasAllDefaults = true;
 			for (int32 ParamIndex = 0; ParamIndex < Params.Num(); ++ParamIndex)
 			{

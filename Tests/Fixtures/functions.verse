@@ -60,4 +60,26 @@ NegateValue(Input : int)<computes> : int =
 CallAbsolute(Input : int)<computes> : int =
     Abs(Input)
 
+CallNamed(Input : int)<computes> : int =
+    AcceptNamed(?Value := Input)
+
 EmptyFunction()<computes> : void = {}
+
+ControlIf(Input : int)<computes> : int =
+    if (Input > 0):
+        Input
+    else:
+        0
+
+ControlFor(Values : []int)<computes> : void =
+    for (Value : Values):
+        Value
+
+ControlLoop()<computes> : void =
+    loop:
+        break
+
+LocalDefinitions(Input : int)<computes> : int =
+    var Total : int = Input
+    Offset : int = 1
+    Total + Offset

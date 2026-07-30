@@ -103,6 +103,7 @@ namespace VerseParseSnapshotBuilder
 		const Verse::Vst::Node& Node,
 		const FSourceIndex& SourceIndex,
 		FVerseSourceRegion& OutRegion);
+	bool ContainsNodeType(const Verse::Vst::Node& Node, Verse::Vst::NodeType Type);
 
 	int32 FindLastByte(FUtf8StringView Source, UTF8CHAR Byte, int32 Begin, int32 End)
 	{
@@ -132,6 +133,21 @@ namespace VerseParseSnapshotBuilder
 		while (Begin < End && IsWhitespace(Source[Begin])) ++Begin;
 		while (End > Begin && IsWhitespace(Source[End - 1])) --End;
 		return FVerseByteRange::FromBounds(Begin, End);
+	}
+
+	EVerseClausePunctuationStyle ToClausePunctuationStyle(
+		Verse::Vst::Clause::EPunctuation Punctuation)
+	{
+		switch (Punctuation)
+		{
+		case Verse::Vst::Clause::EPunctuation::Braces:
+			return EVerseClausePunctuationStyle::Braces;
+		case Verse::Vst::Clause::EPunctuation::Colon:
+		case Verse::Vst::Clause::EPunctuation::Indentation:
+			return EVerseClausePunctuationStyle::ColonOrIndentation;
+		default:
+			return EVerseClausePunctuationStyle::None;
+		}
 	}
 
 	void AccumulateOwnedSourceBounds(
@@ -584,6 +600,124 @@ namespace VerseParseSnapshotBuilder
 		Result.Range = SourceIndex.ToRange(Node.Whence());
 		Result.VstNodeType = static_cast<uint8>(Node.GetElementType());
 		Result.VstTag = Node.GetTag<uint8>();
+		auto AppendControlRegion = [&](const Verse::Vst::Clause& Clause,
+			EVerseControlRegionKind Kind)
+		{
+			FVerseExpressionControlRegion& Region =
+				Result.ControlRegions.AddDefaulted_GetRef();
+			Region.Range = SourceIndex.ToRange(Clause.Whence());
+			Region.Kind = Kind;
+			Region.PunctuationStyle = ToClausePunctuationStyle(Clause.GetPunctuation());
+			Region.FirstOperandIndex = Result.Operands.Num();
+			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause.GetChildren())
+			{
+				const Verse::Vst::Node* Expression = UnwrapSingleClause(Child.Get());
+				if (Expression != nullptr && !Expression->IsA<Verse::Vst::Comment>())
+				{
+					Result.Operands.Add(BuildExpressionDescriptor(
+						*Expression, SourceIndex, Parameters));
+				}
+			}
+			Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;
+		};
+
+		if (const Verse::Vst::FlowIf* FlowIf = Node.AsNullable<Verse::Vst::FlowIf>())
+		{
+			Result.Kind = EVerseExpressionKind::Control;
+			Result.ControlKind = EVerseControlKind::If;
+			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : FlowIf->GetChildren())
+			{
+				const Verse::Vst::Clause* Clause = Child->AsNullable<Verse::Vst::Clause>();
+				if (Clause == nullptr)
+				{
+					continue;
+				}
+				switch (Child->GetTag<Verse::Vst::FlowIf::ClauseTag>())
+				{
+				case Verse::Vst::FlowIf::ClauseTag::condition:
+					AppendControlRegion(*Clause, EVerseControlRegionKind::Condition);
+					break;
+				case Verse::Vst::FlowIf::ClauseTag::then_body:
+					AppendControlRegion(*Clause, EVerseControlRegionKind::Body);
+					break;
+				case Verse::Vst::FlowIf::ClauseTag::else_body:
+					AppendControlRegion(*Clause, EVerseControlRegionKind::Else);
+					break;
+				default:
+					break;
+				}
+			}
+			return Result;
+		}
+
+		if (const Verse::Vst::Macro* Macro = Node.AsNullable<Verse::Vst::Macro>())
+		{
+			const Verse::Vst::Identifier* Name = FindFirstIdentifier(*Macro->GetName());
+			const FVerseByteRange NameRange = Name != nullptr
+				? TrimSourceWhitespace(SourceIndex.GetSource(), SourceIndex.ToRange(Name->Whence()))
+				: FVerseByteRange();
+			const FUtf8StringView NameText = NameRange.IsSet()
+				? SourceIndex.GetSource().Mid(NameRange.BeginByte, NameRange.NumBytes)
+				: FUtf8StringView();
+			if (NameText == UTF8TEXTVIEW("for") || NameText == UTF8TEXTVIEW("loop"))
+			{
+				Result.Kind = EVerseExpressionKind::Control;
+				Result.ControlKind = NameText == UTF8TEXTVIEW("for")
+					? EVerseControlKind::For
+					: EVerseControlKind::Loop;
+				Result.OperatorRange = NameRange;
+				const int32 ClauseCount = Macro->GetChildCount() - 1;
+				for (int32 ClauseIndex = 0; ClauseIndex < ClauseCount; ++ClauseIndex)
+				{
+					AppendControlRegion(
+						*Macro->GetClause(ClauseIndex),
+						Result.ControlKind == EVerseControlKind::For && ClauseIndex == 0
+							? EVerseControlRegionKind::Condition
+							: EVerseControlRegionKind::Body);
+				}
+				return Result;
+			}
+		}
+
+		if (const Verse::Vst::Definition* Definition = Node.AsNullable<Verse::Vst::Definition>();
+			Definition != nullptr && Definition->GetChildCount() == 2)
+		{
+			const Verse::Vst::Node& Left = *Definition->GetOperandLeft();
+			const Verse::Vst::Node* NameNode = &Left;
+			const Verse::Vst::Node* TypeNode = nullptr;
+			if (const Verse::Vst::TypeSpec* TypeSpec = Left.AsNullable<Verse::Vst::TypeSpec>();
+				TypeSpec != nullptr && TypeSpec->HasLhs())
+			{
+				NameNode = TypeSpec->GetLhs().Get();
+				TypeNode = TypeSpec->GetRhs().Get();
+			}
+			if (const Verse::Vst::Identifier* Name = FindFirstIdentifier(*NameNode))
+			{
+				Result.Kind = EVerseExpressionKind::Definition;
+				Result.DefinitionKind = ContainsNodeType(
+					*NameNode, Verse::Vst::NodeType::Mutation)
+					? VerseSyntaxKind::Variable
+					: VerseSyntaxKind::Constant;
+				Result.NameRange = SourceIndex.ToRange(Name->Whence());
+				const int32 NameLength = Name->GetSourceText().ByteLen();
+				if (NameLength > 0 && Result.NameRange.NumBytes >= NameLength)
+				{
+					Result.NameRange = {
+						Result.NameRange.EndByte() - NameLength, NameLength};
+				}
+				Result.DeclaredTypeRange = TypeNode != nullptr
+					? SourceIndex.ToRange(TypeNode->Whence())
+					: FVerseByteRange();
+				const Verse::Vst::Node* Value = UnwrapSingleClause(
+					Definition->GetOperandRight().Get());
+				if (Value != nullptr)
+				{
+					Result.Operands.Add(BuildExpressionDescriptor(
+						*Value, SourceIndex, Parameters));
+				}
+				return Result;
+			}
+		}
 		if (const Verse::Vst::Identifier* Identifier = Node.AsNullable<Verse::Vst::Identifier>())
 		{
 			const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
@@ -773,7 +907,16 @@ namespace VerseParseSnapshotBuilder
 			{
 				for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Argument : Clause->GetChildren())
 				{
-					Result.Operands.Add(BuildExpressionDescriptor(*Argument, SourceIndex, Parameters));
+					// A named argument is represented by the official VST as a
+					// Definition (`?Name := Value`). The call operand is Value; the
+					// selected semantic signature supplies the socket's parameter name.
+					const Verse::Vst::Node* Value = Argument.Get();
+					if (const Verse::Vst::Definition* Named =
+						Argument->AsNullable<Verse::Vst::Definition>())
+					{
+						Value = Named->GetOperandRight().Get();
+					}
+					Result.Operands.Add(BuildExpressionDescriptor(*Value, SourceIndex, Parameters));
 				}
 			}
 			return Result;
@@ -1087,7 +1230,9 @@ namespace VerseParseSnapshotBuilder
 		if (const Verse::Vst::Macro* Macro = UnwrappedRight != nullptr
 			? UnwrappedRight->AsNullable<Verse::Vst::Macro>()
 			: nullptr;
-			Macro != nullptr && Macro->GetChildCount() > 1)
+			Macro != nullptr
+			&& Macro->GetChildCount() > 1
+			&& !ClassifyMacro(*Macro).IsNone())
 		{
 			const Verse::Vst::Clause& BodyClause = *Macro->GetClause(Macro->GetChildCount() - 2);
 			OutRegion.BodyClause = MakeClauseDescriptor(BodyClause, DefinitionRange, SourceIndex);

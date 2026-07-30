@@ -53,6 +53,8 @@ struct FVerseExpressionAction
 	bool bUsesFailureCallSyntax = false;
 	int32 BoundInputIndex = INDEX_NONE;
 	TArray<FString> InputDefaultSources;
+	TArray<FString> InputNames;
+	TArray<bool> NamedInputs;
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;

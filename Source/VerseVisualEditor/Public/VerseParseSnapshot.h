@@ -39,8 +39,34 @@ enum class EVerseExpressionKind : uint8
 	Identifier,
 	Literal,
 	Call,
+	Definition,
+	Control,
 	BinaryOperator,
 	UnaryOperator,
+};
+
+enum class EVerseControlKind : uint8
+{
+	None,
+	If,
+	For,
+	Loop,
+};
+
+enum class EVerseControlRegionKind : uint8
+{
+	Condition,
+	Body,
+	Else,
+};
+
+struct VERSEVISUALEDITOR_API FVerseExpressionControlRegion
+{
+	FVerseByteRange Range;
+	EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
+	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	int32 FirstOperandIndex = 0;
+	int32 OperandCount = 0;
 };
 
 inline bool IsVerseBinaryOperatorExpression(EVerseExpressionKind Kind)
@@ -95,8 +121,13 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 	uint8 VstTag = 0;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	EVerseControlKind ControlKind = EVerseControlKind::None;
+	FName DefinitionKind;
+	FVerseByteRange NameRange;
+	FVerseByteRange DeclaredTypeRange;
 	FVerseExpressionType Type;
 	TArray<FVerseExpressionDescriptor> Operands;
+	TArray<FVerseExpressionControlRegion> ControlRegions;
 };
 
 enum class EVerseClauseItemSeparator : uint8

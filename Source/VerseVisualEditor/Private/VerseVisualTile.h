@@ -20,6 +20,8 @@ enum class EVerseVisualTileKind : uint8
 struct FVerseVisualSocket
 {
 	FVerseTextRange NameRange;
+	/** Compiler-authored parameter name when it is not represented by this expression's source. */
+	FString SemanticName;
 	FVerseTextRange TypeRange;
 	bool bConnected = false;
 	FName IntrinsicTypeName;
@@ -37,6 +39,10 @@ struct FVerseVisualExpressionDescriptor
 	uint8 VstTag = 0;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	EVerseControlKind ControlKind = EVerseControlKind::None;
+	FName DefinitionKind;
+	FVerseTextRange NameRange;
+	FVerseTextRange DeclaredTypeRange;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
@@ -44,6 +50,15 @@ struct FVerseVisualExpressionDescriptor
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseVisualExpressionDescriptor> Operands;
+	struct FControlRegion
+	{
+		FVerseTextRange Range;
+		EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
+		EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+		int32 FirstOperandIndex = 0;
+		int32 OperandCount = 0;
+	};
+	TArray<FControlRegion> ControlRegions;
 };
 
 struct FVerseVisualClauseItemDescriptor
@@ -85,6 +100,7 @@ struct FVerseVisualTile
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	EVerseControlKind ControlKind = EVerseControlKind::None;
 	uint8 VstNodeType = 0;
 	uint8 VstTag = 0;
 	FVerseTextRange OperatorRange;
@@ -104,6 +120,7 @@ struct FVerseVisualTile
 	FVerseTextRange BodyRange;
 	FVerseVisualClauseDescriptor BodyClause;
 	TArray<FVerseVisualTile> Children;
+	TArray<FVerseVisualExpressionDescriptor::FControlRegion> ControlRegions;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 	TArray<FVerseVisualSocket> ValueInputs;
 	TArray<FVerseVisualSocket> ValueOutputs;

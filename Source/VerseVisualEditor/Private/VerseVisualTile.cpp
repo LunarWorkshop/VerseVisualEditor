@@ -77,12 +77,26 @@ namespace
 		Result.VstTag = Expression.VstTag;
 		Result.Kind = Expression.Kind;
 		Result.LiteralKind = Expression.LiteralKind;
+		Result.ControlKind = Expression.ControlKind;
+		Result.DefinitionKind = Expression.DefinitionKind;
+		Result.NameRange = MakeTextRange(Revision, Expression.NameRange);
+		Result.DeclaredTypeRange = MakeTextRange(Revision, Expression.DeclaredTypeRange);
 		Result.TypeRange = MakeTextRange(Revision, Expression.Type.SourceRange);
 		Result.IntrinsicTypeName = Expression.Type.IntrinsicName;
 		Result.TypeProvenance = Expression.Type.Provenance;
 		for (const FVerseExpressionDescriptor& Operand : Expression.Operands)
 		{
 			Result.Operands.Add(MakeVisualExpressionDescriptor(Operand, Revision));
+		}
+		for (const FVerseExpressionControlRegion& Region : Expression.ControlRegions)
+		{
+			FVerseVisualExpressionDescriptor::FControlRegion& VisualRegion =
+				Result.ControlRegions.AddDefaulted_GetRef();
+			VisualRegion.Range = MakeTextRange(Revision, Region.Range);
+			VisualRegion.Kind = Region.Kind;
+			VisualRegion.PunctuationStyle = Region.PunctuationStyle;
+			VisualRegion.FirstOperandIndex = Region.FirstOperandIndex;
+			VisualRegion.OperandCount = Region.OperandCount;
 		}
 		return Result;
 	}
@@ -219,17 +233,32 @@ namespace
 		bool bImplicitReturnValue)
 	{
 		FVerseVisualTile Tile;
-		Tile.Kind = EVerseVisualTileKind::Expression;
+		Tile.Kind = Descriptor.Kind == EVerseExpressionKind::Definition
+			? EVerseVisualTileKind::Definition
+			: EVerseVisualTileKind::Expression;
 		Tile.ExpressionKind = Descriptor.Kind;
 		Tile.LiteralKind = Descriptor.LiteralKind;
+		Tile.ControlKind = Descriptor.ControlKind;
+		Tile.DefinitionKind = Descriptor.DefinitionKind;
 		Tile.VstNodeType = Descriptor.VstNodeType;
 		Tile.VstTag = Descriptor.VstTag;
 		Tile.Range = Descriptor.Range;
 		Tile.OperatorRange = Descriptor.OperatorRange;
 		Tile.NameRange = Descriptor.Kind == EVerseExpressionKind::Identifier
+			|| Descriptor.Kind == EVerseExpressionKind::Call
 			? Descriptor.Range
 			: FVerseTextRange();
-		Tile.TypeRange = Descriptor.TypeRange;
+		if (Descriptor.Kind == EVerseExpressionKind::Call)
+		{
+			Tile.NameRange = Descriptor.OperatorRange;
+		}
+		else if (Descriptor.Kind == EVerseExpressionKind::Definition)
+		{
+			Tile.NameRange = Descriptor.NameRange;
+		}
+		Tile.TypeRange = Descriptor.Kind == EVerseExpressionKind::Definition
+			? Descriptor.DeclaredTypeRange
+			: Descriptor.TypeRange;
 		Tile.IntrinsicTypeName = Descriptor.IntrinsicTypeName;
 		Tile.TypeProvenance = Descriptor.TypeProvenance;
 		if (bStatementLevel)
@@ -245,9 +274,18 @@ namespace
 			Tile.bImplicitReturnValue = bImplicitReturnValue;
 		}
 
+		for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
+			Descriptor.ControlRegions)
+		{
+			Tile.ControlRegions.Add(Region);
+		}
 		for (const FVerseVisualExpressionDescriptor& Operand : Descriptor.Operands)
 		{
-			Tile.Children.Add(MakeExpressionTile(Operand, Snapshot, false, false));
+			Tile.Children.Add(MakeExpressionTile(
+				Operand,
+				Snapshot,
+				Descriptor.Kind == EVerseExpressionKind::Control,
+				false));
 		}
 		if (IsVerseOperatorExpression(Descriptor.Kind) || Descriptor.Kind == EVerseExpressionKind::Call)
 		{
@@ -280,6 +318,23 @@ namespace
 						Child.IntrinsicTypeName,
 						true));
 				}
+			}
+		}
+		else if (Descriptor.Kind == EVerseExpressionKind::Definition
+			&& Descriptor.Operands.Num() == 1)
+		{
+			const FVerseVisualExpressionDescriptor& Value = Descriptor.Operands[0];
+			Tile.ValueInputs.Add(MakeSocket(
+				Descriptor.DeclaredTypeRange,
+				Value.IntrinsicTypeName,
+				Value.LiteralKind == EVerseLiteralKind::None));
+			if (!Tile.Children.IsEmpty()
+				&& Value.LiteralKind == EVerseLiteralKind::None)
+			{
+				Tile.Children[0].ValueOutputs.Add(MakeSocket(
+					Value.TypeRange.IsSet() ? Value.TypeRange : Descriptor.DeclaredTypeRange,
+					Value.IntrinsicTypeName,
+					true));
 			}
 		}
 		else if (Descriptor.Kind == EVerseExpressionKind::Identifier && bStatementLevel)
@@ -397,12 +452,13 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		: FVerseTextRange();
 	if (bHasReturnValue)
 	{
-		Return.ValueInputs.Add({{}, FunctionTile.TypeRange,
-			FunctionTile.BodyClause.Items.ContainsByPredicate(
-				[](const FVerseVisualClauseItemDescriptor& Item)
-				{
-					return Item.bIsFinalValuePosition;
-				})});
+		FVerseVisualSocket& Socket = Return.ValueInputs.AddDefaulted_GetRef();
+		Socket.TypeRange = FunctionTile.TypeRange;
+		Socket.bConnected = FunctionTile.BodyClause.Items.ContainsByPredicate(
+			[](const FVerseVisualClauseItemDescriptor& Item)
+			{
+				return Item.bIsFinalValuePosition;
+			});
 	}
 	return GraphTiles;
 }

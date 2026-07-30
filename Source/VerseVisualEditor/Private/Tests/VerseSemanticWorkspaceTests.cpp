@@ -240,7 +240,8 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	Document.Source = FUtf8String(UTF8TEXT(
 		"AcceptInt(Value : int)<computes> : int = Value\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
-		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"));
+		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
+		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"));
 	Document.Revision.Value = 91;
 
 	TestFalse(TEXT("The test document is not registered by existing on-disk source"), FPaths::FileExists(Document.FilePath));
@@ -316,6 +317,29 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			&& BoundAdd.ValueInputs[0].SemanticTypeName == TEXT("int")
 			&& BoundAdd.ValueInputs[1].SemanticTypeName == TEXT("int"));
 	}
+	FVerseFunctionNavigationItem* BoundCallFunction = BoundFunctions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("CallAcceptInt");
+		});
+	if (TestNotNull(TEXT("Semantic call binding fixture exists"), BoundCallFunction)
+		&& TestTrue(TEXT("Semantic call fixture has a statement"),
+			BoundCallFunction->GraphTiles.Num() >= 3))
+	{
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			BoundCallFunction->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		const FVerseVisualTile& BoundCall = BoundCallFunction->GraphTiles[1];
+		TestTrue(TEXT("Call binds to the selected compiler signature"),
+			BoundCall.ExpressionKind == EVerseExpressionKind::Call
+			&& BoundCall.SemanticFunction != nullptr
+			&& BoundCall.SemanticTypeName == TEXT("int")
+			&& BoundCall.ValueInputs.Num() == 1
+			&& BoundCall.ValueInputs[0].SemanticName == TEXT("Value")
+			&& BoundCall.ValueInputs[0].SemanticTypeName == TEXT("int"));
+	}
 	TestTrue(
 		TEXT("Compiler intrinsics contribute the polymorphic Add overload for int"),
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
@@ -324,14 +348,24 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				&& Candidate.SourceSpelling == TEXT("+")
 				&& Candidate.Function != nullptr;
 		}));
-	TestTrue(
-		TEXT("A function declared only in the private overlay is discovered dynamically"),
-		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)
+	const FVerseSemanticCandidate* AcceptIntCandidate = Candidates.FindByPredicate(
+		[](const FVerseSemanticCandidate& Candidate)
 		{
 			return Candidate.Kind == EVerseSemanticCandidateKind::Function
 				&& Candidate.SourceSpelling == TEXT("AcceptInt")
 				&& Candidate.Function != nullptr;
-		}));
+		});
+	TestNotNull(
+		TEXT("A function declared only in the private overlay is discovered dynamically"),
+		AcceptIntCandidate);
+	if (AcceptIntCandidate != nullptr)
+	{
+		TestTrue(TEXT("Function candidates retain selected-signature parameter metadata"),
+			AcceptIntCandidate->InputNames.Num() == 1
+			&& AcceptIntCandidate->InputNames[0] == TEXT("Value")
+			&& AcceptIntCandidate->NamedInputs.Num() == 1
+			&& !AcceptIntCandidate->NamedInputs[0]);
+	}
 	const FVerseSemanticCandidate* AbsoluteInteger = Candidates.FindByPredicate(
 		[](const FVerseSemanticCandidate& Candidate)
 		{
@@ -427,6 +461,24 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		HasFloatCategory(TEXT("Sin"), TEXT("Math|Trig")));
 	TestTrue(TEXT("Float ToString uses Blueprint's string category"),
 		HasFloatCategory(TEXT("ToString"), TEXT("Utilities|String")));
+
+	FVerseExpressionAction NamedCallAction;
+	NamedCallAction.SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
+	NamedCallAction.SourceSpelling = TEXT("AcceptNamed");
+	NamedCallAction.BoundInputIndex = 0;
+	NamedCallAction.InputDefaultSources.Add(FString());
+	NamedCallAction.InputNames.Add(TEXT("Value"));
+	NamedCallAction.NamedInputs.Add(true);
+	FVerseDocumentSession NamedCallSession(ParsedDocument.ToSharedRef());
+	const bool bNamedCallApplied = TryApplyVerseExpressionAction(
+		NamedCallSession,
+		FVerseTextRange(NamedCallSession.GetRevision(), {ExpressionBeginByte, 9}),
+		NamedCallAction,
+		DocumentError);
+	TestTrue(TEXT("Generic call creation preserves named selected-signature arguments"),
+		bNamedCallApplied
+		&& FString(UTF8_TO_TCHAR(*NamedCallSession.GetCurrentUtf8())).Contains(
+			TEXT("AcceptNamed(?Value := Input + 1)")));
 
 	FVerseSemanticDocumentInput InvalidDocument = Document;
 	InvalidDocument.Source = FUtf8String(UTF8TEXT(

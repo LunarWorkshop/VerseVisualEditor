@@ -510,6 +510,73 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	const FVerseVisualTile* CallFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("CallAbsolute"));
+	if (TestNotNull(TEXT("Call visual tile exists"), CallFunction))
+	{
+		const TArray<FVerseVisualTile> CallGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*CallFunction, Snapshot);
+		if (TestEqual(TEXT("Call graph has entry, call, and return tiles"), CallGraph.Num(), 3))
+		{
+			TestTrue(TEXT("Call uses one generic compiler-bindable visual shape"),
+				CallGraph[1].ExpressionKind == EVerseExpressionKind::Call
+				&& Snapshot.GetDocument()->DecodeOriginalRange(CallGraph[1].NameRange) == TEXT("Abs")
+				&& CallGraph[1].ValueInputs.Num() == 1
+				&& CallGraph[1].ValueOutputs.Num() == 1
+				&& CallGraph[1].Children.Num() == 1
+				&& CallGraph[1].Children[0].ExpressionKind == EVerseExpressionKind::Identifier);
+		}
+	}
+
+	const FVerseVisualTile* IfFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlIf"));
+	if (TestNotNull(TEXT("If control visual tile exists"), IfFunction))
+	{
+		const TArray<FVerseVisualTile> IfGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*IfFunction, Snapshot);
+		TestTrue(TEXT("If uses one control tile with separate nested regions"),
+			IfGraph.Num() == 3
+			&& IfGraph[1].ExpressionKind == EVerseExpressionKind::Control
+			&& IfGraph[1].ControlKind == EVerseControlKind::If
+			&& IfGraph[1].ControlRegions.Num() == 3
+			&& IfGraph[1].Children.Num() >= 3
+			&& IfGraph[1].Children.ContainsByPredicate([](const FVerseVisualTile& Child)
+			{
+				return Child.bHasExecutionInput && Child.bHasExecutionOutput;
+			}));
+	}
+
+	const FVerseVisualTile* LocalFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("LocalDefinitions"));
+	if (TestNotNull(TEXT("Local-definition visual fixture exists"), LocalFunction))
+	{
+		const TArray<FVerseVisualTile> LocalGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*LocalFunction, Snapshot);
+		if (TestTrue(TEXT("Local definitions become statement-level graph tiles"),
+			LocalGraph.Num() == 5
+			&& LocalGraph[1].Kind == EVerseVisualTileKind::Definition
+			&& LocalGraph[1].DefinitionKind == VerseSyntaxKind::Variable
+			&& LocalGraph[2].Kind == EVerseVisualTileKind::Definition
+			&& LocalGraph[2].DefinitionKind == VerseSyntaxKind::Constant))
+		{
+			TestTrue(TEXT("Variable initializer connects to its typed left input"),
+				LocalGraph[1].bHasExecutionInput
+				&& LocalGraph[1].ValueInputs.Num() == 1
+				&& LocalGraph[1].ValueInputs[0].bConnected
+				&& Snapshot.GetDocument()->DecodeOriginalRange(
+					LocalGraph[1].ValueInputs[0].TypeRange) == TEXT("int")
+				&& LocalGraph[1].Children.Num() == 1
+				&& LocalGraph[1].Children[0].ValueOutputs.Num() == 1);
+			TestTrue(TEXT("Literal local initializer uses the shared inline editor"),
+				LocalGraph[2].ValueInputs.Num() == 1
+				&& !LocalGraph[2].ValueInputs[0].bConnected
+				&& LocalGraph[2].ValueInputs[0].InlineLiteralKind
+					== EVerseLiteralKind::Integer);
+		}
+	}
+
 	struct FExpectedBinaryTile
 	{
 		FUtf8StringView Function;

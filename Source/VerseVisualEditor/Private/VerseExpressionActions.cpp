@@ -153,6 +153,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 		Action->bUsesFailureCallSyntax = Candidate.bUsesFailureCallSyntax;
 		Action->BoundInputIndex = Candidate.BoundInputIndex;
 		Action->InputDefaultSources = Candidate.UnboundInputDefaults;
+		Action->InputNames = Candidate.InputNames;
+		Action->NamedInputs = Candidate.NamedInputs;
 		Action->SemanticDataDefinition = Candidate.DataDefinition;
 		Action->SemanticFunction = Candidate.Function;
 		Action->SemanticSnapshot = Candidate.Snapshot;
@@ -271,17 +273,32 @@ bool TryApplyVerseExpressionAction(
 		switch (Action.SourceForm)
 		{
 		case EVerseExpressionSourceForm::OrdinaryCall:
+		{
+			TArray<FString> Arguments;
+			Arguments.Reserve(Inputs.Num());
+			for (int32 Index = 0; Index < Inputs.Num(); ++Index)
+			{
+				const bool bNamed = Action.NamedInputs.IsValidIndex(Index)
+					&& Action.NamedInputs[Index];
+				const FString Name = Action.InputNames.IsValidIndex(Index)
+					? Action.InputNames[Index]
+					: FString();
+				Arguments.Add(bNamed && !Name.IsEmpty()
+					? FString::Printf(TEXT("?%s := %s"), *Name, *Inputs[Index])
+					: Inputs[Index]);
+			}
 			Replacement = Action.bUsesFailureCallSyntax
 				? FString::Printf(
 					TEXT("%s[%s]"),
 					*Action.SourceSpelling,
-					*FString::Join(Inputs, TEXT(", ")))
+					*FString::Join(Arguments, TEXT(", ")))
 				: FString::Printf(
 					TEXT("%s(%s)"),
 					*Action.SourceSpelling,
-					*FString::Join(Inputs, TEXT(", ")));
+					*FString::Join(Arguments, TEXT(", ")));
 			RequiredKind = EVerseExpressionKind::Call;
 			break;
+		}
 		case EVerseExpressionSourceForm::InfixOperator:
 			if (Inputs.Num() != 2)
 			{

@@ -431,7 +431,9 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			: Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
-		const FText Name = Decode(Socket.NameRange);
+		const FText Name = !Socket.SemanticName.IsEmpty()
+			? FText::FromString(Socket.SemanticName)
+			: Decode(Socket.NameRange);
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
 		Rows.Add(Row);
 		auto AddPin = [&]()
@@ -626,6 +628,20 @@ FText SVerseTile::GetKindText() const
 		{
 			return FText::GetEmpty();
 		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Call)
+		{
+			return LOCTEXT("CallKind", "Function");
+		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
+		{
+			switch (Tile.ControlKind)
+			{
+			case EVerseControlKind::If: return LOCTEXT("IfKind", "If");
+			case EVerseControlKind::For: return LOCTEXT("ForKind", "For");
+			case EVerseControlKind::Loop: return LOCTEXT("LoopKind", "Loop");
+			default: return LOCTEXT("ControlKind", "Control");
+			}
+		}
 		return IsVerseOperatorExpression(Tile.ExpressionKind)
 			? LOCTEXT("OperatorKind", "Operator")
 			: LOCTEXT("ExpressionKind", "Expression");
@@ -687,6 +703,16 @@ const FSlateBrush* SVerseTile::GetIcon() const
 	if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 	{
 		return FAppStyle::GetBrush("GraphEditor.Function_16x");
+	}
+	if (Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Call)
+	{
+		return FAppStyle::GetBrush("GraphEditor.Function_16x");
+	}
+	if (Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Control)
+	{
+		return FAppStyle::GetBrush("GraphEditor.StateMachine_16x");
 	}
 	return nullptr;
 }

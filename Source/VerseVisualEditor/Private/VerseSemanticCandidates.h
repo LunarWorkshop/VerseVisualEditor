@@ -39,6 +39,8 @@ struct FVerseSemanticCandidate
 	bool bUsesFailureCallSyntax = false;
 	int32 BoundInputIndex = INDEX_NONE;
 	TArray<FString> UnboundInputDefaults;
+	TArray<FString> InputNames;
+	TArray<bool> NamedInputs;
 	const uLang::CDataDefinition* DataDefinition = nullptr;
 	const uLang::CFunction* Function = nullptr;
 	const uLang::CTypeBase* ResultType = nullptr;

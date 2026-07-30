@@ -462,8 +462,13 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	{
 		const FVerseSourceRegion* Region = VerseParseSnapshotBuilderTests::FindTypedRegion(
 			Snapshot, Snapshot.GetSourceRegions(), Name);
-		if (!TestNotNull(TEXT("Typed Add fixture exists"), Region)
-			|| !TestEqual(TEXT("Fixture has one root expression"), Region->BodyClause.Items.Num(), 1))
+		const FUTF8ToTCHAR ConvertedName(
+			reinterpret_cast<const ANSICHAR*>(Name.GetData()), Name.Len());
+		const FString FixtureName(ConvertedName.Length(), ConvertedName.Get());
+		const FString Label = FString::Printf(
+			TEXT("%s fixture has one root expression"), *FixtureName);
+		if (!TestNotNull(TEXT("Typed expression fixture exists"), Region)
+			|| !TestEqual(*Label, Region->BodyClause.Items.Num(), 1))
 		{
 			return nullptr;
 		}
@@ -526,6 +531,13 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			&& Snapshot.GetSourceView(Call->OperatorRange) == UTF8TEXTVIEW("Abs")
 			&& Snapshot.GetSourceView(Call->Operands[0].Range) == UTF8TEXTVIEW("Input"));
 	}
+	if (const FVerseExpressionDescriptor* NamedCall = FindOnlyExpression(UTF8TEXTVIEW("CallNamed")))
+	{
+		TestTrue(TEXT("Named calls retain the value as their source-exact operand"),
+			NamedCall->Kind == EVerseExpressionKind::Call
+			&& NamedCall->Operands.Num() == 1
+			&& Snapshot.GetSourceView(NamedCall->Operands[0].Range) == UTF8TEXTVIEW("Input"));
+	}
 	if (const FVerseExpressionDescriptor* Subtract = FindOnlyExpression(UTF8TEXTVIEW("Subtract")))
 	{
 		TestEqual(TEXT("Subtraction uses the generic operator shape"),
@@ -556,6 +568,53 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 				Snapshot.GetSourceView(Expression->OperatorRange) == Expected.Spelling);
 			TestEqual(TEXT("Binary operator retains two operands"), Expression->Operands.Num(), 2);
 		}
+	}
+	if (const FVerseExpressionDescriptor* If = FindOnlyExpression(UTF8TEXTVIEW("ControlIf")))
+	{
+		TestTrue(TEXT("If creates compiler-derived condition, body, and else regions"),
+			If->Kind == EVerseExpressionKind::Control
+			&& If->ControlKind == EVerseControlKind::If
+			&& If->ControlRegions.Num() == 3
+			&& If->ControlRegions[0].Kind == EVerseControlRegionKind::Condition
+			&& If->ControlRegions[1].Kind == EVerseControlRegionKind::Body
+			&& If->ControlRegions[2].Kind == EVerseControlRegionKind::Else);
+	}
+	if (const FVerseExpressionDescriptor* For = FindOnlyExpression(UTF8TEXTVIEW("ControlFor")))
+	{
+		TestTrue(TEXT("For creates iterator and body regions from its macro clauses"),
+			For->Kind == EVerseExpressionKind::Control
+			&& For->ControlKind == EVerseControlKind::For
+			&& For->ControlRegions.Num() >= 2);
+	}
+	if (const FVerseExpressionDescriptor* Loop = FindOnlyExpression(UTF8TEXTVIEW("ControlLoop")))
+	{
+		TestTrue(TEXT("Verse loop creates its own body region"),
+			Loop->Kind == EVerseExpressionKind::Control
+			&& Loop->ControlKind == EVerseControlKind::Loop
+			&& Loop->ControlRegions.Num() == 1
+			&& Loop->ControlRegions[0].Kind == EVerseControlRegionKind::Body);
+	}
+	const FVerseSourceRegion* LocalDefinitions = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot, Snapshot.GetSourceRegions(), UTF8TEXTVIEW("LocalDefinitions"));
+	if (TestNotNull(TEXT("Local-definition fixture exists"), LocalDefinitions)
+		&& TestEqual(TEXT("Local-definition fixture has three statements"),
+			LocalDefinitions->BodyClause.Items.Num(), 3))
+	{
+		const FVerseExpressionDescriptor& Variable =
+			LocalDefinitions->BodyClause.Items[0].Expression;
+		const FVerseExpressionDescriptor& Constant =
+			LocalDefinitions->BodyClause.Items[1].Expression;
+		TestTrue(TEXT("Mutable local definitions retain name, type, and value"),
+			Variable.Kind == EVerseExpressionKind::Definition
+			&& Variable.DefinitionKind == VerseSyntaxKind::Variable
+			&& Snapshot.GetSourceView(Variable.NameRange) == UTF8TEXTVIEW("Total")
+			&& Snapshot.GetSourceView(Variable.DeclaredTypeRange) == UTF8TEXTVIEW("int")
+			&& Variable.Operands.Num() == 1);
+		TestTrue(TEXT("Immutable local definitions reuse the same definition shape"),
+			Constant.Kind == EVerseExpressionKind::Definition
+			&& Constant.DefinitionKind == VerseSyntaxKind::Constant
+			&& Snapshot.GetSourceView(Constant.NameRange) == UTF8TEXTVIEW("Offset")
+			&& Constant.Operands.Num() == 1);
 	}
 	return true;
 }
