@@ -2,12 +2,14 @@
 #include "SVerseTile.h"
 
 #include "VerseDocumentSession.h"
+#include "VerseOrderedTilePacking.h"
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SPanel.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -15,12 +17,87 @@
 
 namespace
 {
-	bool BelongsInCompactStack(const FVerseVisualTile& Tile)
+	class SOrderedSquareTilePanel final : public SPanel
+	{
+	public:
+		SLATE_BEGIN_ARGS(SOrderedSquareTilePanel) {}
+		SLATE_END_ARGS()
+
+		SOrderedSquareTilePanel()
+			: Children(this)
+		{
+		}
+
+		void Construct(const FArguments& InArgs)
+		{
+		}
+
+		void AddTile(TSharedRef<SWidget> Tile)
+		{
+			FSlot::FSlotArguments SlotArguments(MakeUnique<FSlot>());
+			SlotArguments.AttachWidget(Tile);
+			Children.AddSlot(MoveTemp(SlotArguments));
+		}
+
+		virtual void OnArrangeChildren(
+			const FGeometry& AllottedGeometry,
+			FArrangedChildren& ArrangedChildren) const override
+		{
+			const FVerseOrderedTilePackingResult Layout = ComputeLayout();
+			for (int32 Index = 0; Index < Children.Num(); ++Index)
+			{
+				const FSlot& Slot = Children[Index];
+				const TSharedRef<SWidget> Widget = Slot.GetWidget();
+				const EVisibility Visibility = Widget->GetVisibility();
+				if (ArrangedChildren.Accepts(Visibility))
+				{
+					ArrangedChildren.AddWidget(
+						Visibility,
+						AllottedGeometry.MakeChild(
+							Widget,
+							Widget->GetDesiredSize(),
+							FSlateLayoutTransform(Layout.Positions[Index])));
+				}
+			}
+		}
+
+		virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override
+		{
+			return ComputeLayout().Size;
+		}
+
+		virtual FChildren* GetChildren() override
+		{
+			return &Children;
+		}
+
+	private:
+		struct FSlot : TSlotBase<FSlot>
+		{
+		};
+
+		FVerseOrderedTilePackingResult ComputeLayout() const
+		{
+			TArray<FVector2D, TInlineAllocator<16>> Sizes;
+			Sizes.Reserve(Children.Num());
+			for (int32 Index = 0; Index < Children.Num(); ++Index)
+			{
+				Sizes.Add(Children[Index].GetWidget()->GetDesiredSize());
+			}
+			return PackVerseTilesApproximatelySquare(Sizes, 16.0f, 8.0f);
+		}
+
+		TPanelChildren<FSlot> Children;
+	};
+
+	bool BelongsInCompactStack(const FVerseVisualTile& Tile, bool bIncludeFunctions)
 	{
 		return Tile.Kind == EVerseVisualTileKind::Comment
 			|| (Tile.Kind == EVerseVisualTileKind::Definition
 				&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
-					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias));
+					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias
+					|| (bIncludeFunctions
+						&& Tile.DefinitionKind == VerseSyntaxKind::Function)));
 	}
 
 	FLinearColor GetVerseTypeColor(const FString& TypeName)
@@ -148,13 +225,14 @@ bool SVerseFileCanvas::FocusTile(const FVerseVisualTile& Tile)
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildTileRow()
 {
-	return BuildTileSequence(Tiles, INDEX_NONE, true);
+	return BuildTileSequence(Tiles, INDEX_NONE, true, true);
 }
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildTileSequence(
 	TConstArrayView<FVerseVisualTile> TilesToBuild,
 	int32 SharedDiagnosticTileIndex,
-	bool bShowEmptyDocumentMessage)
+	bool bShowEmptyDocumentMessage,
+	bool bIncludeFunctionsInCompactStack)
 {
 	TSharedRef<SHorizontalBox> TileRow = SNew(SHorizontalBox);
 	for (int32 TileIndex = 0; TileIndex < TilesToBuild.Num();)
@@ -163,22 +241,24 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildTileSequence(
 			? TileIndex
 			: SharedDiagnosticTileIndex;
 		TSharedRef<SWidget> Presentation = SNullWidget::NullWidget;
-		if (BelongsInCompactStack(TilesToBuild[TileIndex]))
+		if (BelongsInCompactStack(
+			TilesToBuild[TileIndex], bIncludeFunctionsInCompactStack))
 		{
-			TSharedRef<SVerticalBox> CompactStack = SNew(SVerticalBox);
+			TSharedRef<SOrderedSquareTilePanel> CompactStack =
+				SNew(SOrderedSquareTilePanel);
 			do
 			{
-				CompactStack->AddSlot()
-				.AutoHeight()
-				.Padding(0.0f, 0.0f, 0.0f, 8.0f)
-				[
+				CompactStack->AddTile(
 					BuildTile(
 						TilesToBuild[TileIndex],
-						SharedDiagnosticTileIndex == INDEX_NONE ? TileIndex : SharedDiagnosticTileIndex)
-				];
+						SharedDiagnosticTileIndex == INDEX_NONE
+							? TileIndex
+							: SharedDiagnosticTileIndex));
 				++TileIndex;
 			}
-			while (TileIndex < TilesToBuild.Num() && BelongsInCompactStack(TilesToBuild[TileIndex]));
+			while (TileIndex < TilesToBuild.Num()
+				&& BelongsInCompactStack(
+					TilesToBuild[TileIndex], bIncludeFunctionsInCompactStack));
 			Presentation = CompactStack;
 		}
 		else
@@ -245,7 +325,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 		.AutoWrapText(true);
 	if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.Children.IsEmpty())
 	{
-		BodyContent = BuildTileSequence(Tile.Children, TileIndex, false);
+		BodyContent = BuildTileSequence(Tile.Children, TileIndex, false, false);
 	}
 	else if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Function)
 	{
