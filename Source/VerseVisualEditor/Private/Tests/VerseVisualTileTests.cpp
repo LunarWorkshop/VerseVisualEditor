@@ -433,7 +433,7 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& GraphTiles[0].ValueOutputs.Num() == 2);
 		TestTrue(TEXT("Function body expression uses the shared visual tile model"),
 			GraphTiles[1].Kind == EVerseVisualTileKind::Expression
-			&& GraphTiles[1].ExpressionKind == EVerseExpressionKind::Addition
+			&& GraphTiles[1].ExpressionKind == EVerseExpressionKind::BinaryOperator
 			&& GraphTiles[1].OperatorRange.IsSet()
 			&& Snapshot.GetDocument()->DecodeOriginalRange(GraphTiles[1].OperatorRange) == TEXT("+")
 			&& GraphTiles[1].bHasExecutionInput
@@ -507,6 +507,37 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				&& NegativeIntGraph[1].ValueInputs[1].InlineLiteralKind == EVerseLiteralKind::Integer
 				&& Snapshot.GetDocument()->DecodeOriginalRange(
 					NegativeIntGraph[1].ValueInputs[1].InlineLiteralRange) == TEXT("-12"));
+		}
+	}
+
+	struct FExpectedBinaryTile
+	{
+		FUtf8StringView Function;
+	};
+	const FExpectedBinaryTile BinaryTiles[] = {
+		{UTF8TEXTVIEW("Subtract")},
+		{UTF8TEXTVIEW("Multiply")},
+		{UTF8TEXTVIEW("Divide")},
+		{UTF8TEXTVIEW("Equal")},
+		{UTF8TEXTVIEW("NotEqual")},
+		{UTF8TEXTVIEW("LessThan")},
+		{UTF8TEXTVIEW("LessThanOrEqual")},
+		{UTF8TEXTVIEW("GreaterThan")},
+		{UTF8TEXTVIEW("GreaterThanOrEqual")},
+	};
+	for (const FExpectedBinaryTile& Expected : BinaryTiles)
+	{
+		const FVerseVisualTile* Definition = VerseVisualTileTests::FindDefinition(
+			Snapshot, Tiles, Expected.Function);
+		if (TestNotNull(TEXT("Binary operator visual definition exists"), Definition))
+		{
+			const TArray<FVerseVisualTile> Graph =
+				FVerseVisualTileBuilder::BuildFunctionGraph(*Definition, Snapshot);
+			TestTrue(TEXT("Binary operator uses the common two-input operator tile"),
+				Graph.Num() == 3
+				&& Graph[1].ExpressionKind == EVerseExpressionKind::BinaryOperator
+				&& Graph[1].OperatorRange.IsSet()
+				&& Graph[1].ValueInputs.Num() == 2);
 		}
 	}
 

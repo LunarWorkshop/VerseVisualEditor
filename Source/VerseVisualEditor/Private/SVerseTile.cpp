@@ -582,8 +582,8 @@ FText SVerseTile::GetKindText() const
 		{
 			return FText::GetEmpty();
 		}
-		return Tile.ExpressionKind == EVerseExpressionKind::Addition
-			? LOCTEXT("AdditionKind", "Add")
+		return IsVerseBinaryOperatorExpression(Tile.ExpressionKind)
+			? LOCTEXT("OperatorKind", "Operator")
 			: LOCTEXT("ExpressionKind", "Expression");
 	case EVerseVisualTileKind::FunctionEntry: return LOCTEXT("FunctionEntryKind", "Function");
 	case EVerseVisualTileKind::FunctionReturn: return LOCTEXT("FunctionReturnKind", "Return");

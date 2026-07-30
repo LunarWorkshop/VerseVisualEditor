@@ -29,3 +29,27 @@ AddChain(A : int, B : int, C : int)<computes> : int =
 
 Subtract(Left : int, Right : int)<computes> : int =
     Left - Right
+
+Multiply(Left : int, Right : int)<computes> : int =
+    Left * Right
+
+Divide(Left : float, Right : float)<computes> : float =
+    Left / Right
+
+Equal(Left : int, Right : int)<decides><computes> : void =
+    Left = Right
+
+NotEqual(Left : int, Right : int)<decides><computes> : void =
+    Left <> Right
+
+LessThan(Left : int, Right : int)<decides><computes> : void =
+    Left < Right
+
+LessThanOrEqual(Left : int, Right : int)<decides><computes> : void =
+    Left <= Right
+
+GreaterThan(Left : int, Right : int)<decides><computes> : void =
+    Left > Right
+
+GreaterThanOrEqual(Left : int, Right : int)<decides><computes> : void =
+    Left >= Right

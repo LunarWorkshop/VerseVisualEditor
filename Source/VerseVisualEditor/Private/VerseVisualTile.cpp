@@ -245,19 +245,28 @@ namespace
 		{
 			Tile.Children.Add(MakeExpressionTile(Operand, Snapshot, false, false));
 		}
-		if (Descriptor.Kind == EVerseExpressionKind::Addition)
+		if (IsVerseBinaryOperatorExpression(Descriptor.Kind))
 		{
-			for (int32 Index = 0; Index < Descriptor.Operands.Num(); ++Index)
+			for (const FVerseVisualExpressionDescriptor& Operand : Descriptor.Operands)
 			{
 				Tile.ValueInputs.Add(MakeSocket(
-					Descriptor.TypeRange,
-					Descriptor.IntrinsicTypeName,
+					Operand.TypeRange.IsSet() ? Operand.TypeRange : Descriptor.TypeRange,
+					!Operand.IntrinsicTypeName.IsNone()
+						? Operand.IntrinsicTypeName
+						: Descriptor.IntrinsicTypeName,
 					true));
 			}
-			Tile.ValueOutputs.Add(MakeSocket(
-				Descriptor.TypeRange,
-				Descriptor.IntrinsicTypeName,
-				bImplicitReturnValue));
+			const bool bVoidResult = Descriptor.IntrinsicTypeName == TEXT("void")
+				|| (Descriptor.TypeRange.IsSet()
+					&& Snapshot.GetDocument()->DecodeOriginalRange(Descriptor.TypeRange)
+						.TrimStartAndEnd() == TEXT("void"));
+			if (!bVoidResult)
+			{
+				Tile.ValueOutputs.Add(MakeSocket(
+					Descriptor.TypeRange,
+					Descriptor.IntrinsicTypeName,
+					bImplicitReturnValue));
+			}
 			for (FVerseVisualTile& Child : Tile.Children)
 			{
 				if (Child.LiteralKind == EVerseLiteralKind::None)

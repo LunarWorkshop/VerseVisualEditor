@@ -59,7 +59,7 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 	IntegerLessKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
 	IntegerLessKey.Spelling = TEXT("<");
 	IntegerLessKey.ParameterTypes = {TEXT("int"), TEXT("int")};
-	IntegerLessKey.ResultType = TEXT("int");
+	IntegerLessKey.ResultType = TEXT("void");
 	const FVerseIntrinsicPresentationDescriptor* IntegerLess =
 		FindVerseIntrinsicPresentation(IntegerLessKey);
 	if (TestNotNull(TEXT("Typed integer relation descriptor resolves"), IntegerLess))
@@ -231,7 +231,7 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		Identifier.ValueOutputs[0],
 		true,
 		*Session.GetParseSnapshot().GetDocument());
-	TestEqual(TEXT("Only consumers are offered for an output drag"), Actions.Num(), 1);
+	TestEqual(TEXT("All compatible built-in binary consumers are offered for an int output drag"), Actions.Num(), 10);
 	TestTrue(TEXT("Identifiers are excluded from output-drag consumers"), !Actions.ContainsByPredicate(
 		[](const TSharedPtr<FVerseExpressionAction>& Action)
 		{
@@ -248,6 +248,13 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestTrue(TEXT("Verse not-equal is offered using its source spelling"), Actions.ContainsByPredicate(
+		[](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+				&& Action->SourceSpelling == TEXT("<>")
+				&& Action->DisplayName.ToString() == TEXT("Not Equal (!=)");
+		}));
 	TestEqual(
 		TEXT("The editor-supported Add action uses structural validation"),
 		(*Add)->Validation,

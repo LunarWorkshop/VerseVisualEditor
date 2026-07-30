@@ -65,7 +65,7 @@ namespace
 		TSharedPtr<FVerseExpressionAction> Action;
 		TArray<FVerseExpressionType> InputTypes;
 		FVerseExpressionType OutputType;
-		TOptional<EVerseOperatorKind> PolymorphicOperator;
+		FString OperatorSpelling;
 		int32 RequiredInputCount = 0;
 		bool bHomogeneousInputs = false;
 	};
@@ -107,10 +107,10 @@ namespace
 		const FVerseExpressionType& SourceType,
 		FUtf8StringView Source)
 	{
-		if (Candidate.PolymorphicOperator.IsSet())
+		if (!Candidate.OperatorSpelling.IsEmpty())
 		{
 			return FVerseOperatorTyping::CanAcceptOperand(
-				Candidate.PolymorphicOperator.GetValue(), SourceType, Source);
+				Candidate.OperatorSpelling, SourceType, Source);
 		}
 		return Candidate.InputTypes.ContainsByPredicate(
 			[&](const FVerseExpressionType& InputType)
@@ -124,10 +124,10 @@ namespace
 		const FVerseExpressionType& RequiredType,
 		FUtf8StringView Source)
 	{
-		if (Candidate.PolymorphicOperator.IsSet())
+		if (!Candidate.OperatorSpelling.IsEmpty())
 		{
 			return FVerseOperatorTyping::CanProduceResult(
-				Candidate.PolymorphicOperator.GetValue(), RequiredType, Source);
+				Candidate.OperatorSpelling, RequiredType, Source);
 		}
 		return Candidate.OutputType.IsResolved()
 			&& TypesMatch(Candidate.OutputType, RequiredType, Source);
@@ -155,27 +155,32 @@ namespace
 				EVerseTypeResolutionProvenance::LocallyInferred};
 		}
 
-		FExpressionCandidate& Addition = Candidates.AddDefaulted_GetRef();
-		Addition.Action = MakeShared<FVerseExpressionAction>();
-		Addition.Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
-		Addition.Action->SourceSpelling = TEXT("+");
-		FVerseIntrinsicPresentationKey AdditionPresentationKey;
-		AdditionPresentationKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
-		AdditionPresentationKey.Spelling = TEXT("+");
-		const FVerseResolvedExpressionPresentation AdditionPresentation =
-			ResolveVerseExpressionPresentation(
-				FText::GetEmpty(),
-				FText::GetEmpty(),
-				FText::GetEmpty(),
-				FText::GetEmpty(),
-				FindVerseIntrinsicPresentation(AdditionPresentationKey),
-				AdditionPresentationKey.Spelling);
-		Addition.Action->DisplayName = AdditionPresentation.DisplayName;
-		Addition.Action->Category = AdditionPresentation.Category;
-		Addition.Action->ModuleCategory = LOCTEXT("VerseModuleCategory", "Verse");
-		Addition.PolymorphicOperator = EVerseOperatorKind::Addition;
-		Addition.RequiredInputCount = 2;
-		Addition.bHomogeneousInputs = true;
+		TSet<FString> AddedOperators;
+		for (const FVerseIntrinsicPresentationDescriptor& Descriptor :
+			GetVerseIntrinsicPresentationTable())
+		{
+			if (!Descriptor.bStructuralSignature
+				|| Descriptor.Key.Form != EVerseIntrinsicCallableForm::InfixOperator
+				|| AddedOperators.Contains(Descriptor.Key.Spelling))
+			{
+				continue;
+			}
+			AddedOperators.Add(Descriptor.Key.Spelling);
+			FExpressionCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+			Candidate.Action = MakeShared<FVerseExpressionAction>();
+			Candidate.Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
+			Candidate.Action->SourceSpelling = Descriptor.Key.Spelling;
+			const FVerseResolvedExpressionPresentation Presentation =
+				ResolveVerseExpressionPresentation(
+					FText::GetEmpty(), FText::GetEmpty(), FText::GetEmpty(), FText::GetEmpty(),
+					&Descriptor, Descriptor.Key.Spelling);
+			Candidate.Action->DisplayName = Presentation.DisplayName;
+			Candidate.Action->Category = Presentation.Category;
+			Candidate.Action->ModuleCategory = LOCTEXT("VerseModuleCategory", "Verse");
+			Candidate.OperatorSpelling = Descriptor.Key.Spelling;
+			Candidate.RequiredInputCount = Descriptor.Key.ParameterTypes.Num();
+			Candidate.bHomogeneousInputs = true;
+		}
 		return Candidates;
 	}
 }
@@ -200,7 +205,7 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 		if (bCompatible)
 		{
 			Candidate.Action->ResultTypeName = GetTypeName(
-				Candidate.PolymorphicOperator.IsSet() ? SocketType : Candidate.OutputType,
+				!Candidate.OperatorSpelling.IsEmpty() ? SocketType : Candidate.OutputType,
 				Source);
 			if (bDraggingFromOutput && Candidate.RequiredInputCount > 1)
 			{
@@ -391,9 +396,7 @@ bool TryApplyVerseExpressionAction(
 			Replacement = FString::Printf(
 				TEXT("%s %s %s"),
 				*Inputs[0], *Action.SourceSpelling, *Inputs[1]);
-			RequiredKind = Action.SourceSpelling == TEXT("+")
-				? EVerseExpressionKind::Addition
-				: EVerseExpressionKind::Unsupported;
+			RequiredKind = EVerseExpressionKind::BinaryOperator;
 			break;
 		case EVerseExpressionSourceForm::PrefixOperator:
 			if (Inputs.Num() != 1)

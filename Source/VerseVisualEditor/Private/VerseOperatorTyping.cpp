@@ -1,31 +1,10 @@
 #include "VerseOperatorTyping.h"
 
 #include "Containers/StringConv.h"
+#include "VerseIntrinsicPresentation.h"
 
 namespace
 {
-	enum class ETypePatternKind : uint8
-	{
-		Concrete,
-		ArrayVariable,
-	};
-
-	struct FTypePattern
-	{
-		ETypePatternKind Kind = ETypePatternKind::Concrete;
-		FName ConcreteName;
-		int32 VariableIndex = INDEX_NONE;
-	};
-
-	struct FOperatorSignature
-	{
-		EVerseOperatorKind Operator = EVerseOperatorKind::Addition;
-		int32 MinimumOperands = 2;
-		TArray<FTypePattern> FixedOperands;
-		TOptional<FTypePattern> VariadicOperand;
-		FTypePattern Result;
-	};
-
 	FString NormalizeType(FString Type)
 	{
 		Type.TrimStartAndEndInline();
@@ -48,172 +27,135 @@ namespace
 
 	FString GetEvidenceName(const FVerseExpressionType& Type, FUtf8StringView Source)
 	{
-		if (Type.SourceRange.IsSet())
-		{
-			return NormalizeType(Decode(Source, Type.SourceRange));
-		}
-		return NormalizeType(Type.IntrinsicName.ToString());
+		return NormalizeType(Type.SourceRange.IsSet()
+			? Decode(Source, Type.SourceRange)
+			: Type.IntrinsicName.ToString());
 	}
 
-	TArray<FOperatorSignature> GetSignatures(EVerseOperatorKind Operator)
+	bool IsStructuralOperator(
+		const FVerseIntrinsicPresentationDescriptor& Descriptor,
+		FStringView Spelling)
 	{
-		TArray<FOperatorSignature> Result;
-		if (Operator != EVerseOperatorKind::Addition)
-		{
-			return Result;
-		}
-
-		auto AddConcrete = [&Result, Operator](const FName TypeName)
-		{
-			FOperatorSignature& Signature = Result.AddDefaulted_GetRef();
-			Signature.Operator = Operator;
-			Signature.VariadicOperand = FTypePattern{ETypePatternKind::Concrete, TypeName};
-			Signature.Result = FTypePattern{ETypePatternKind::Concrete, TypeName};
-		};
-		AddConcrete(TEXT("int"));
-		AddConcrete(TEXT("float"));
-		AddConcrete(TEXT("string"));
-
-		FOperatorSignature& Array = Result.AddDefaulted_GetRef();
-		Array.Operator = Operator;
-		Array.VariadicOperand = FTypePattern{ETypePatternKind::ArrayVariable, NAME_None, 0};
-		Array.Result = FTypePattern{ETypePatternKind::ArrayVariable, NAME_None, 0};
-		return Result;
+		return Descriptor.bStructuralSignature
+			&& Descriptor.Key.Form == EVerseIntrinsicCallableForm::InfixOperator
+			&& Descriptor.Key.Spelling == FString(Spelling);
 	}
 
 	bool MatchPattern(
-		const FTypePattern& Pattern,
-		const FString& Evidence,
-		TMap<int32, FString>& Variables)
+		FStringView Pattern,
+		FStringView Evidence,
+		TConstArrayView<FString> OperandEvidence)
 	{
 		if (Evidence.IsEmpty())
 		{
 			return true;
 		}
-		if (Pattern.Kind == ETypePatternKind::Concrete)
+		if (Pattern == TEXT("*"))
 		{
-			return Evidence == Pattern.ConcreteName.ToString();
+			return true;
 		}
-		if (!Evidence.StartsWith(TEXT("[]")) || Evidence.Len() <= 2)
+		if (Pattern == TEXT("$0"))
 		{
-			return false;
+			return OperandEvidence.IsEmpty()
+				|| OperandEvidence[0].IsEmpty()
+				|| Evidence == OperandEvidence[0];
 		}
-		const FString ElementType = Evidence.Mid(2);
-		if (const FString* Existing = Variables.Find(Pattern.VariableIndex))
+		if (Pattern == TEXT("[]*"))
 		{
-			return *Existing == ElementType;
+			return Evidence.StartsWith(TEXT("[]"))
+				&& (OperandEvidence.IsEmpty()
+					|| OperandEvidence[0].IsEmpty()
+					|| !OperandEvidence[0].StartsWith(TEXT("[]"))
+					|| Evidence == OperandEvidence[0]);
 		}
-		Variables.Add(Pattern.VariableIndex, ElementType);
-		return true;
+		return Evidence == NormalizeType(FString(Pattern));
 	}
 
-	FString ResolvePattern(const FTypePattern& Pattern, const TMap<int32, FString>& Variables)
+	FString ResolvePattern(FStringView Pattern, TConstArrayView<FString> OperandEvidence)
 	{
-		if (Pattern.Kind == ETypePatternKind::Concrete)
+		if (Pattern == TEXT("$0") || Pattern == TEXT("*") || Pattern == TEXT("[]*"))
 		{
-			return Pattern.ConcreteName.ToString();
+			return OperandEvidence.IsEmpty() ? FString() : OperandEvidence[0];
 		}
-		const FString* Element = Variables.Find(Pattern.VariableIndex);
-		return Element != nullptr ? TEXT("[]") + *Element : FString();
+		return NormalizeType(FString(Pattern));
 	}
 }
 
 FVerseExpressionType FVerseOperatorTyping::Resolve(
-	EVerseOperatorKind Operator,
+	FStringView OperatorSpelling,
 	TConstArrayView<FVerseExpressionType> OperandTypes,
 	const FVerseExpressionType& ExpectedResult,
 	FUtf8StringView Source)
 {
-	FVerseExpressionType Unresolved;
-	TArray<FString> OperandNames;
-	OperandNames.Reserve(OperandTypes.Num());
+	TArray<FString> OperandEvidence;
+	OperandEvidence.Reserve(OperandTypes.Num());
 	for (const FVerseExpressionType& Operand : OperandTypes)
 	{
-		OperandNames.Add(GetEvidenceName(Operand, Source));
+		OperandEvidence.Add(GetEvidenceName(Operand, Source));
 	}
-	const FString ExpectedName = GetEvidenceName(ExpectedResult, Source);
-
-	struct FMatch
+	const FString Expected = GetEvidenceName(ExpectedResult, Source);
+	TSet<FString> MatchingResults;
+	for (const FVerseIntrinsicPresentationDescriptor& Descriptor : GetVerseIntrinsicPresentationTable())
 	{
-		FString ResultType;
-	};
-	TArray<FMatch> Matches;
-	for (const FOperatorSignature& Signature : GetSignatures(Operator))
-	{
-		if (OperandTypes.Num() < Signature.MinimumOperands
-			|| (!Signature.VariadicOperand.IsSet()
-				&& OperandTypes.Num() != Signature.FixedOperands.Num()))
+		if (!IsStructuralOperator(Descriptor, OperatorSpelling)
+			|| Descriptor.Key.ParameterTypes.Num() != OperandTypes.Num())
 		{
 			continue;
 		}
-
-		TMap<int32, FString> Variables;
 		bool bMatches = true;
-		for (int32 Index = 0; Index < OperandNames.Num(); ++Index)
+		for (int32 Index = 0; Index < OperandEvidence.Num(); ++Index)
 		{
-			const FTypePattern* Pattern = Signature.FixedOperands.IsValidIndex(Index)
-				? &Signature.FixedOperands[Index]
-				: Signature.VariadicOperand.IsSet() ? &Signature.VariadicOperand.GetValue() : nullptr;
-			if (Pattern == nullptr || !MatchPattern(*Pattern, OperandNames[Index], Variables))
+			if (!MatchPattern(
+				Descriptor.Key.ParameterTypes[Index], OperandEvidence[Index], OperandEvidence))
 			{
 				bMatches = false;
 				break;
 			}
 		}
-		if (bMatches && !MatchPattern(Signature.Result, ExpectedName, Variables))
+		const FString ResultType = ResolvePattern(Descriptor.Key.ResultType, OperandEvidence);
+		if (bMatches && !ResultType.IsEmpty()
+			&& MatchPattern(Descriptor.Key.ResultType, Expected, OperandEvidence))
 		{
-			bMatches = false;
-		}
-		const FString ResultType = bMatches ? ResolvePattern(Signature.Result, Variables) : FString();
-		if (bMatches && !ResultType.IsEmpty())
-		{
-			Matches.Add({ResultType});
+			MatchingResults.Add(ResultType);
 		}
 	}
-
-	if (Matches.Num() != 1)
+	if (MatchingResults.Num() != 1)
 	{
-		return Unresolved;
+		return {};
 	}
 
+	const FString ResolvedName = MatchingResults.Array()[0];
 	FVerseExpressionType Resolved;
 	Resolved.Provenance = EVerseTypeResolutionProvenance::LocallyInferred;
 	for (const FVerseExpressionType& Operand : OperandTypes)
 	{
-		if (Operand.SourceRange.IsSet()
-			&& GetEvidenceName(Operand, Source) == Matches[0].ResultType)
+		if (Operand.SourceRange.IsSet() && GetEvidenceName(Operand, Source) == ResolvedName)
 		{
 			Resolved.SourceRange = Operand.SourceRange;
 			return Resolved;
 		}
 	}
-	if (ExpectedResult.SourceRange.IsSet()
-		&& ExpectedName == Matches[0].ResultType)
+	if (ExpectedResult.SourceRange.IsSet() && Expected == ResolvedName)
 	{
 		Resolved.SourceRange = ExpectedResult.SourceRange;
 		return Resolved;
 	}
-	Resolved.IntrinsicName = FName(*Matches[0].ResultType);
+	Resolved.IntrinsicName = FName(*ResolvedName);
 	return Resolved;
 }
 
-bool FVerseOperatorTyping::SupportsOperandCount(
-	EVerseOperatorKind Operator,
-	int32 OperandCount)
+bool FVerseOperatorTyping::SupportsOperandCount(FStringView OperatorSpelling, int32 OperandCount)
 {
-	for (const FOperatorSignature& Signature : GetSignatures(Operator))
-	{
-		if (OperandCount >= Signature.MinimumOperands
-			&& (Signature.VariadicOperand.IsSet() || OperandCount == Signature.FixedOperands.Num()))
+	return GetVerseIntrinsicPresentationTable().ContainsByPredicate(
+		[OperatorSpelling, OperandCount](const FVerseIntrinsicPresentationDescriptor& Descriptor)
 		{
-			return true;
-		}
-	}
-	return false;
+			return IsStructuralOperator(Descriptor, OperatorSpelling)
+				&& Descriptor.Key.ParameterTypes.Num() == OperandCount;
+		});
 }
 
 bool FVerseOperatorTyping::CanAcceptOperand(
-	EVerseOperatorKind Operator,
+	FStringView OperatorSpelling,
 	const FVerseExpressionType& OperandType,
 	FUtf8StringView Source)
 {
@@ -222,20 +164,17 @@ bool FVerseOperatorTyping::CanAcceptOperand(
 	{
 		return false;
 	}
-	for (const FOperatorSignature& Signature : GetSignatures(Operator))
+	for (const FVerseIntrinsicPresentationDescriptor& Descriptor : GetVerseIntrinsicPresentationTable())
 	{
-		for (const FTypePattern& Pattern : Signature.FixedOperands)
+		if (!IsStructuralOperator(Descriptor, OperatorSpelling))
 		{
-			TMap<int32, FString> Variables;
-			if (MatchPattern(Pattern, Evidence, Variables))
-			{
-				return true;
-			}
+			continue;
 		}
-		if (Signature.VariadicOperand.IsSet())
+		for (const FString& Pattern : Descriptor.Key.ParameterTypes)
 		{
-			TMap<int32, FString> Variables;
-			if (MatchPattern(Signature.VariadicOperand.GetValue(), Evidence, Variables))
+			if (Pattern == TEXT("*") || Pattern == TEXT("$0")
+				|| (Pattern == TEXT("[]*") && Evidence.StartsWith(TEXT("[]")))
+				|| NormalizeType(Pattern) == Evidence)
 			{
 				return true;
 			}
@@ -245,7 +184,7 @@ bool FVerseOperatorTyping::CanAcceptOperand(
 }
 
 bool FVerseOperatorTyping::CanProduceResult(
-	EVerseOperatorKind Operator,
+	FStringView OperatorSpelling,
 	const FVerseExpressionType& ResultType,
 	FUtf8StringView Source)
 {
@@ -254,13 +193,13 @@ bool FVerseOperatorTyping::CanProduceResult(
 	{
 		return false;
 	}
-	for (const FOperatorSignature& Signature : GetSignatures(Operator))
-	{
-		TMap<int32, FString> Variables;
-		if (MatchPattern(Signature.Result, Evidence, Variables))
+	return GetVerseIntrinsicPresentationTable().ContainsByPredicate(
+		[OperatorSpelling, &Evidence](const FVerseIntrinsicPresentationDescriptor& Descriptor)
 		{
-			return true;
-		}
-	}
-	return false;
+			return IsStructuralOperator(Descriptor, OperatorSpelling)
+				&& (Descriptor.Key.ResultType == TEXT("*")
+					|| Descriptor.Key.ResultType == TEXT("$0")
+					|| (Descriptor.Key.ResultType == TEXT("[]*") && Evidence.StartsWith(TEXT("[]")))
+					|| NormalizeType(Descriptor.Key.ResultType) == Evidence);
+		});
 }

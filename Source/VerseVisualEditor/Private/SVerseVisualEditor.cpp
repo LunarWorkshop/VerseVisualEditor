@@ -501,7 +501,7 @@ namespace
 		constexpr float OperandWireSpace = 72.0f;
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
-		if (Tile.ExpressionKind != EVerseExpressionKind::Addition || Tile.Children.Num() != 2)
+		if (!IsVerseBinaryOperatorExpression(Tile.ExpressionKind) || Tile.Children.Num() != 2)
 		{
 			return {
 				SNew(SHorizontalBox)

@@ -31,11 +31,29 @@ CorpusInterfaceTwo := interface {}
 CorpusEnumOne := enum { First, Second }
 CorpusEnumTwo := enum { Alpha, Beta }
 
-CorpusFunctionOne(Input : int)<computes> : int =
+CorpusFunctionIdentity(Input : int)<computes> : int =
     Input
 
-CorpusFunctionTwo(Input : int)<computes> : int =
+CorpusFunctionAdd1(Input : int)<computes> : int =
     Input + 1
+
+CorpusFunctionAddNegative1(Input : int)<computes> : int =
+    Input + -1
+
+CorpusFunctionSubtract1(Input : int)<computes> : int =
+    Input - 1
+
+CorpusFunctionMultiply1(Input : int)<computes> : int =
+    Input * 1
+
+CorpusFunctionDivide1(Input : int)<computes> : int =
+    Input / 1
+
+CorpusFunctionGreater1(Input : int)<computes> : bool =
+    Input > 1
+
+CorpusFunctionGreaterOrEqual1(Input : int)<computes> : bool =
+    Input >= 1
 
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"

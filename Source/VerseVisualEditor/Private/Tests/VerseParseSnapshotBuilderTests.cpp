@@ -344,8 +344,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 {
-	TestTrue(TEXT("Add signature is variadic for its future chain presentation"),
-		FVerseOperatorTyping::SupportsOperandCount(EVerseOperatorKind::Addition, 5));
+	TestTrue(TEXT("Add has a data-driven binary signature"),
+		FVerseOperatorTyping::SupportsOperandCount(TEXT("+"), 2));
 	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
 		*this,
 		TEXT("functions.verse"));
@@ -395,9 +395,9 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	if (Function->BodyClause.Items.Num() == 1)
 	{
 		const FVerseExpressionDescriptor& Add = Function->BodyClause.Items[0].Expression;
-		TestEqual(TEXT("Binary plus is recognized as Add"),
+		TestEqual(TEXT("Binary plus uses the generic operator shape"),
 			Add.Kind,
-			EVerseExpressionKind::Addition);
+			EVerseExpressionKind::BinaryOperator);
 		TestEqual(TEXT("Add retains two ordered operands"), Add.Operands.Num(), 2);
 		TestTrue(TEXT("Add operator range is exact"),
 			Snapshot.GetSourceView(Add.OperatorRange) == UTF8TEXTVIEW("+"));
@@ -473,7 +473,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	};
 	if (const FVerseExpressionDescriptor* AddInt = FindOnlyExpression(UTF8TEXTVIEW("AddIntLiteral")))
 	{
-		TestEqual(TEXT("Identifier plus literal is Add"), AddInt->Kind, EVerseExpressionKind::Addition);
+		TestEqual(TEXT("Identifier plus literal is a binary operator"),
+			AddInt->Kind, EVerseExpressionKind::BinaryOperator);
 		TestTrue(TEXT("Integer literal retains literal identity while its expression kind remains generic"),
 			AddInt->Operands.Num() == 2
 			&& AddInt->Operands[1].Kind == EVerseExpressionKind::Unsupported
@@ -510,8 +511,34 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	}
 	if (const FVerseExpressionDescriptor* Subtract = FindOnlyExpression(UTF8TEXTVIEW("Subtract")))
 	{
-		TestEqual(TEXT("Subtraction remains unsupported in this slice"),
-			Subtract->Kind, EVerseExpressionKind::Unsupported);
+		TestEqual(TEXT("Subtraction uses the generic operator shape"),
+			Subtract->Kind, EVerseExpressionKind::BinaryOperator);
+	}
+	struct FExpectedOperator
+	{
+		FUtf8StringView Function;
+		FUtf8StringView Spelling;
+	};
+	const FExpectedOperator ExpectedOperators[] = {
+		{UTF8TEXTVIEW("Multiply"), UTF8TEXTVIEW("*")},
+		{UTF8TEXTVIEW("Divide"), UTF8TEXTVIEW("/")},
+		{UTF8TEXTVIEW("Equal"), UTF8TEXTVIEW("=")},
+		{UTF8TEXTVIEW("NotEqual"), UTF8TEXTVIEW("<>")},
+		{UTF8TEXTVIEW("LessThan"), UTF8TEXTVIEW("<")},
+		{UTF8TEXTVIEW("LessThanOrEqual"), UTF8TEXTVIEW("<=")},
+		{UTF8TEXTVIEW("GreaterThan"), UTF8TEXTVIEW(">")},
+		{UTF8TEXTVIEW("GreaterThanOrEqual"), UTF8TEXTVIEW(">=")},
+	};
+	for (const FExpectedOperator& Expected : ExpectedOperators)
+	{
+		if (const FVerseExpressionDescriptor* Expression = FindOnlyExpression(Expected.Function))
+		{
+			TestEqual(TEXT("Binary operator uses the generic expression shape"),
+				Expression->Kind, EVerseExpressionKind::BinaryOperator);
+			TestTrue(TEXT("Binary operator range is source exact"),
+				Snapshot.GetSourceView(Expression->OperatorRange) == Expected.Spelling);
+			TestEqual(TEXT("Binary operator retains two operands"), Expression->Operands.Num(), 2);
+		}
 	}
 	return true;
 }

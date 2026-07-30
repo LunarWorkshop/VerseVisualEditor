@@ -33,6 +33,8 @@ struct FVerseIntrinsicPresentationKey
 struct FVerseIntrinsicPresentationDescriptor
 {
 	FVerseIntrinsicPresentationKey Key;
+	/** This row is a source-safe local signature, not only a presentation fallback. */
+	bool bStructuralSignature = false;
 	EVerseIntrinsicBlueprintLibrary BlueprintLibrary =
 		EVerseIntrinsicBlueprintLibrary::None;
 	FName BlueprintFunctionName;

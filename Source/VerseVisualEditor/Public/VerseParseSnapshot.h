@@ -37,8 +37,13 @@ enum class EVerseExpressionKind : uint8
 {
 	Unsupported,
 	Identifier,
-	Addition,
+	BinaryOperator,
 };
+
+inline bool IsVerseBinaryOperatorExpression(EVerseExpressionKind Kind)
+{
+	return Kind == EVerseExpressionKind::BinaryOperator;
+}
 
 enum class EVerseLiteralKind : uint8
 {

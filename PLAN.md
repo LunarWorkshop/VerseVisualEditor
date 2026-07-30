@@ -544,13 +544,6 @@ This step delivers the first complete edit-and-save workflow.
   use this same candidate and action pipeline rather than registering parallel
   search systems.
 
-### 12. Literal expressions
-
-- Add literal entries for each supported primitive type.
-- Provide type-appropriate inline and property-panel editors.
-- Add explicit controls for supported floating-point special values.
-- Restrict the first implementation to literals that require no casts.
-
 ### 13. Basic expressions
 
 - Replace operation-specific expression classification with a finite set of
@@ -635,6 +628,7 @@ This step delivers the first complete edit-and-save workflow.
 - Save the open function tabs
 - Zoom into the mouse pointer position
 - Inform the user that their open file is not registered with Solaris
+- Context menu hover tooltips for function descriptions
 
 ### 1. Multi-selection and copying
 
@@ -797,6 +791,13 @@ introduced immediately beforehand.
 - Recursively derive interface fields, accessors, nested definitions, and raw
   gaps from the interface VST body while retaining the parent interior range
   for empty-body insertion and trivia preservation.
+
+### 12. Literal expressions
+
+- Add literal entries for each supported primitive type.
+- Provide type-appropriate inline and property-panel editors.
+- Add explicit controls for supported floating-point special values.
+- Restrict the first implementation to literals that require no casts.
 
 All editing features for comments, definitions, statements, and expressions
 must reuse localized revisioned replacements, atomic transactions,
