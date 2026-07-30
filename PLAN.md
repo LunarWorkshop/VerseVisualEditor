@@ -544,7 +544,7 @@ This step delivers the first complete edit-and-save workflow.
   use this same candidate and action pipeline rather than registering parallel
   search systems.
 
-### 13. Basic expressions
+### 13. Basic expressions (complete)
 
 - Replace operation-specific expression classification with a finite set of
   visual syntax shapes: unsupported, identifier, literal, call, binary

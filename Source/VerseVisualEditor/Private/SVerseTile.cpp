@@ -395,7 +395,9 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	for (int32 SocketIndex = 0; SocketIndex < Sockets.Num(); ++SocketIndex)
 	{
 		const FVerseVisualSocket& Socket = Sockets[SocketIndex];
-		const FString Type = Socket.TypeRange.IsSet()
+		const FString Type = !Socket.SemanticTypeName.IsEmpty()
+			? Socket.SemanticTypeName
+			: Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
 		const FText Name = Decode(Socket.NameRange);
@@ -556,7 +558,9 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	DragStart.Tile = Tile;
 	DragStart.Socket = Socket;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
-	DragStart.WireColor = GetVerseTilePinColor(Socket.TypeRange.IsSet()
+	DragStart.WireColor = GetVerseTilePinColor(!Socket.SemanticTypeName.IsEmpty()
+		? Socket.SemanticTypeName
+		: Socket.TypeRange.IsSet()
 		? Decode(Socket.TypeRange).ToString()
 		: Socket.IntrinsicTypeName.ToString());
 	DragStart.bOutput = bOutput;
@@ -582,7 +586,7 @@ FText SVerseTile::GetKindText() const
 		{
 			return FText::GetEmpty();
 		}
-		return IsVerseBinaryOperatorExpression(Tile.ExpressionKind)
+		return IsVerseOperatorExpression(Tile.ExpressionKind)
 			? LOCTEXT("OperatorKind", "Operator")
 			: LOCTEXT("ExpressionKind", "Expression");
 	case EVerseVisualTileKind::FunctionEntry: return LOCTEXT("FunctionEntryKind", "Function");
@@ -604,7 +608,9 @@ FText SVerseTile::GetNameText() const
 
 FText SVerseTile::GetTypeText() const
 {
-	return Tile.TypeRange.IsSet()
+	return !Tile.SemanticTypeName.IsEmpty()
+		? FText::FromString(Tile.SemanticTypeName)
+		: Tile.TypeRange.IsSet()
 		? Decode(Tile.TypeRange)
 		: FText::FromName(Tile.IntrinsicTypeName);
 }

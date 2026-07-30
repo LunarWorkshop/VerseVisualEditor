@@ -37,12 +37,21 @@ enum class EVerseExpressionKind : uint8
 {
 	Unsupported,
 	Identifier,
+	Literal,
+	Call,
 	BinaryOperator,
+	UnaryOperator,
 };
 
 inline bool IsVerseBinaryOperatorExpression(EVerseExpressionKind Kind)
 {
 	return Kind == EVerseExpressionKind::BinaryOperator;
+}
+
+inline bool IsVerseOperatorExpression(EVerseExpressionKind Kind)
+{
+	return Kind == EVerseExpressionKind::BinaryOperator
+		|| Kind == EVerseExpressionKind::UnaryOperator;
 }
 
 enum class EVerseLiteralKind : uint8
@@ -81,6 +90,9 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 {
 	FVerseByteRange Range;
 	FVerseByteRange OperatorRange;
+	/** Official Verse VST identity. These values are deliberately not a plugin syntax catalog. */
+	uint8 VstNodeType = 0;
+	uint8 VstTag = 0;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	FVerseExpressionType Type;

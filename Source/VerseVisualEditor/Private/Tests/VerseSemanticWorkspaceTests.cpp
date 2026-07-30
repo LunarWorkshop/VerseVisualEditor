@@ -4,7 +4,10 @@
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
 #include "VerseExpressionActions.h"
+#include "VerseFunctionNavigation.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "VerseSemanticCandidates.h"
+#include "VerseVisualTile.h"
 
 #include "Misc/FileHelper.h"
 #include "Misc/AutomationTest.h"
@@ -283,6 +286,36 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			ExpressionBeginByte,
 			true,
 			*ParsedDocument);
+	const FVerseParseSnapshot SyntaxSnapshot =
+		FVerseParseSnapshotBuilder::Build(ParsedDocument.ToSharedRef());
+	const TArray<FVerseVisualTile> SyntaxTiles =
+		FVerseVisualTileBuilder::Build(SyntaxSnapshot, Document.Revision);
+	TArray<FVerseFunctionNavigationItem> BoundFunctions =
+		FVerseFunctionNavigationBuilder::Build(SyntaxTiles, SyntaxSnapshot);
+	FVerseFunctionNavigationItem* BoundIntFunction = BoundFunctions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("PrivateSemanticOverlayOnly");
+		});
+	if (TestNotNull(TEXT("Semantic binding fixture function exists"), BoundIntFunction)
+		&& TestTrue(TEXT("Semantic binding fixture has a statement"),
+			BoundIntFunction->GraphTiles.Num() >= 3))
+	{
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			BoundIntFunction->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		const FVerseVisualTile& BoundAdd = BoundIntFunction->GraphTiles[1];
+		TestNotNull(TEXT("Parsed Add is bound to its compiler CFunction"),
+			BoundAdd.SemanticFunction);
+		TestEqual(TEXT("Compiler supplies Add's concrete result type"),
+			BoundAdd.SemanticTypeName, FString(TEXT("int")));
+		TestTrue(TEXT("Compiler supplies both ordered Add parameter types"),
+			BoundAdd.ValueInputs.Num() == 2
+			&& BoundAdd.ValueInputs[0].SemanticTypeName == TEXT("int")
+			&& BoundAdd.ValueInputs[1].SemanticTypeName == TEXT("int"));
+	}
 	TestTrue(
 		TEXT("Compiler intrinsics contribute the polymorphic Add overload for int"),
 		Candidates.ContainsByPredicate([](const FVerseSemanticCandidate& Candidate)

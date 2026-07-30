@@ -4,6 +4,9 @@
 #include "VerseDocumentRevision.h"
 #include "VerseParseSnapshot.h"
 
+class FVerseSemanticSnapshot;
+namespace uLang { class CFunction; }
+
 enum class EVerseVisualTileKind : uint8
 {
 	Definition,
@@ -20,6 +23,8 @@ struct FVerseVisualSocket
 	FVerseTextRange TypeRange;
 	bool bConnected = false;
 	FName IntrinsicTypeName;
+	/** Compiler-authored type spelling when an exact semantic snapshot is available. */
+	FString SemanticTypeName;
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
 };
@@ -28,11 +33,16 @@ struct FVerseVisualExpressionDescriptor
 {
 	FVerseTextRange Range;
 	FVerseTextRange OperatorRange;
+	uint8 VstNodeType = 0;
+	uint8 VstTag = 0;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
+	FString SemanticTypeName;
+	const uLang::CFunction* SemanticFunction = nullptr;
+	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseVisualExpressionDescriptor> Operands;
 };
 
@@ -75,12 +85,17 @@ struct FVerseVisualTile
 	EVerseVisualTileKind Kind = EVerseVisualTileKind::Unknown;
 	EVerseExpressionKind ExpressionKind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	uint8 VstNodeType = 0;
+	uint8 VstTag = 0;
 	FVerseTextRange OperatorRange;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
+	FString SemanticTypeName;
+	const uLang::CFunction* SemanticFunction = nullptr;
+	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseTextRange> SpecifierRanges;
 	TArray<FVerseTextRange> FunctionAccessSpecifierRanges;
 	TArray<FVerseTextRange> FunctionEffectSpecifierRanges;

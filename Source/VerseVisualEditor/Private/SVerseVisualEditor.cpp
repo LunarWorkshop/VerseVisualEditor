@@ -39,6 +39,7 @@
 #include "VerseExternalChange.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseIdentifier.h"
+#include "VerseSemanticCandidates.h"
 #include "VerseSemanticWorkspace.h"
 #include "VerseSpecifier.h"
 #include "VerseTileProperties.h"
@@ -454,9 +455,12 @@ namespace
 	FString GetVisualTypeName(
 		const FVerseTextRange& TypeRange,
 		FName IntrinsicTypeName,
-		const FVerseDocument& Document)
+		const FVerseDocument& Document,
+		FStringView SemanticTypeName = FStringView())
 	{
-		return TypeRange.IsSet()
+		return !SemanticTypeName.IsEmpty()
+			? FString(SemanticTypeName)
+			: TypeRange.IsSet()
 			? Document.DecodeOriginalRange(TypeRange).TrimStartAndEnd()
 			: IntrinsicTypeName.ToString();
 	}
@@ -501,7 +505,7 @@ namespace
 		constexpr float OperandWireSpace = 72.0f;
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
-		if (!IsVerseBinaryOperatorExpression(Tile.ExpressionKind) || Tile.Children.Num() != 2)
+		if (!IsVerseOperatorExpression(Tile.ExpressionKind) || Tile.Children.IsEmpty())
 		{
 			return {
 				SNew(SHorizontalBox)
@@ -517,21 +521,26 @@ namespace
 				{}};
 		}
 
-		TSharedPtr<SVerseTile> LeftOperand;
-		TSharedPtr<SVerseTile> RightOperand;
-		TSharedRef<SWidget> LeftPresentation = SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
-		TSharedRef<SWidget> RightPresentation = SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
-		if (Tile.Children[0].LiteralKind == EVerseLiteralKind::None)
+		TArray<TSharedPtr<SVerseTile>> OperandTiles;
+		OperandTiles.SetNum(Tile.Children.Num());
+		TSharedRef<SVerticalBox> OperandColumn = SNew(SVerticalBox);
+		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
-			LeftOperand = BuildFunctionGraphTile(
-				Tile.Children[0], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
-			LeftPresentation = LeftOperand.ToSharedRef();
-		}
-		if (Tile.Children[1].LiteralKind == EVerseLiteralKind::None)
-		{
-			RightOperand = BuildFunctionGraphTile(
-				Tile.Children[1], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
-			RightPresentation = RightOperand.ToSharedRef();
+			TSharedRef<SWidget> Presentation =
+				SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
+			if (Tile.Children[Index].LiteralKind == EVerseLiteralKind::None)
+			{
+				OperandTiles[Index] = BuildFunctionGraphTile(
+					Tile.Children[Index], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
+				Presentation = OperandTiles[Index].ToSharedRef();
+			}
+			OperandColumn->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			.Padding(0.0f, Index == 0 ? 0.0f : 18.0f, 0.0f, 0.0f)
+			[
+				Presentation
+			];
 		}
 		TSharedRef<SWidget> Subtree =
 			SNew(SHorizontalBox)
@@ -540,17 +549,7 @@ namespace
 				SNew(SBox)
 				.WidthOverride(OperandColumnWidth)
 				.HAlign(HAlign_Right)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
-					[
-						LeftPresentation
-					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 18.0f, 0.0f, 0.0f).HAlign(HAlign_Right)
-					[
-						RightPresentation
-					]
-				]
+				[ OperandColumn ]
 			]
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
@@ -561,18 +560,18 @@ namespace
 				RootTile
 			];
 
-		const FString TypeName = GetVisualTypeName(Tile.TypeRange, Tile.IntrinsicTypeName, *Document);
-		const FLinearColor WireColor = GetBlueprintPinColor(TypeName);
 		TArray<FVerseGraphConnection> Connections;
-		if (LeftOperand.IsValid())
+		for (int32 Index = 0; Index < OperandTiles.Num(); ++Index)
 		{
-			Connections.Add({LeftOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(0),
-				EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
-		}
-		if (RightOperand.IsValid())
-		{
-			Connections.Add({RightOperand->GetValueOutputAnchor(0), RootTile->GetValueInputAnchor(1),
-				EVerseGraphConnectionAxis::Horizontal, WireColor, 2.0f, 0});
+			if (OperandTiles[Index].IsValid() && Tile.ValueInputs.IsValidIndex(Index))
+			{
+				const FVerseVisualSocket& Input = Tile.ValueInputs[Index];
+				const FString TypeName = GetVisualTypeName(
+					Input.TypeRange, Input.IntrinsicTypeName, *Document, Input.SemanticTypeName);
+				Connections.Add({OperandTiles[Index]->GetValueOutputAnchor(0),
+					RootTile->GetValueInputAnchor(Index), EVerseGraphConnectionAxis::Horizontal,
+					GetBlueprintPinColor(TypeName), 2.0f, 0});
+			}
 		}
 		return {Subtree, RootTile, MoveTemp(Connections)};
 	}
@@ -696,7 +695,44 @@ namespace
 		});
 	}
 
-	void ReconcileFunctionTabs(FOpenVerseDocument& Document)
+	TSharedPtr<const FVerseSemanticSnapshot> FindExactSemanticSnapshot(
+		const FVerseSemanticWorkspace* Workspace,
+		const FOpenVerseDocument& Document)
+	{
+		if (Workspace == nullptr || !Document.Session.IsValid())
+		{
+			return nullptr;
+		}
+		for (const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot :
+			Workspace->GetCandidateSnapshots())
+		{
+			if (Snapshot.IsValid()
+				&& Snapshot->Describes(Document.FilePath, Document.Session->GetRevision()))
+			{
+				return Snapshot;
+			}
+		}
+		return nullptr;
+	}
+
+	void BindGraphTiles(
+		FOpenVerseDocument& Document,
+		TArray<FVerseVisualTile>& GraphTiles,
+		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot)
+	{
+		if (Document.Session.IsValid() && Snapshot.IsValid())
+		{
+			FVerseSemanticCandidateProvider::BindFunctionGraph(
+				GraphTiles,
+				Snapshot,
+				Document.FilePath,
+				*Document.Session->GetParseSnapshot().GetDocument());
+		}
+	}
+
+	void ReconcileFunctionTabs(
+		FOpenVerseDocument& Document,
+		const TSharedPtr<const FVerseSemanticSnapshot>& SemanticSnapshot = nullptr)
 	{
 		if (!Document.Session.IsValid())
 		{
@@ -733,6 +769,7 @@ namespace
 			Tab.ReturnTypeRange = Item->ReturnTypeRange;
 			Tab.Parameters = Item->Parameters;
 			Tab.GraphTiles = Item->GraphTiles;
+			BindGraphTiles(Document, Tab.GraphTiles, SemanticSnapshot);
 			Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 			Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		}
@@ -1582,6 +1619,7 @@ void SVerseVisualEditor::PublishCompletedSemanticCompilations()
 		return;
 	}
 
+	bool bRefreshActiveGraph = false;
 	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
 	{
 		if (!OpenDocument.IsValid()
@@ -1605,6 +1643,10 @@ void SVerseVisualEditor::PublishCompletedSemanticCompilations()
 		}
 		OpenDocument->bSemanticCompilationPending = false;
 		OpenDocument->bHasSemanticCompilationResult = true;
+		const TSharedPtr<const FVerseSemanticSnapshot> ExactSnapshot =
+			FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument);
+		ReconcileFunctionTabs(*OpenDocument, ExactSnapshot);
+		bRefreshActiveGraph |= OpenDocument == ActiveDocument && ExactSnapshot.IsValid();
 
 		const bool bHasErrors = OpenDocument->SemanticCompilationDiagnostics.ContainsByPredicate(
 			[](const FVerseSemanticDiagnostic& Diagnostic)
@@ -1616,6 +1658,10 @@ void SVerseVisualEditor::PublishCompletedSemanticCompilations()
 		{
 			bLocalCompilePanelOpen = true;
 		}
+	}
+	if (bRefreshActiveGraph)
+	{
+		RefreshActiveDocument();
 	}
 }
 
@@ -2182,7 +2228,8 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 	const FString SocketType = GetVisualTypeName(
 		SocketDrag->Socket.TypeRange,
 		SocketDrag->Socket.IntrinsicTypeName,
-		Document);
+		Document,
+		SocketDrag->Socket.SemanticTypeName);
 	const FText ContextDescription = FText::Format(
 		SocketDrag->bOutput
 			? LOCTEXT("ExpressionConsumerTypeContext", "Actions taking {0}")
@@ -2266,7 +2313,9 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	{
 		ExpressionMenu->Dismiss();
 	}
-	ReconcileFunctionTabs(*ActiveDocument);
+	ReconcileFunctionTabs(
+		*ActiveDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 }
@@ -2308,7 +2357,9 @@ void SVerseVisualEditor::HandleInlineLiteralCommitted(
 	{
 		QueueCompilation(OpenDocument, true);
 	}
-	ReconcileFunctionTabs(*OpenDocument);
+	ReconcileFunctionTabs(
+		*OpenDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument));
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
@@ -2904,7 +2955,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		return;
 	}
 
-	ReconcileFunctionTabs(*ActiveDocument);
+	ReconcileFunctionTabs(
+		*ActiveDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
 	const bool bShowingFunction =
 		ActiveDocument->FunctionTabs.IsValidIndex(ActiveDocument->ActiveFunctionTabIndex);
 	const bool bCanReuseCanvas = bShowingFunction
@@ -2990,7 +3043,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			const FString ReturnType = GetVisualTypeName(
 				FunctionTab.GraphTiles.Last().TypeRange,
 				FunctionTab.GraphTiles.Last().IntrinsicTypeName,
-				*SourceDocument);
+				*SourceDocument,
+				FunctionTab.GraphTiles.Last().SemanticTypeName);
 			GraphConnections.Add({ImplicitReturnSourceTile->GetFirstValueOutputAnchor(),
 				ReturnTile->GetFirstValueInputAnchor(), EVerseGraphConnectionAxis::Horizontal,
 				GetBlueprintPinColor(ReturnType), 2.0f, 0});

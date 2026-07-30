@@ -5,7 +5,6 @@
 #include "uLang/SourceProject/UploadedAtFNVersion.h"
 #include "uLang/SourceProject/VerseVersion.h"
 #include "uLang/Syntax/VstNode.h"
-#include "VerseOperatorTyping.h"
 
 const FName VerseSyntaxKind::Module(TEXT("Module"));
 const FName VerseSyntaxKind::Class(TEXT("Class"));
@@ -583,6 +582,8 @@ namespace VerseParseSnapshotBuilder
 	{
 		FVerseExpressionDescriptor Result;
 		Result.Range = SourceIndex.ToRange(Node.Whence());
+		Result.VstNodeType = static_cast<uint8>(Node.GetElementType());
+		Result.VstTag = Node.GetTag<uint8>();
 		if (const Verse::Vst::Identifier* Identifier = Node.AsNullable<Verse::Vst::Identifier>())
 		{
 			const int32 IdentifierLength = Identifier->GetSourceText().ByteLen();
@@ -595,6 +596,7 @@ namespace VerseParseSnapshotBuilder
 				Result.Range.NumBytes);
 			if (IdentifierText == UTF8TEXTVIEW("true") || IdentifierText == UTF8TEXTVIEW("false"))
 			{
+				Result.Kind = EVerseExpressionKind::Literal;
 				Result.LiteralKind = EVerseLiteralKind::Logic;
 				Result.Type = {{}, TEXT("logic"), EVerseTypeResolutionProvenance::LocallyInferred};
 				return Result;
@@ -608,24 +610,28 @@ namespace VerseParseSnapshotBuilder
 		}
 		if (Node.IsA<Verse::Vst::IntLiteral>())
 		{
+			Result.Kind = EVerseExpressionKind::Literal;
 			Result.LiteralKind = EVerseLiteralKind::Integer;
 			Result.Type = {{}, TEXT("int"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
 		}
 		if (Node.IsA<Verse::Vst::FloatLiteral>())
 		{
+			Result.Kind = EVerseExpressionKind::Literal;
 			Result.LiteralKind = EVerseLiteralKind::Float;
 			Result.Type = {{}, TEXT("float"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
 		}
 		if (Node.IsA<Verse::Vst::StringLiteral>())
 		{
+			Result.Kind = EVerseExpressionKind::Literal;
 			Result.LiteralKind = EVerseLiteralKind::String;
 			Result.Type = {{}, TEXT("string"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
 		}
 		if (Node.IsA<Verse::Vst::CharLiteral>())
 		{
+			Result.Kind = EVerseExpressionKind::Literal;
 			Result.LiteralKind = EVerseLiteralKind::Character;
 			Result.Type = {{}, TEXT("char"), EVerseTypeResolutionProvenance::LocallyInferred};
 			return Result;
@@ -709,6 +715,69 @@ namespace VerseParseSnapshotBuilder
 				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte));
 			return Result;
 		}
+
+		auto TryBuildTwoOperandGapOperator = [&](bool bMatches) -> bool
+		{
+			if (!bMatches || Node.GetChildCount() != 2)
+			{
+				return false;
+			}
+			const Verse::Vst::Node& Left = *Node.GetChildren()[0];
+			const Verse::Vst::Node& Right = *Node.GetChildren()[1];
+			const FVerseByteRange LeftRange = SourceIndex.ToRange(Left.Whence());
+			const FVerseByteRange RightRange = SourceIndex.ToRange(Right.Whence());
+			BuildBinary(Left, Right,
+				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte));
+			return true;
+		};
+		if (TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::BinaryOpLogicalAnd>())
+			|| TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::BinaryOpLogicalOr>())
+			|| TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::Assignment>()))
+		{
+			return Result;
+		}
+
+		if (const Verse::Vst::PrefixOpLogicalNot* LogicalNot =
+			Node.AsNullable<Verse::Vst::PrefixOpLogicalNot>();
+			LogicalNot != nullptr && LogicalNot->GetChildCount() == 1)
+		{
+			const Verse::Vst::Node& Operand = *LogicalNot->GetChildren()[0];
+			const FVerseByteRange OperandRange = SourceIndex.ToRange(Operand.Whence());
+			Result.Kind = EVerseExpressionKind::UnaryOperator;
+			Result.OperatorRange = TrimSourceWhitespace(
+				SourceIndex.GetSource(),
+				FVerseByteRange::FromBounds(Result.Range.BeginByte, OperandRange.BeginByte));
+			Result.Operands.Add(BuildExpressionDescriptor(Operand, SourceIndex, Parameters));
+			return Result;
+		}
+
+		if (Add != nullptr && Add->GetChildCount() == 2)
+		{
+			const Verse::Vst::Node& OperatorNode = *Add->GetChildren()[0];
+			const Verse::Vst::Node& Operand = *Add->GetChildren()[1];
+			Result.Kind = EVerseExpressionKind::UnaryOperator;
+			Result.OperatorRange = TrimSourceWhitespace(
+				SourceIndex.GetSource(), SourceIndex.ToRange(OperatorNode.Whence()));
+			Result.Operands.Add(BuildExpressionDescriptor(Operand, SourceIndex, Parameters));
+			return Result;
+		}
+
+		if (const Verse::Vst::PrePostCall* Call = Node.AsNullable<Verse::Vst::PrePostCall>();
+			Call != nullptr && Call->IsSimpleCall())
+		{
+			Result.Kind = EVerseExpressionKind::Call;
+			const Verse::Vst::Node& Callee = *Call->GetChildren()[0];
+			const Verse::Vst::Node& Arguments = *Call->GetChildren()[1];
+			Result.OperatorRange = SourceIndex.ToRange(Callee.Whence());
+			if (const Verse::Vst::Clause* Clause = Arguments.AsNullable<Verse::Vst::Clause>())
+			{
+				for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Argument : Clause->GetChildren())
+				{
+					Result.Operands.Add(BuildExpressionDescriptor(*Argument, SourceIndex, Parameters));
+				}
+			}
+			return Result;
+		}
 		return Result;
 	}
 
@@ -786,32 +855,6 @@ namespace VerseParseSnapshotBuilder
 			Item.Separator = ClassifySeparator(Trivia, Item.bIsFinalValuePosition);
 			Item.ExtraBlankLineCount = FMath::Max(0, CountLineBreaks(Trivia) - 1);
 
-			if (Item.Expression.Kind == EVerseExpressionKind::BinaryOperator)
-			{
-				TArray<FVerseExpressionType> OperandTypes;
-				for (const FVerseExpressionDescriptor& Operand : Item.Expression.Operands)
-				{
-					OperandTypes.Add(Operand.Type);
-				}
-				const FVerseExpressionType ExpectedResult = Item.bIsFinalValuePosition
-					&& OutRegion.TypeRange.IsSet()
-					? FVerseExpressionType{OutRegion.TypeRange, NAME_None,
-						EVerseTypeResolutionProvenance::LocallyInferred}
-					: FVerseExpressionType{};
-				const FUtf8StringView OperatorSource = SourceIndex.GetSource().Mid(
-					Item.Expression.OperatorRange.BeginByte,
-					Item.Expression.OperatorRange.NumBytes);
-				const FUTF8ToTCHAR ConvertedOperator(
-					reinterpret_cast<const ANSICHAR*>(OperatorSource.GetData()),
-					OperatorSource.Len());
-				const FString OperatorSpelling(
-					ConvertedOperator.Length(), ConvertedOperator.Get());
-				Item.Expression.Type = FVerseOperatorTyping::Resolve(
-					OperatorSpelling,
-					OperandTypes,
-					ExpectedResult,
-					SourceIndex.GetSource());
-			}
 		}
 	}
 

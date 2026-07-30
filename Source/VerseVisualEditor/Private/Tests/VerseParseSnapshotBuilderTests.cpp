@@ -1,7 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseOperatorTyping.h"
+#include "uLang/Syntax/VstNode.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
@@ -344,8 +344,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 {
-	TestTrue(TEXT("Add has a data-driven binary signature"),
-		FVerseOperatorTyping::SupportsOperandCount(TEXT("+"), 2));
 	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
 		*this,
 		TEXT("functions.verse"));
@@ -401,8 +399,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Add retains two ordered operands"), Add.Operands.Num(), 2);
 		TestTrue(TEXT("Add operator range is exact"),
 			Snapshot.GetSourceView(Add.OperatorRange) == UTF8TEXTVIEW("+"));
-		TestTrue(TEXT("Add type resolves to the parameter's int spelling"),
-			Snapshot.GetSourceView(Add.Type.SourceRange) == UTF8TEXTVIEW("int"));
+		TestFalse(TEXT("Syntax parsing does not guess the selected Add overload"),
+			Add.Type.IsResolved());
 		if (Add.Operands.Num() == 2)
 		{
 			TestTrue(TEXT("First Add operand is exact"),
@@ -477,9 +475,13 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			AddInt->Kind, EVerseExpressionKind::BinaryOperator);
 		TestTrue(TEXT("Integer literal retains literal identity while its expression kind remains generic"),
 			AddInt->Operands.Num() == 2
-			&& AddInt->Operands[1].Kind == EVerseExpressionKind::Unsupported
+			&& AddInt->Operands[1].Kind == EVerseExpressionKind::Literal
 			&& AddInt->Operands[1].LiteralKind == EVerseLiteralKind::Integer
 			&& AddInt->Operands[1].Type.IntrinsicName == TEXT("int"));
+		TestEqual(
+			TEXT("Expression retains its official VST node type"),
+			AddInt->VstNodeType,
+			static_cast<uint8>(Verse::Vst::NodeType::BinaryOpAddSub));
 	}
 	if (const FVerseExpressionDescriptor* AddNegativeInt = FindOnlyExpression(UTF8TEXTVIEW("AddNegativeIntLiteral")))
 	{
@@ -491,14 +493,13 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	}
 	if (const FVerseExpressionDescriptor* AddFloat = FindOnlyExpression(UTF8TEXTVIEW("AddFloat")))
 	{
-		TestTrue(TEXT("Float Add resolves from source-backed evidence"),
-			Snapshot.GetSourceView(AddFloat->Type.SourceRange) == UTF8TEXTVIEW("float")
-			&& AddFloat->Operands.Num() == 2);
+		TestTrue(TEXT("Float Add retains ordered source operands without guessing an overload"),
+			!AddFloat->Type.IsResolved() && AddFloat->Operands.Num() == 2);
 	}
 	if (const FVerseExpressionDescriptor* AddArray = FindOnlyExpression(UTF8TEXTVIEW("AddArray")))
 	{
-		TestTrue(TEXT("Generic array Add retains the concrete source type"),
-			Snapshot.GetSourceView(AddArray->Type.SourceRange) == UTF8TEXTVIEW("[]int"));
+		TestFalse(TEXT("Generic array Add is left for compiler semantic binding"),
+			AddArray->Type.IsResolved());
 	}
 	if (const FVerseExpressionDescriptor* Conflict = FindOnlyExpression(UTF8TEXTVIEW("AddConflict")))
 	{
@@ -508,6 +509,22 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Add chains remain unsupported in this slice"),
 			Chain->Kind, EVerseExpressionKind::Unsupported);
+	}
+	if (const FVerseExpressionDescriptor* Negate = FindOnlyExpression(UTF8TEXTVIEW("NegateValue")))
+	{
+		TestTrue(TEXT("Unary operators use one generic syntax shape and exact operand"),
+			Negate->Kind == EVerseExpressionKind::UnaryOperator
+			&& Negate->Operands.Num() == 1
+			&& Snapshot.GetSourceView(Negate->OperatorRange) == UTF8TEXTVIEW("-")
+			&& Snapshot.GetSourceView(Negate->Operands[0].Range) == UTF8TEXTVIEW("Input"));
+	}
+	if (const FVerseExpressionDescriptor* Call = FindOnlyExpression(UTF8TEXTVIEW("CallAbsolute")))
+	{
+		TestTrue(TEXT("Calls retain a generic syntax shape without cataloging the function"),
+			Call->Kind == EVerseExpressionKind::Call
+			&& Call->Operands.Num() == 1
+			&& Snapshot.GetSourceView(Call->OperatorRange) == UTF8TEXTVIEW("Abs")
+			&& Snapshot.GetSourceView(Call->Operands[0].Range) == UTF8TEXTVIEW("Input"));
 	}
 	if (const FVerseExpressionDescriptor* Subtract = FindOnlyExpression(UTF8TEXTVIEW("Subtract")))
 	{

@@ -53,3 +53,9 @@ GreaterThan(Left : int, Right : int)<decides><computes> : void =
 
 GreaterThanOrEqual(Left : int, Right : int)<decides><computes> : void =
     Left >= Right
+
+NegateValue(Input : int)<computes> : int =
+    -Input
+
+CallAbsolute(Input : int)<computes> : int =
+    Abs(Input)

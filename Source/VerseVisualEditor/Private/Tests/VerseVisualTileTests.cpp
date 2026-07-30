@@ -256,15 +256,15 @@ bool FVerseNestedModulePresentationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FVerseGlobalScopeDevelopmentCorpusTest,
-	"VerseVisualEditor.Foundation.VisualTiles.DevelopmentCorpus",
+	FVerseGlobalScopeStableFixtureTest,
+	"VerseVisualEditor.Foundation.VisualTiles.StableGlobalScopeFixture",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
+bool FVerseGlobalScopeStableFixtureTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadPluginFile(
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
 		*this,
-		TEXT("Content/TestCorpus/GlobalScopeCorpus.verse"));
+		TEXT("global_scope_visual_tiles.verse"));
 	if (!Document.IsValid())
 	{
 		return false;
@@ -287,13 +287,13 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 		{
 			++DefinitionCounts.FindOrAdd(Tile.DefinitionKind);
 			const FString Name = Document->DecodeOriginalRange(Tile.NameRange);
-			if (Name == TEXT("CorpusModuleOne"))
+			if (Name == TEXT("FixtureModuleOne"))
 			{
 				ModuleOneTile = &Tile;
 				ModuleOneFirstLine = Tile.FirstSourceLine;
 				ModuleOneLastLine = Tile.LastSourceLine;
 			}
-			else if (Name == TEXT("CorpusModuleTwo"))
+			else if (Name == TEXT("FixtureModuleTwo"))
 			{
 				ModuleTwoFirstLine = Tile.FirstSourceLine;
 				ModuleTwoLastLine = Tile.LastSourceLine;
@@ -328,7 +328,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Single-line module starts on line 5"), ModuleOneFirstLine, 5);
 	TestEqual(TEXT("Single-line module ends on line 5"), ModuleOneLastLine, 5);
 	TestEqual(TEXT("Multi-line module starts on line 6"), ModuleTwoFirstLine, 6);
-	TestEqual(TEXT("Multi-line module ends on line 22"), ModuleTwoLastLine, 22);
+	TestEqual(TEXT("Multi-line module ends on line 16"), ModuleTwoLastLine, 16);
 	if (TestNotNull(TEXT("Single-line module tile is available for selection and properties"), ModuleOneTile))
 	{
 		FVerseTileSelection Selection;
@@ -352,7 +352,7 @@ bool FVerseGlobalScopeDevelopmentCorpusTest::RunTest(const FString& Parameters)
 		const FVerseTileProperty* LinesProperty = FindProperty(TEXT("Lines"));
 		TestTrue(
 			TEXT("Definition properties expose the original name"),
-			NameProperty && NameProperty->Value == TEXT("CorpusModuleOne"));
+			NameProperty && NameProperty->Value == TEXT("FixtureModuleOne"));
 		TestTrue(
 			TEXT("Definition properties expose its source lines"),
 			LinesProperty && LinesProperty->Value == TEXT("L5"));
@@ -480,7 +480,7 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& TestEqual(TEXT("Integer-literal Add has two child operands"), IntGraph[1].Children.Num(), 2))
 		{
 			TestTrue(TEXT("Literal is represented by an unconnected inline editor on its parent input"),
-				IntGraph[1].Children[1].ExpressionKind == EVerseExpressionKind::Unsupported
+				IntGraph[1].Children[1].ExpressionKind == EVerseExpressionKind::Literal
 				&& IntGraph[1].Children[1].LiteralKind == EVerseLiteralKind::Integer
 				&& IntGraph[1].Children[1].IntrinsicTypeName == TEXT("int")
 				&& IntGraph[1].Children[1].ValueOutputs.IsEmpty()

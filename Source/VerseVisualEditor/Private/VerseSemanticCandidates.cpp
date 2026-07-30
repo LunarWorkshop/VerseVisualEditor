@@ -4,6 +4,7 @@
 #include "VerseBlueprintCallablePresentation.h"
 #include "VerseIntrinsicPresentation.h"
 #include "VerseSemanticWorkspace.h"
+#include "VerseVisualTile.h"
 #include "uLang/Semantics/DataDefinition.h"
 #include "uLang/Semantics/Expression.h"
 #include "uLang/Semantics/SemanticFunction.h"
@@ -63,6 +64,47 @@ namespace
 		}
 		return Snippet->FindChildByPosition(ByteOffsetToPosition(
 			Document.GetOriginalUtf8View(), BeginByte));
+	}
+
+	const Verse::Vst::Node* FindExactSemanticNode(
+		const FVerseSemanticSnapshot& Snapshot,
+		const FString& FilePath,
+		FVerseTextRange Range,
+		const FVerseDocument& Document)
+	{
+		const Verse::Vst::Node* Node = FindSemanticNode(
+			Snapshot, FilePath, Range.BeginByte, Document);
+		const uLang::STextPosition Begin = ByteOffsetToPosition(
+			Document.GetOriginalUtf8View(), Range.BeginByte);
+		const uLang::STextPosition End = ByteOffsetToPosition(
+			Document.GetOriginalUtf8View(), Range.EndByte());
+		for (; Node != nullptr; Node = Node->GetParent())
+		{
+			if (Node->Whence().GetBegin() == Begin && Node->Whence().GetEnd() == End)
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	}
+
+	const uLang::CExpressionBase* FindMappedExpression(const Verse::Vst::Node& Node)
+	{
+		if (const uLang::CAstNode* Ast = Node.GetMappedAstNode())
+		{
+			if (const uLang::CExpressionBase* Expression = Ast->AsExpression())
+			{
+				return Expression;
+			}
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			if (const uLang::CExpressionBase* Expression = FindMappedExpression(*Child))
+			{
+				return Expression;
+			}
+		}
+		return nullptr;
 	}
 
 	const uLang::CScope* ScopeFromAst(
@@ -138,6 +180,116 @@ namespace
 		const FUTF8ToTCHAR Converted(
 			reinterpret_cast<const ANSICHAR*>(Text.Data()), Text.ByteLen());
 		return FString(Converted.Length(), Converted.Get());
+	}
+
+	const uLang::CExprInvocation* AsInvocation(const uLang::CExpressionBase& Expression)
+	{
+		switch (Expression.GetNodeType())
+		{
+		case uLang::EAstNodeType::Invoke_Invocation:
+		case uLang::EAstNodeType::Invoke_UnaryArithmetic:
+		case uLang::EAstNodeType::Invoke_BinaryArithmetic:
+		case uLang::EAstNodeType::Invoke_Comparison:
+			return static_cast<const uLang::CExprInvocation*>(&Expression);
+		default:
+			return nullptr;
+		}
+	}
+
+	const uLang::CExprInvocation* FindMappedInvocation(const Verse::Vst::Node& Node)
+	{
+		if (const uLang::CAstNode* Ast = Node.GetMappedAstNode())
+		{
+			if (const uLang::CExpressionBase* Expression = Ast->AsExpression())
+			{
+				if (const uLang::CExprInvocation* Invocation = AsInvocation(*Expression))
+				{
+					return Invocation;
+				}
+			}
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			if (const uLang::CExprInvocation* Invocation = FindMappedInvocation(*Child))
+			{
+				return Invocation;
+			}
+		}
+		return nullptr;
+	}
+
+	void BindExpressionTile(
+		FVerseVisualTile& Tile,
+		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
+		const FString& FilePath,
+		const FVerseDocument& Document)
+	{
+		for (FVerseVisualTile& Child : Tile.Children)
+		{
+			BindExpressionTile(Child, Snapshot, FilePath, Document);
+		}
+		if (Tile.Kind != EVerseVisualTileKind::Expression
+			|| !Snapshot.IsValid()
+			|| !Snapshot->GetProgram().IsValid()
+			|| !Snapshot->Describes(FilePath, Tile.Range.Revision))
+		{
+			return;
+		}
+
+		const Verse::Vst::Node* Node = FindExactSemanticNode(
+			*Snapshot, FilePath, Tile.Range, Document);
+		const uLang::CExpressionBase* Expression = Node
+			? FindMappedExpression(*Node)
+			: nullptr;
+		if (Expression == nullptr)
+		{
+			return;
+		}
+
+		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+		if (const uLang::CTypeBase* ResultType = Expression->GetResultType(Program))
+		{
+			Tile.SemanticTypeName = ToFString(ResultType->AsCode());
+			Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
+			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
+			{
+				Output.SemanticTypeName = Tile.SemanticTypeName;
+			}
+			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+			{
+				Tile.ValueOutputs.Reset();
+			}
+		}
+
+		const uLang::CExprInvocation* Invocation = FindMappedInvocation(*Node);
+		if (Invocation == nullptr)
+		{
+			return;
+		}
+		if (const uLang::TSPtr<uLang::CExpressionBase>& Callee = Invocation->GetCallee();
+			Callee && Callee->GetNodeType() == uLang::EAstNodeType::Identifier_Function)
+		{
+			Tile.SemanticFunction =
+				&static_cast<const uLang::CExprIdentifierFunction&>(*Callee)._Function;
+			Tile.SemanticSnapshot = Snapshot;
+		}
+		if (const uLang::CFunctionType* FunctionType = Invocation->GetResolvedCalleeType())
+		{
+			const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
+			for (int32 Index = 0; Index < Tile.ValueInputs.Num() && Index < Params.Num(); ++Index)
+			{
+				Tile.ValueInputs[Index].SemanticTypeName = ToFString(Params[Index]->AsCode());
+			}
+			Tile.SemanticTypeName = ToFString(FunctionType->GetReturnType().AsCode());
+			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+			{
+				Tile.ValueOutputs.Reset();
+			}
+			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
+			{
+				Output.SemanticTypeName = Tile.SemanticTypeName;
+			}
+		}
 	}
 
 	FText GetDefinitionCategory(const uLang::CDefinition& Definition)
@@ -605,4 +757,20 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 		}
 	}
 	return Result;
+}
+
+void FVerseSemanticCandidateProvider::BindFunctionGraph(
+	TArray<FVerseVisualTile>& GraphTiles,
+	const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
+	const FString& FilePath,
+	const FVerseDocument& Document)
+{
+	if (!Snapshot.IsValid())
+	{
+		return;
+	}
+	for (FVerseVisualTile& Tile : GraphTiles)
+	{
+		BindExpressionTile(Tile, Snapshot, FilePath, Document);
+	}
 }

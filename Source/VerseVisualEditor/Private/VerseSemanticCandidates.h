@@ -6,6 +6,7 @@
 
 class FVerseDocument;
 class FVerseSemanticSnapshot;
+struct FVerseVisualTile;
 
 namespace uLang
 {
@@ -52,5 +53,12 @@ public:
 		const FString& FilePath,
 		int32 ExpressionBeginByte,
 		bool bDraggingFromOutput,
+		const FVerseDocument& Document);
+
+	/** Bind existing expression tiles to the exact compiler-owned syntax/semantic graph. */
+	static void BindFunctionGraph(
+		TArray<FVerseVisualTile>& GraphTiles,
+		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
+		const FString& FilePath,
 		const FVerseDocument& Document);
 };

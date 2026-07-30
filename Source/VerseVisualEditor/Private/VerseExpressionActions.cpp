@@ -3,12 +3,10 @@
 #include "Internationalization/Text.h"
 #include "VerseDocument.h"
 #include "VerseDocumentSession.h"
-#include "VerseOperatorTyping.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseSemanticCandidates.h"
 #include "VerseSemanticWorkspace.h"
-#include "VerseIntrinsicPresentation.h"
 
 #define LOCTEXT_NAMESPACE "VerseExpressionActions"
 
@@ -63,34 +61,8 @@ namespace
 	struct FExpressionCandidate
 	{
 		TSharedPtr<FVerseExpressionAction> Action;
-		TArray<FVerseExpressionType> InputTypes;
 		FVerseExpressionType OutputType;
-		FString OperatorSpelling;
-		int32 RequiredInputCount = 0;
-		bool bHomogeneousInputs = false;
 	};
-
-	FString GetDefaultLiteralSource(const FVerseExpressionType& Type, FUtf8StringView Source)
-	{
-		const FString TypeName = GetTypeName(Type, Source);
-		if (TypeName == TEXT("int"))
-		{
-			return TEXT("0");
-		}
-		if (TypeName == TEXT("float"))
-		{
-			return TEXT("0.0");
-		}
-		if (TypeName == TEXT("string"))
-		{
-			return TEXT("\"\"");
-		}
-		if (TypeName.StartsWith(TEXT("[]")))
-		{
-			return TEXT("array{}");
-		}
-		return FString();
-	}
 
 	bool TypesMatch(
 		const FVerseExpressionType& Left,
@@ -100,37 +72,6 @@ namespace
 		const FString LeftName = GetTypeName(Left, Source);
 		const FString RightName = GetTypeName(Right, Source);
 		return !LeftName.IsEmpty() && LeftName == RightName;
-	}
-
-	bool CandidateAcceptsInput(
-		const FExpressionCandidate& Candidate,
-		const FVerseExpressionType& SourceType,
-		FUtf8StringView Source)
-	{
-		if (!Candidate.OperatorSpelling.IsEmpty())
-		{
-			return FVerseOperatorTyping::CanAcceptOperand(
-				Candidate.OperatorSpelling, SourceType, Source);
-		}
-		return Candidate.InputTypes.ContainsByPredicate(
-			[&](const FVerseExpressionType& InputType)
-			{
-				return TypesMatch(InputType, SourceType, Source);
-			});
-	}
-
-	bool CandidateProducesOutput(
-		const FExpressionCandidate& Candidate,
-		const FVerseExpressionType& RequiredType,
-		FUtf8StringView Source)
-	{
-		if (!Candidate.OperatorSpelling.IsEmpty())
-		{
-			return FVerseOperatorTyping::CanProduceResult(
-				Candidate.OperatorSpelling, RequiredType, Source);
-		}
-		return Candidate.OutputType.IsResolved()
-			&& TypesMatch(Candidate.OutputType, RequiredType, Source);
 	}
 
 	TArray<FExpressionCandidate> BuildCandidateRegistry(
@@ -154,33 +95,6 @@ namespace
 				NAME_None,
 				EVerseTypeResolutionProvenance::LocallyInferred};
 		}
-
-		TSet<FString> AddedOperators;
-		for (const FVerseIntrinsicPresentationDescriptor& Descriptor :
-			GetVerseIntrinsicPresentationTable())
-		{
-			if (!Descriptor.bStructuralSignature
-				|| Descriptor.Key.Form != EVerseIntrinsicCallableForm::InfixOperator
-				|| AddedOperators.Contains(Descriptor.Key.Spelling))
-			{
-				continue;
-			}
-			AddedOperators.Add(Descriptor.Key.Spelling);
-			FExpressionCandidate& Candidate = Candidates.AddDefaulted_GetRef();
-			Candidate.Action = MakeShared<FVerseExpressionAction>();
-			Candidate.Action->SourceForm = EVerseExpressionSourceForm::InfixOperator;
-			Candidate.Action->SourceSpelling = Descriptor.Key.Spelling;
-			const FVerseResolvedExpressionPresentation Presentation =
-				ResolveVerseExpressionPresentation(
-					FText::GetEmpty(), FText::GetEmpty(), FText::GetEmpty(), FText::GetEmpty(),
-					&Descriptor, Descriptor.Key.Spelling);
-			Candidate.Action->DisplayName = Presentation.DisplayName;
-			Candidate.Action->Category = Presentation.Category;
-			Candidate.Action->ModuleCategory = LOCTEXT("VerseModuleCategory", "Verse");
-			Candidate.OperatorSpelling = Descriptor.Key.Spelling;
-			Candidate.RequiredInputCount = Descriptor.Key.ParameterTypes.Num();
-			Candidate.bHomogeneousInputs = true;
-		}
 		return Candidates;
 	}
 }
@@ -199,33 +113,15 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 	const FUtf8StringView Source = Document.GetOriginalUtf8View();
 	for (FExpressionCandidate& Candidate : BuildCandidateRegistry(Parameters, Document))
 	{
-		const bool bCompatible = bDraggingFromOutput
-			? CandidateAcceptsInput(Candidate, SocketType, Source)
-			: CandidateProducesOutput(Candidate, SocketType, Source);
+		// Syntax-only fallback can safely offer identifiers as values, but it
+		// cannot authorize any callable or operator signature. Those come only
+		// from FVerseSemanticCandidateProvider.
+		const bool bCompatible = !bDraggingFromOutput
+			&& Candidate.OutputType.IsResolved()
+			&& TypesMatch(Candidate.OutputType, SocketType, Source);
 		if (bCompatible)
 		{
-			Candidate.Action->ResultTypeName = GetTypeName(
-				!Candidate.OperatorSpelling.IsEmpty() ? SocketType : Candidate.OutputType,
-				Source);
-			if (bDraggingFromOutput && Candidate.RequiredInputCount > 1)
-			{
-				if (!Candidate.bHomogeneousInputs)
-				{
-					continue;
-				}
-				const FString DefaultSource = GetDefaultLiteralSource(SocketType, Source);
-				if (DefaultSource.IsEmpty())
-				{
-					continue;
-				}
-				Candidate.Action->BoundInputIndex = 0;
-				Candidate.Action->InputDefaultSources.Init(
-					FString(), Candidate.RequiredInputCount);
-				for (int32 Index = 1; Index < Candidate.RequiredInputCount; ++Index)
-				{
-					Candidate.Action->InputDefaultSources[Index] = DefaultSource;
-				}
-			}
+			Candidate.Action->ResultTypeName = GetTypeName(Candidate.OutputType, Source);
 			Result.Add(MoveTemp(Candidate.Action));
 		}
 	}
@@ -384,6 +280,7 @@ bool TryApplyVerseExpressionAction(
 					TEXT("%s(%s)"),
 					*Action.SourceSpelling,
 					*FString::Join(Inputs, TEXT(", ")));
+			RequiredKind = EVerseExpressionKind::Call;
 			break;
 		case EVerseExpressionSourceForm::InfixOperator:
 			if (Inputs.Num() != 2)
@@ -408,6 +305,7 @@ bool TryApplyVerseExpressionAction(
 			}
 			Replacement = FString::Printf(
 				TEXT("%s %s"), *Action.SourceSpelling, *Inputs[0]);
+			RequiredKind = EVerseExpressionKind::UnaryOperator;
 			break;
 		case EVerseExpressionSourceForm::PostfixOperator:
 			if (Inputs.Num() != 1)
@@ -419,6 +317,7 @@ bool TryApplyVerseExpressionAction(
 			}
 			Replacement = FString::Printf(
 				TEXT("%s%s"), *Inputs[0], *Action.SourceSpelling);
+			RequiredKind = EVerseExpressionKind::UnaryOperator;
 			break;
 		default:
 			OutError = LOCTEXT(
