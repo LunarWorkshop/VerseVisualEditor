@@ -154,7 +154,7 @@ void SVerseFileCanvas::Construct(
 	ChildSlot
 	[
 		SAssignNew(GraphSurface, SVerseGraphSurface, InitialViewState, false)
-		.UseEdgePanPadding(false)
+		.UseEdgePanPadding(true)
 		.OnBackgroundClicked(FSimpleDelegate::CreateSP(this, &SVerseFileCanvas::ClearTileSelection))
 		[
 			BuildTileRow()
