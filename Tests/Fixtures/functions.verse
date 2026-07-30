@@ -59,3 +59,5 @@ NegateValue(Input : int)<computes> : int =
 
 CallAbsolute(Input : int)<computes> : int =
     Abs(Input)
+
+EmptyFunction()<computes> : void = {}

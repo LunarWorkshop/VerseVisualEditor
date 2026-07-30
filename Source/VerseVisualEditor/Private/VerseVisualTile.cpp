@@ -380,6 +380,10 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		}
 		GraphTiles.Add(MoveTemp(Expression));
 	}
+	if (FunctionTile.BodyClause.Items.IsEmpty())
+	{
+		return GraphTiles;
+	}
 
 	FVerseVisualTile& Return = GraphTiles.AddDefaulted_GetRef();
 	Return.Kind = EVerseVisualTileKind::FunctionReturn;
@@ -391,8 +395,6 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 				FunctionTile.BodyRange.EndByte(),
 				FunctionTile.BodyRange.EndByte()))
 		: FVerseTextRange();
-	Return.bHasExecutionInput = true;
-	Return.bExecutionInputConnected = true;
 	if (bHasReturnValue)
 	{
 		Return.ValueInputs.Add({{}, FunctionTile.TypeRange,

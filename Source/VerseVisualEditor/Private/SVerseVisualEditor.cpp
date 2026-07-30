@@ -3004,6 +3004,56 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					this,
 					&SVerseVisualEditor::HandleInlineLiteralCommitted,
 					ActiveDocument));
+			const bool bPairWithImplicitReturn = Tile.bImplicitReturnValue
+				&& FunctionTab.GraphTiles.IsValidIndex(Index + 1)
+				&& FunctionTab.GraphTiles[Index + 1].Kind
+					== EVerseVisualTileKind::FunctionReturn;
+			if (bPairWithImplicitReturn)
+			{
+				const TSharedRef<SVerseTile> ReturnRoot = BuildFunctionGraphTile(
+					FunctionTab.GraphTiles[Index + 1],
+					SourceDocument,
+					FOnVerseSocketDragStarted::CreateSP(
+						this, &SVerseVisualEditor::BeginSocketDrag),
+					FOnVerseInlineLiteralCommitted::CreateSP(
+						this,
+						&SVerseVisualEditor::HandleInlineLiteralCommitted,
+						ActiveDocument));
+				GraphRow.RootTile->SlatePrepass();
+				ReturnRoot->SlatePrepass();
+				const float ReturnTopPadding =
+					GraphRow.RootTile->GetValueSocketCenterY(0, true)
+					- ReturnRoot->GetValueSocketCenterY(0, false);
+				FunctionContent->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Left)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						GraphRow.Widget
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(96.0f)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						SNew(SBox)
+						.Padding(FMargin(0.0f, ReturnTopPadding, 0.0f, 0.0f))
+						[
+							ReturnRoot
+						]
+					]
+				];
+				GraphConnections.Append(GraphRow.Connections);
+				RootTiles.Add(GraphRow.RootTile);
+				RootTiles.Add(ReturnRoot);
+				ImplicitReturnSourceTile = GraphRow.RootTile;
+				ReturnTile = ReturnRoot;
+				++Index;
+				continue;
+			}
 			FunctionContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Left)

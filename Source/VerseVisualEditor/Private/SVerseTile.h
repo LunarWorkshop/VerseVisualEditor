@@ -64,6 +64,8 @@ public:
 	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
 	TSharedPtr<SWidget> GetExecutionInputAnchor() const { return ExecutionInputAnchor; }
 	TSharedPtr<SWidget> GetExecutionOutputAnchor() const { return ExecutionOutputAnchor; }
+	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
+	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
 
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
@@ -106,6 +108,12 @@ private:
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
 	TSharedPtr<SWidget> ExecutionInputAnchor;
 	TSharedPtr<SWidget> ExecutionOutputAnchor;
+	TSharedPtr<SWidget> OperatorLineWidget;
+	TSharedPtr<SWidget> HeaderSocketRow;
+	TSharedPtr<SWidget> ValueInputColumn;
+	TSharedPtr<SWidget> ValueOutputColumn;
+	TArray<TSharedPtr<SWidget>> ValueInputRows;
+	TArray<TSharedPtr<SWidget>> ValueOutputRows;
 	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;

@@ -31,6 +31,9 @@ CorpusInterfaceTwo := interface {}
 CorpusEnumOne := enum { First, Second }
 CorpusEnumTwo := enum { Alpha, Beta }
 
+CorpusFunctionEmpty() : void = {
+}
+
 CorpusFunctionIdentity(Input : int)<computes> : int =
     Input
 

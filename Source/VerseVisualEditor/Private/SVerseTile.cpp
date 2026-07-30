@@ -170,7 +170,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					+ SVerticalBox::Slot()
 					.AutoHeight()
 					[
-						SNew(STextBlock)
+						SAssignNew(OperatorLineWidget, STextBlock)
 						.Visibility(bOperatorTile && !OperatorLines.IsEmpty()
 							? EVisibility::Visible
 							: EVisibility::Collapsed)
@@ -182,7 +182,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					+ SVerticalBox::Slot()
 					.AutoHeight()
 					[
-					SNew(SHorizontalBox)
+					SAssignNew(HeaderSocketRow, SHorizontalBox)
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
 					.VAlign(VAlign_Center)
@@ -275,6 +275,35 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		TileAndOutput
 	];
 	ChildSlot[TileWithExecution];
+}
+
+float SVerseTile::GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const
+{
+	// Execution input consumes 32 Slate units, while the tile surface overlaps
+	// it by 8. The outer one-unit outline precedes the header contents. Both
+	// value-pin columns are vertically centered in HeaderSocketRow.
+	const float ExecutionOffset = Tile.bHasExecutionInput ? 24.0f : 0.0f;
+	const float OperatorLineHeight = OperatorLineWidget.IsValid()
+		? OperatorLineWidget->GetDesiredSize().Y
+		: 0.0f;
+	const float HeaderRowHeight = HeaderSocketRow.IsValid()
+		? HeaderSocketRow->GetDesiredSize().Y
+		: 0.0f;
+	const TSharedPtr<SWidget>& Column = bOutput ? ValueOutputColumn : ValueInputColumn;
+	const TArray<TSharedPtr<SWidget>>& Rows = bOutput ? ValueOutputRows : ValueInputRows;
+	if (!Column.IsValid() || !Rows.IsValidIndex(SocketIndex))
+	{
+		return ExecutionOffset + 1.0f + OperatorLineHeight + HeaderRowHeight * 0.5f;
+	}
+
+	float RowCenter = 0.0f;
+	for (int32 Index = 0; Index < SocketIndex; ++Index)
+	{
+		RowCenter += Rows[Index]->GetDesiredSize().Y + 2.0f;
+	}
+	RowCenter += 1.0f + Rows[SocketIndex]->GetDesiredSize().Y * 0.5f;
+	const float ColumnTop = (HeaderRowHeight - Column->GetDesiredSize().Y) * 0.5f;
+	return ExecutionOffset + 1.0f + OperatorLineHeight + ColumnTop + RowCenter;
 }
 
 TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& DiagnosticText) const
@@ -392,6 +421,8 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	bool bOutput)
 {
 	TSharedRef<SVerticalBox> Column = SNew(SVerticalBox);
+	TArray<TSharedPtr<SWidget>>& Rows = bOutput ? ValueOutputRows : ValueInputRows;
+	Rows.Reset();
 	for (int32 SocketIndex = 0; SocketIndex < Sockets.Num(); ++SocketIndex)
 	{
 		const FVerseVisualSocket& Socket = Sockets[SocketIndex];
@@ -402,6 +433,7 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			: Socket.IntrinsicTypeName.ToString();
 		const FText Name = Decode(Socket.NameRange);
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
+		Rows.Add(Row);
 		auto AddPin = [&]()
 		{
 			TSharedPtr<SImage> PinImage;
@@ -533,6 +565,14 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 		else { AddPin(); AddInlineLiteral(); AddName(); }
 		Column->AddSlot().AutoHeight().HAlign(bOutput ? HAlign_Right : HAlign_Left).Padding(0.0f, 1.0f)[Row];
 	}
+	if (bOutput)
+	{
+		ValueOutputColumn = Column;
+	}
+	else
+	{
+		ValueInputColumn = Column;
+	}
 	return Column;
 }
 
@@ -590,7 +630,7 @@ FText SVerseTile::GetKindText() const
 			? LOCTEXT("OperatorKind", "Operator")
 			: LOCTEXT("ExpressionKind", "Expression");
 	case EVerseVisualTileKind::FunctionEntry: return LOCTEXT("FunctionEntryKind", "Function");
-	case EVerseVisualTileKind::FunctionReturn: return LOCTEXT("FunctionReturnKind", "Return");
+	case EVerseVisualTileKind::FunctionReturn: return LOCTEXT("FunctionReturnKind", "Implicit Return");
 	default: return LOCTEXT("UnknownKind", "unknown");
 	}
 }

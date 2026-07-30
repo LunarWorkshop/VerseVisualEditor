@@ -462,8 +462,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("Function return uses the shared visual tile model"),
 			GraphTiles[2].Kind == EVerseVisualTileKind::FunctionReturn
-			&& GraphTiles[2].bHasExecutionInput
-			&& GraphTiles[2].bExecutionInputConnected
+			&& !GraphTiles[2].bHasExecutionInput
+			&& !GraphTiles[2].bExecutionInputConnected
 			&& GraphTiles[2].ValueInputs.Num() == 1
 			&& GraphTiles[2].ValueInputs[0].bConnected);
 	}
@@ -538,6 +538,23 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				&& Graph[1].ExpressionKind == EVerseExpressionKind::BinaryOperator
 				&& Graph[1].OperatorRange.IsSet()
 				&& Graph[1].ValueInputs.Num() == 2);
+		}
+	}
+
+	const FVerseVisualTile* EmptyFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("EmptyFunction"));
+	if (TestNotNull(TEXT("Empty function visual definition exists"), EmptyFunction))
+	{
+		const TArray<FVerseVisualTile> EmptyGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*EmptyFunction, Snapshot);
+		if (TestEqual(TEXT("Empty function graph contains only its entry tile"), EmptyGraph.Num(), 1))
+		{
+			TestEqual(
+				TEXT("Empty function graph omits the implicit return tile"),
+				EmptyGraph[0].Kind,
+				EVerseVisualTileKind::FunctionEntry);
 		}
 	}
 
