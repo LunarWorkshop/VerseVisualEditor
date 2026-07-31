@@ -55,6 +55,7 @@ struct FVerseVisualExpressionDescriptor
 {
 	FVerseTextRange Range;
 	FVerseTextRange OperatorRange;
+	FString OperatorSpelling;
 	uint8 VstNodeType = 0;
 	uint8 VstTag = 0;
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
@@ -137,6 +138,7 @@ struct FVerseVisualTile
 	uint8 VstNodeType = 0;
 	uint8 VstTag = 0;
 	FVerseTextRange OperatorRange;
+	FString OperatorSpelling;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;

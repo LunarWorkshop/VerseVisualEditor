@@ -735,6 +735,44 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	const FVerseVisualTile* ComplexFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ComplexBinary"));
+	if (TestNotNull(TEXT("Complex binary-expression fixture exists"), ComplexFunction))
+	{
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*ComplexFunction, Snapshot);
+		const FVerseVisualTile* Add = Graph.Num() == 3 ? &Graph[1] : nullptr;
+		const FVerseVisualTile* Multiply = Add != nullptr && Add->Children.Num() == 2
+			? &Add->Children[1] : nullptr;
+		const FVerseVisualTile* Divide = Multiply != nullptr
+			&& Multiply->Children.Num() == 2 ? &Multiply->Children[1] : nullptr;
+		const FVerseVisualTile* NestedSubtract = Divide != nullptr
+			&& Divide->Children.Num() == 2 ? &Divide->Children[0] : nullptr;
+		TestTrue(TEXT("Complex binary expressions remain recursive visual tiles"),
+			Add != nullptr
+				&& Multiply != nullptr
+				&& Divide != nullptr
+				&& NestedSubtract != nullptr);
+		TestTrue(TEXT("Every nested operator exposes one connected result socket"),
+			Multiply != nullptr
+				&& Multiply->ValueOutputs.Num() == 1
+				&& Multiply->ValueOutputs[0].bConnected
+				&& Divide != nullptr
+				&& Divide->ValueOutputs.Num() == 1
+				&& Divide->ValueOutputs[0].bConnected
+				&& NestedSubtract != nullptr
+				&& NestedSubtract->ValueOutputs.Num() == 1
+				&& NestedSubtract->ValueOutputs[0].bConnected);
+		TestTrue(TEXT("Every nested operator token is source exact"),
+			Multiply != nullptr
+				&& Snapshot.GetDocument()->DecodeOriginalRange(Multiply->OperatorRange) == TEXT("*")
+				&& Divide != nullptr
+				&& Snapshot.GetDocument()->DecodeOriginalRange(Divide->OperatorRange) == TEXT("/")
+				&& NestedSubtract != nullptr
+				&& Snapshot.GetDocument()->DecodeOriginalRange(
+					NestedSubtract->OperatorRange) == TEXT("-"));
+	}
+
 	const FVerseVisualTile* EmptyFunction = VerseVisualTileTests::FindDefinition(
 		Snapshot,
 		Tiles,

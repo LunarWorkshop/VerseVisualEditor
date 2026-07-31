@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "Containers/UnrealString.h"
 #include "CoreTypes.h"
 #include "Templates/SharedPointer.h"
 #include "VerseDocument.h"
@@ -139,6 +140,8 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 {
 	FVerseByteRange Range;
 	FVerseByteRange OperatorRange;
+	/** Display spelling derived from the official VST operator identity, never decoded from source. */
+	FString OperatorSpelling;
 	/** Official Verse VST identity. These values are deliberately not a plugin syntax catalog. */
 	uint8 VstNodeType = 0;
 	uint8 VstTag = 0;

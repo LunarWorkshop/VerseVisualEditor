@@ -73,6 +73,7 @@ namespace
 		FVerseVisualExpressionDescriptor Result;
 		Result.Range = MakeTextRange(Revision, Expression.Range);
 		Result.OperatorRange = MakeTextRange(Revision, Expression.OperatorRange);
+		Result.OperatorSpelling = Expression.OperatorSpelling;
 		Result.VstNodeType = Expression.VstNodeType;
 		Result.VstTag = Expression.VstTag;
 		Result.Kind = Expression.Kind;
@@ -268,6 +269,7 @@ namespace
 		Tile.VstTag = Descriptor.VstTag;
 		Tile.Range = Descriptor.Range;
 		Tile.OperatorRange = Descriptor.OperatorRange;
+		Tile.OperatorSpelling = Descriptor.OperatorSpelling;
 		Tile.NameRange = Descriptor.Kind == EVerseExpressionKind::Identifier
 			|| Descriptor.Kind == EVerseExpressionKind::Call
 			? Descriptor.Range
@@ -407,10 +409,17 @@ namespace
 			{
 				if (Child.LiteralKind == EVerseLiteralKind::None)
 				{
-					Child.ValueOutputs.Add(MakeSocket(
-						Child.TypeRange,
-						Child.IntrinsicTypeName,
-						true));
+					if (Child.ValueOutputs.IsEmpty())
+					{
+						Child.ValueOutputs.Add(MakeSocket(
+							Child.TypeRange,
+							Child.IntrinsicTypeName,
+							true));
+					}
+					else
+					{
+						Child.ValueOutputs[0].bConnected = true;
+					}
 				}
 			}
 		}

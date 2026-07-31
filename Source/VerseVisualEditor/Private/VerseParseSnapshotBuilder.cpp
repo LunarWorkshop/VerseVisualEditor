@@ -75,7 +75,9 @@ namespace VerseParseSnapshotBuilder
 
 	const Verse::Vst::Node* UnwrapSingleClause(const Verse::Vst::Node* Node)
 	{
-		while (Node != nullptr && Node->IsA<Verse::Vst::Clause>() && Node->GetChildCount() == 1)
+		while (Node != nullptr
+			&& (Node->IsA<Verse::Vst::Clause>() || Node->IsA<Verse::Vst::Parens>())
+			&& Node->GetChildCount() == 1)
 		{
 			Node = Node->GetChildren()[0].Get();
 		}
@@ -843,12 +845,22 @@ namespace VerseParseSnapshotBuilder
 		}
 		auto BuildBinary = [&](const Verse::Vst::Node& Left,
 			const Verse::Vst::Node& Right,
-			FVerseByteRange OperatorRange)
+			FVerseByteRange OperatorRange,
+			FString OperatorSpelling)
 		{
 			Result.Kind = EVerseExpressionKind::BinaryOperator;
 			Result.OperatorRange = TrimSourceWhitespace(SourceIndex.GetSource(), OperatorRange);
-			Result.Operands.Add(BuildExpressionDescriptor(Left, SourceIndex, Parameters));
-			Result.Operands.Add(BuildExpressionDescriptor(Right, SourceIndex, Parameters));
+			Result.OperatorSpelling = MoveTemp(OperatorSpelling);
+			const Verse::Vst::Node* UnwrappedLeft = UnwrapSingleClause(&Left);
+			const Verse::Vst::Node* UnwrappedRight = UnwrapSingleClause(&Right);
+			Result.Operands.Add(BuildExpressionDescriptor(
+				UnwrappedLeft != nullptr ? *UnwrappedLeft : Left,
+				SourceIndex,
+				Parameters));
+			Result.Operands.Add(BuildExpressionDescriptor(
+				UnwrappedRight != nullptr ? *UnwrappedRight : Right,
+				SourceIndex,
+				Parameters));
 		};
 
 		auto TryBuildTaggedBinary = [&](const Verse::Vst::BinaryOp* Binary) -> bool
@@ -868,7 +880,25 @@ namespace VerseParseSnapshotBuilder
 			{
 				return false;
 			}
-			BuildBinary(Left, Right, SourceIndex.ToRange(OperatorNode.Whence()));
+			const FVerseByteRange OperatorLocus =
+				SourceIndex.ToRange(OperatorNode.Whence());
+			const UTF8CHAR OperatorByte =
+				static_cast<UTF8CHAR>(Operator->GetSourceText()[0]);
+			const FUTF8ToTCHAR ConvertedOperator(
+				reinterpret_cast<const ANSICHAR*>(Operator->GetSourceText().AsUTF8()),
+				Operator->GetSourceText().ByteLen());
+			const int32 OperatorByteIndex = FindLastByte(
+				SourceIndex.GetSource(),
+				OperatorByte,
+				OperatorLocus.BeginByte,
+				OperatorLocus.EndByte());
+			BuildBinary(
+				Left,
+				Right,
+				OperatorByteIndex != INDEX_NONE
+					? FVerseByteRange{OperatorByteIndex, 1}
+					: OperatorLocus,
+				FString(ConvertedOperator.Length(), ConvertedOperator.Get()));
 			return true;
 		};
 
@@ -885,12 +915,27 @@ namespace VerseParseSnapshotBuilder
 			const Verse::Vst::Node& Right = *Compare->GetOperandRight();
 			const FVerseByteRange LeftRange = SourceIndex.ToRange(Left.Whence());
 			const FVerseByteRange RightRange = SourceIndex.ToRange(Right.Whence());
-			BuildBinary(Left, Right,
-				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte));
+			FString OperatorSpelling;
+			switch (Compare->GetOp())
+			{
+			case Verse::Vst::BinaryOpCompare::op::lt: OperatorSpelling = TEXT("<"); break;
+			case Verse::Vst::BinaryOpCompare::op::lteq: OperatorSpelling = TEXT("<="); break;
+			case Verse::Vst::BinaryOpCompare::op::gt: OperatorSpelling = TEXT(">"); break;
+			case Verse::Vst::BinaryOpCompare::op::gteq: OperatorSpelling = TEXT(">="); break;
+			case Verse::Vst::BinaryOpCompare::op::eq: OperatorSpelling = TEXT("="); break;
+			case Verse::Vst::BinaryOpCompare::op::noteq: OperatorSpelling = TEXT("<>"); break;
+			default: checkNoEntry(); break;
+			}
+			BuildBinary(
+				Left,
+				Right,
+				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte),
+				MoveTemp(OperatorSpelling));
 			return Result;
 		}
 
-		auto TryBuildTwoOperandGapOperator = [&](bool bMatches) -> bool
+		auto TryBuildTwoOperandGapOperator = [&](bool bMatches,
+			const TCHAR* OperatorSpelling) -> bool
 		{
 			if (!bMatches || Node.GetChildCount() != 2)
 			{
@@ -900,13 +945,19 @@ namespace VerseParseSnapshotBuilder
 			const Verse::Vst::Node& Right = *Node.GetChildren()[1];
 			const FVerseByteRange LeftRange = SourceIndex.ToRange(Left.Whence());
 			const FVerseByteRange RightRange = SourceIndex.ToRange(Right.Whence());
-			BuildBinary(Left, Right,
-				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte));
+			BuildBinary(
+				Left,
+				Right,
+				FVerseByteRange::FromBounds(LeftRange.EndByte(), RightRange.BeginByte),
+				OperatorSpelling);
 			return true;
 		};
-		if (TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::BinaryOpLogicalAnd>())
-			|| TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::BinaryOpLogicalOr>())
-			|| TryBuildTwoOperandGapOperator(Node.IsA<Verse::Vst::Assignment>()))
+		if (TryBuildTwoOperandGapOperator(
+				Node.IsA<Verse::Vst::BinaryOpLogicalAnd>(), TEXT("and"))
+			|| TryBuildTwoOperandGapOperator(
+				Node.IsA<Verse::Vst::BinaryOpLogicalOr>(), TEXT("or"))
+			|| TryBuildTwoOperandGapOperator(
+				Node.IsA<Verse::Vst::Assignment>(), TEXT("=")))
 		{
 			return Result;
 		}
@@ -918,6 +969,7 @@ namespace VerseParseSnapshotBuilder
 			const Verse::Vst::Node& Operand = *LogicalNot->GetChildren()[0];
 			const FVerseByteRange OperandRange = SourceIndex.ToRange(Operand.Whence());
 			Result.Kind = EVerseExpressionKind::UnaryOperator;
+			Result.OperatorSpelling = TEXT("not");
 			Result.OperatorRange = TrimSourceWhitespace(
 				SourceIndex.GetSource(),
 				FVerseByteRange::FromBounds(Result.Range.BeginByte, OperandRange.BeginByte));
@@ -930,6 +982,15 @@ namespace VerseParseSnapshotBuilder
 			const Verse::Vst::Node& OperatorNode = *Add->GetChildren()[0];
 			const Verse::Vst::Node& Operand = *Add->GetChildren()[1];
 			Result.Kind = EVerseExpressionKind::UnaryOperator;
+			if (const Verse::Vst::Operator* PrefixOperator =
+				OperatorNode.AsNullable<Verse::Vst::Operator>())
+			{
+				const FUTF8ToTCHAR ConvertedOperator(
+					reinterpret_cast<const ANSICHAR*>(PrefixOperator->GetSourceText().AsUTF8()),
+					PrefixOperator->GetSourceText().ByteLen());
+				Result.OperatorSpelling = FString(
+					ConvertedOperator.Length(), ConvertedOperator.Get());
+			}
 			Result.OperatorRange = TrimSourceWhitespace(
 				SourceIndex.GetSource(), SourceIndex.ToRange(OperatorNode.Whence()));
 			Result.Operands.Add(BuildExpressionDescriptor(Operand, SourceIndex, Parameters));

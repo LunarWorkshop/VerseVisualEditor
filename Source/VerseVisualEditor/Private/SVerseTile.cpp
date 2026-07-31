@@ -325,7 +325,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	bShowBody = InArgs._ShowBody;
 	bCollapsible = bShowBody && !(
 		Tile.Kind == EVerseVisualTileKind::Expression
-		&& Tile.OperatorRange.IsSet());
+		&& IsVerseOperatorExpression(Tile.ExpressionKind));
 	const bool bHasLabeledExecutionOutputs = !InArgs._ExecutionOutputLabels.IsEmpty();
 	const bool bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
 
@@ -342,7 +342,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		];
 	}
 	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
-		&& Tile.OperatorRange.IsSet();
+		&& IsVerseOperatorExpression(Tile.ExpressionKind);
 	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control
 		&& Tile.ControlKind == EVerseControlKind::If;
@@ -664,7 +664,8 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	const FText Type = GetTypeText();
 	const FText Lines = GetLineText();
 	TSharedRef<SVerticalBox> Header = SNew(SVerticalBox);
-	if (Tile.Kind == EVerseVisualTileKind::Expression && Tile.OperatorRange.IsSet())
+	if (Tile.Kind == EVerseVisualTileKind::Expression
+		&& IsVerseOperatorExpression(Tile.ExpressionKind))
 	{
 		Header->AddSlot()
 		.AutoHeight()
@@ -673,7 +674,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			.MinDesiredWidth(72.0f)
 			[
 				SNew(STextBlock)
-				.Text(Decode(Tile.OperatorRange))
+				.Text(FText::FromString(Tile.OperatorSpelling))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
 				.Justification(ETextJustify::Center)
 				.Margin(FMargin(0.0f, 2.0f))

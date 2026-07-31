@@ -399,6 +399,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Add retains two ordered operands"), Add.Operands.Num(), 2);
 		TestTrue(TEXT("Add operator range is exact"),
 			Snapshot.GetSourceView(Add.OperatorRange) == UTF8TEXTVIEW("+"));
+		TestEqual(TEXT("Add display spelling comes from its VST operator"),
+			Add.OperatorSpelling, FString(TEXT("+")));
 		TestFalse(TEXT("Syntax parsing does not guess the selected Add overload"),
 			Add.Type.IsResolved());
 		if (Add.Operands.Num() == 2)
@@ -566,8 +568,39 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 				Expression->Kind, EVerseExpressionKind::BinaryOperator);
 			TestTrue(TEXT("Binary operator range is source exact"),
 				Snapshot.GetSourceView(Expression->OperatorRange) == Expected.Spelling);
+			const FUTF8ToTCHAR ExpectedSpelling(
+				reinterpret_cast<const ANSICHAR*>(Expected.Spelling.GetData()),
+				Expected.Spelling.Len());
+			TestEqual(TEXT("Binary display spelling comes from its VST operator identity"),
+				Expression->OperatorSpelling,
+				FString(ExpectedSpelling.Length(), ExpectedSpelling.Get()));
 			TestEqual(TEXT("Binary operator retains two operands"), Expression->Operands.Num(), 2);
 		}
+	}
+	if (const FVerseExpressionDescriptor* Complex =
+		FindOnlyExpression(UTF8TEXTVIEW("ComplexBinary")))
+	{
+		const FVerseExpressionDescriptor* Multiply =
+			Complex->Operands.Num() == 2 ? &Complex->Operands[1] : nullptr;
+		const FVerseExpressionDescriptor* Divide = Multiply != nullptr
+			&& Multiply->Operands.Num() == 2 ? &Multiply->Operands[1] : nullptr;
+		const FVerseExpressionDescriptor* NestedSubtract = Divide != nullptr
+			&& Divide->Operands.Num() == 2 ? &Divide->Operands[0] : nullptr;
+		TestTrue(TEXT("Nested binary operators retain their recursive VST shape"),
+			Multiply != nullptr
+				&& Multiply->Kind == EVerseExpressionKind::BinaryOperator
+				&& Divide != nullptr
+				&& Divide->Kind == EVerseExpressionKind::BinaryOperator
+				&& NestedSubtract != nullptr
+				&& NestedSubtract->Kind == EVerseExpressionKind::BinaryOperator);
+		TestTrue(TEXT("Parenthesized operator ranges contain only their tokens"),
+			Snapshot.GetSourceView(Complex->OperatorRange) == UTF8TEXTVIEW("+")
+				&& Multiply != nullptr
+				&& Snapshot.GetSourceView(Multiply->OperatorRange) == UTF8TEXTVIEW("*")
+				&& Divide != nullptr
+				&& Snapshot.GetSourceView(Divide->OperatorRange) == UTF8TEXTVIEW("/")
+				&& NestedSubtract != nullptr
+				&& Snapshot.GetSourceView(NestedSubtract->OperatorRange) == UTF8TEXTVIEW("-"));
 	}
 	if (const FVerseExpressionDescriptor* If = FindOnlyExpression(UTF8TEXTVIEW("ControlIf")))
 	{

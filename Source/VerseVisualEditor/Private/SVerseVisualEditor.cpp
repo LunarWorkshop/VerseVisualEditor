@@ -1108,6 +1108,7 @@ namespace
 
 		TArray<TSharedPtr<SVerseTile>> OperandTiles;
 		OperandTiles.SetNum(Tile.Children.Num());
+		TArray<FVerseGraphConnection> Connections;
 		TSharedRef<SVerticalBox> OperandColumn = SNew(SVerticalBox);
 		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
@@ -1115,9 +1116,15 @@ namespace
 				SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
 			if (Tile.Children[Index].LiteralKind == EVerseLiteralKind::None)
 			{
-				OperandTiles[Index] = BuildFunctionGraphTile(
-					Tile.Children[Index], Document, OnSocketDragStarted, OnInlineLiteralCommitted);
-				Presentation = OperandTiles[Index].ToSharedRef();
+				FBuiltFunctionGraphRow OperandRow = BuildFunctionGraphRow(
+					Tile.Children[Index],
+					Document,
+					OnSocketDragStarted,
+					OnInlineLiteralCommitted,
+					true);
+				OperandTiles[Index] = OperandRow.RootTile;
+				Presentation = OperandRow.Widget;
+				Connections.Append(MoveTemp(OperandRow.Connections));
 			}
 			OperandColumn->AddSlot()
 			.AutoHeight()
@@ -1132,7 +1139,7 @@ namespace
 		{
 			OperandPresentation =
 				SNew(SBox)
-					.WidthOverride(OperandColumnWidth)
+					.MinDesiredWidth(OperandColumnWidth)
 					.HAlign(HAlign_Right)
 					[
 						OperandColumn
@@ -1153,7 +1160,6 @@ namespace
 				RootTile
 			];
 
-		TArray<FVerseGraphConnection> Connections;
 		for (int32 Index = 0; Index < OperandTiles.Num(); ++Index)
 		{
 			if (OperandTiles[Index].IsValid() && Tile.ValueInputs.IsValidIndex(Index))

@@ -36,6 +36,9 @@ Multiply(Left : int, Right : int)<computes> : int =
 Divide(Left : float, Right : float)<computes> : float =
     Left / Right
 
+ComplexBinary(A : int, B : int, C : int, D : int, E : int, F : int)<computes> : int =
+    A + (B - C) * ((D - E) / F)
+
 Equal(Left : int, Right : int)<decides><computes> : void =
     Left = Right
 
