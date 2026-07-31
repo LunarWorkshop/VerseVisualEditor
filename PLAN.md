@@ -621,6 +621,227 @@ This step delivers the first complete edit-and-save workflow.
 - Preserve and expose supported formatting variations.
 - Add whitespace properties for choosing among supported body styles.
 
+### 16. Failable `if` predicates
+
+Implement the reusable failure-context foundation through `if` first. Each
+substep must leave a visible, usable result and must be completed in order.
+
+#### 16.1. Failure-aware sockets and wires
+
+- Derive failure from the active UE6 compiler's exact semantic
+  `CanFail()` result and derive the carried value type from the compiler result
+  type. Do not maintain an editor catalog of failable functions or operators.
+- Model the outcome of an expression independently from its value type:
+  ordinary value, failable typed value, or failure-only. Failure is a semantic
+  decoration, not a new Verse type.
+- Continue using the ordinary Blueprint color for the carried type. Draw a
+  failable typed socket as that type's colored diamond and annotate its wire
+  with repeated bright-gold diamonds. Draw failure-only sockets and wires with
+  gold diamonds.
+- Extend the shared graph-surface connection renderer rather than adding
+  owner-specific wire widgets. Resolve all geometry in graph-local paint space
+  so the decorations remain aligned after moving, redocking, panning, or
+  zooming the editor.
+- When an exact semantic snapshot is unavailable, reserve stable decoration
+  geometry but do not invent a type, effect, or failure capability.
+- Add a fixed `Tests/Fixtures/failure_contexts.verse` fixture inside the plugin.
+  Never use the mutable development corpus for this coverage. Test failable and
+  non-failable calls, operators, casts, carried types, failure-only outcomes,
+  zoom, pan, and window movement.
+
+This slice visibly distinguishes values whose failure is still propagating
+without changing any control tile yet.
+
+#### 16.2. Reusable failable-block tile
+
+- Add a selectable failable-block representation using the shared
+  `SVerseTile` behavior, line numbers, golden selection outline, Details panel,
+  and graph-surface painting.
+- Paint four bright `#FFDC4A` diamonds at the tile's corners.
+- Fill the entire interior with an opaque, dark diamond pattern derived from
+  the current Blueprint-like graph background and tinted subtly gold. Do not
+  use a translucent panel that obscures or washes out its child tiles.
+- Present one ordered vertical expression chain. Do not create parallel lanes.
+- Put one downward execution home plate at the top inside list-capable
+  failable blocks. Arrange their expressions below it through the normal solid
+  white execution chain.
+- When a standalone or result-producing failable block preserves its final
+  expression value, expose that value from a right-edge, base-type-colored
+  diamond socket. Owner policies in later steps may deliberately suppress that
+  socket, transform it into a normal handled-result socket, or move ownership
+  of the result to an enclosing boundary.
+- Treat expression wires as confined to their lexical block. Execution wires
+  may not enter or leave a failable block except through the owner's defined
+  structural connections. Explicit typed binding ports may cross the boundary
+  where a later substep permits them.
+- Add layout and paint tests for empty and populated blocks, corner
+  decorations, child clipping, selection, and graph-coordinate alignment.
+
+This slice produces the common visual container that `if`, `for`, and later
+failure-context owners will reuse.
+
+#### 16.3. Place the failable predicate inside `if`
+
+- Derive an `if` failure-context descriptor from the VST. It must retain the
+  owner's identity, exact source range, ordered predicate expression ranges,
+  punctuation and separator ranges, insertion points, and current revision.
+- Replace the hardcoded Boolean condition input with the reusable failable
+  block placed inside the `if` tile.
+- Feed the failable predicate's structural success into the existing `if`
+  branches. The `if` owner discards the predicate's value, so do not display a
+  right-side value socket for this block even when its final expression has a
+  value.
+- Keep the `if` tile's incoming, Completed, True, and False execution paths and
+  body layout. The new predicate container must not become part of the outer
+  statement execution chain.
+- Rebuild the descriptor and tile tree from edited source after every accepted
+  change; never serialize the visual tree.
+- Test brace and indentation forms, empty and multiple predicates, nested
+  failure contexts, and byte-accurate ranges.
+
+This slice makes the new representation visible in every parsed `if`.
+
+#### 16.4. Scoped predicate bindings
+
+- Record each binding introduced by an `if` predicate using compiler identity,
+  displayed name, compiler type, declaration range, and legal consumer scopes.
+- Expose each binding as a typed socket on the right edge of the `if` tile.
+  Connect its defining expression inside the failable block to that boundary
+  port.
+- Make an `if` binding available only in the corresponding `then` body. It must
+  never appear in `else` or after the `if`.
+- Use the same scope-aware expression search and semantic compatibility checks
+  as other identifiers. Do not synthesize bindings from source spelling alone
+  when exact semantic identity is unavailable.
+- Test shadowing, duplicate displayed names, nested predicates, legal `then`
+  consumers, and rejection in `else` and outer scopes.
+
+This slice makes identifiers created by successful predicates visibly usable
+inside the True body.
+
+#### 16.5. Edit ordered expressions inside failable blocks
+
+- Generalize executable-clause editing so function bodies and list-capable
+  failable blocks use the same insertion, deletion, and layout mechanisms.
+- Dragging from the block's top home plate inserts before its first expression.
+  Dragging from an expression's execution output inserts after that expression
+  and opens the normal expression search.
+- Reuse semantic expression actions for identifiers, calls, and operators. Add
+  structural source actions for the supported public failure-context forms;
+  do not add per-function expression kinds.
+- Add the generic delete command for a selected expression.
+- Allow vertical drag reordering only within the same clause. Reject moves
+  across failure contexts or other lexical boundaries.
+- Apply insertion, deletion, and reorder as localized UTF-8 replacements.
+  Preserve punctuation, separators, indentation, blank lines, line endings,
+  and comments not owned by the edited expression.
+- Determine comment ownership from the VST. If ownership is ambiguous, keep the
+  comment fixed rather than guessing.
+- Use one atomic validated multi-range operation for a reorder. Do not add
+  undo/redo history in this prototype step.
+- Prospectively parse and rebuild the VST before accepting source. Reject
+  syntactically invalid replacements without mutation, but allow semantic
+  errors. After acceptance, reparse, rebuild the graph, and schedule semantic
+  analysis.
+- Extend the fixed fixture with insert, delete, reorder, nested-context,
+  comment, mixed-line-ending, and byte-preservation cases. Build the editor
+  target and run the focused tests from the command line.
+
+This slice makes the `if` predicate block directly editable with the same
+workflow used elsewhere in the function graph.
+
+### 17. Failable `for` filters and generators
+
+Implement `for` as the next prototype owner after the `if` foundation.
+
+#### 17.1. Render the ordered `for` failure context
+
+- Derive the `for` filter list, exact ranges, separators, punctuation,
+  insertion points, and body range directly from the VST.
+- Place one reusable failable block inside the `for` tile and render all
+  filters and generators as a single ordered vertical chain. Failure stops the
+  remaining chain; do not present independent lanes.
+- A `for` owner discards the filter chain's value, so omit the block's
+  right-side value socket.
+- Preserve the existing outer execution and loop-body presentation while
+  preventing internal execution wires from crossing the filter-block boundary.
+- Test empty, single, multiple, mixed generator/filter, brace, indentation, and
+  nested `for` forms.
+
+This slice gives existing `for` expressions their final predicate layout.
+
+#### 17.2. Create and edit generators
+
+- Offer generator creation through the ordinary context menu and tile workflow;
+  do not introduce a dedicated generator dialog.
+- Insert a source-safe, collision-free initial generator such as
+  `Item : array{}`.
+- Expose the generated name in Details and rename it through the validated
+  identifier-editing path.
+- Show the iterable as a normal typed input socket. Wiring a compatible
+  iterable replaces the `array{}` placeholder through a localized source edit.
+- Support the optional key binding when the compiler identifies a map
+  generator.
+- Reuse Step 16.5 for insertion, deletion, reordering, syntax validation,
+  byte preservation, and graph rebuilding.
+- Test collision-free names, iterable replacement, maps, malformed prospective
+  syntax, and semantic-error acceptance.
+
+This slice lets a user visibly create a valid generator without typing Verse.
+
+#### 17.3. Expose generator and filter bindings
+
+- Record generator and predicate bindings with compiler identity, type,
+  declaration range, and precise validity interval.
+- Expose them as typed sockets on the right edge of the `for` tile and connect
+  their internal definitions to those ports.
+- Make each binding available to later filters in the same ordered chain and
+  to the loop body, but never before its declaration or outside the `for`.
+- Filter expression search and connection targets by these exact scopes.
+- Test dependent filters, key/value map bindings, shadowing, nested loops, body
+  consumers, and every rejected out-of-scope use.
+
+This slice completes the useful data flow from a `for` predicate into its body.
+
+### 18. Failable `<decides>` function bodies
+
+Implement deciding functions as the final prototype failure-context owner.
+
+#### 18.1. Mark the entire deciding function graph
+
+- Detect `<decides>` from exact compiler semantics and associate the function
+  body's VST clause with the failure context.
+- Do not create a selectable nested failable-block tile. Instead, paint the
+  entire function graph background with the same opaque dark, subtly gold
+  diamond pattern used by failable blocks, including the function entry, body,
+  and return area.
+- Keep tile placement, RMB panning, cursor-relative zooming, clipping,
+  selection, and graph persistence unchanged. Paint the pattern in graph-local
+  coordinates through `SVerseGraphSurface`.
+- Add visual and coordinate tests for moving, redocking, zooming, and panning a
+  deciding function beside an ordinary function.
+
+This slice makes a deciding function's failure context immediately recognizable
+without adding another visual nesting level.
+
+#### 18.2. Use the function boundary as the result owner
+
+- Treat the final expression in a deciding function as the function result
+  according to the compiler-selected return type.
+- Do not add a separate right-side result socket to the background failure
+  context. The existing function boundary and return presentation own the
+  result.
+- Show failure-aware sockets and wires on calls to deciding functions whenever
+  failure remains unhandled at the call site.
+- Reuse the generalized executable-clause editor for the deciding body and
+  preserve all source bytes outside each localized edit.
+- Test void and value-returning deciding functions, implicit final values,
+  nested failure contexts, deciding calls, exact `CanFail()` propagation, and
+  transformed output source.
+
+This slice completes the prototype path from authoring a deciding function to
+using its failable result.
+
 ## Additional Implementation Steps
 
 ### Further work
@@ -799,6 +1020,149 @@ introduced immediately beforehand.
 - Provide type-appropriate inline and property-panel editors.
 - Add explicit controls for supported floating-point special values.
 - Restrict the first implementation to literals that require no casts.
+
+### 13. `first` failure contexts
+
+#### 13.1. Render `first` filters and body
+
+- Reuse the `for` failure-context descriptor, single ordered filter chain, and
+  generator presentation for `first`.
+- Discard filter values while preserving the selected body's value.
+- Display the result as a base-type-colored failable diamond socket because the
+  `first` expression itself can fail.
+- Keep execution confined to the owner and reuse the shared graph connection
+  renderer.
+
+This slice makes existing `first` expressions visually distinct from `for`.
+
+#### 13.2. Edit and scope `first`
+
+- Reuse generator creation, iterable replacement, map bindings, insertion,
+  deletion, and within-clause reordering.
+- Make bindings available to later filters and the selected body, but nowhere
+  outside the `first`.
+- Test empty inputs, successful and failing selection, body result types,
+  nested forms, generators, maps, scope boundaries, and byte preservation in
+  the fixed failure-context fixture.
+
+This slice makes the `first` representation fully authorable.
+
+### 14. `option{}` failure contexts
+
+#### 14.1. Render handled optional construction
+
+- Place the ordered failable block inside the `option{}` owner tile.
+- Because `option{}` handles failure, display its output as a normal Blueprint
+  socket of type `?T`, not as a failable diamond socket.
+- Preserve the final successful expression value as `T`; a failure produces
+  the empty option.
+- Test value and failure paths, nested contexts, empty and multi-expression
+  blocks, and compiler-derived optional result types.
+
+This slice visibly demonstrates failure being handled rather than propagated.
+
+#### 14.2. Edit `option{}` contents
+
+- Reuse top-home-plate insertion, expression insertion, deletion, and
+  within-clause reordering.
+- Preserve the owner's delimiters and all unrelated UTF-8 bytes.
+- Reject syntactically invalid changes without mutation and allow semantic
+  errors for later compilation reporting.
+
+This slice makes optional construction editable through the shared workflow.
+
+### 15. `logic{}` failure contexts
+
+#### 15.1. Render handled logic construction
+
+- Place the ordered failable block inside the `logic{}` owner tile.
+- Discard successful expression values and convert success or failure into a
+  normal `logic` output socket. Do not display a failable diamond after the
+  owner because failure has been handled.
+- Test success, failure, nested contexts, and exact compiler-derived output.
+
+This slice makes the failure-to-logic boundary visible.
+
+#### 15.2. Edit `logic{}` contents
+
+- Reuse the common list editor and source-preservation rules.
+- Test insert, delete, reorder, comments, punctuation, and mixed line endings
+  against the fixed fixture.
+
+This slice completes authoring for `logic{}`.
+
+### 16. `not` failure contexts
+
+#### 16.1. Render failure inversion
+
+- Represent `not` as an owner containing its failable operand.
+- Discard the operand's value and invert success and failure.
+- Show a gold failure-only diamond when the result continues to propagate; do
+  not invent a carried value type.
+- Keep `not` to one operand unless its VST operand is itself a list-capable
+  block. Do not manufacture list syntax.
+
+This slice makes failure inversion readable in the graph.
+
+#### 16.2. Edit the `not` operand
+
+- Reuse normal expression replacement for a single operand and the shared list
+  editor only when the VST exposes a real list-capable operand.
+- Test single and list-capable forms, nested failures, syntax rejection, and
+  byte preservation.
+
+This slice completes authoring without broadening Verse syntax.
+
+### 17. Left-hand `or` failure contexts
+
+#### 17.1. Render fallback data flow
+
+- Represent only the left operand of `or` as the failure context that selects
+  whether the fallback right operand is evaluated.
+- Preserve the left value on success and join it with the fallback result.
+- Derive the joined compiler result type and display a normal typed socket when
+  failure is fully handled. Display a base-type-colored failable diamond only
+  when the right operand can still fail.
+- Keep the two operands and their evaluation order explicit; do not merge the
+  operator into a parallel-lane presentation.
+
+This slice shows both fallback control flow and the surviving value.
+
+#### 17.2. Edit and validate `or`
+
+- Reuse ordinary operand editing and source actions; do not expose the
+  left-hand context as an independently reorderable list unless its VST operand
+  is list-capable.
+- Test left success, left failure with fallback, failable fallback, joined
+  types, nesting, syntax rejection, semantic-error acceptance, and exact source
+  preservation.
+
+This slice completes the public fallback owner.
+
+### 18. Failure-context completeness
+
+- Recognize the complete public UE6 failure-context owner set implemented by
+  the preceding steps: `if`, `for`, `first`, `<decides>` function bodies,
+  `option{}`, `logic{}`, `not`, and the left operand of `or`.
+- Treat `and` expressions and ordinary block expressions as inheriting their
+  surrounding failure context rather than creating a new owner tile. Continue
+  to decorate their result when exact semantics say failure propagates.
+- Explicitly exclude Epic-internal `await`, `batch`, `upon`, and `when` forms
+  from customer-facing creation and presentation until they become public
+  language features.
+- Verify all owner result policies, exact `CanFail()` behavior, value types,
+  scoped bindings, socket shapes, wire decorations, nesting combinations, and
+  transformed output with the fixed fixture.
+- Verify top-home-plate and after-expression insertion, deletion, reordering,
+  generators, maps, cross-context rejection, ambiguous-comment preservation,
+  mixed line endings, graph alignment, and non-mutating syntax rejection across
+  every list-capable owner.
+- Build the editor target and run the focused failure-context, expression,
+  semantic-workspace, source-preservation, and graph-coordinate automation
+  tests from the command line.
+
+This step confirms the editor covers every currently public UE6 failure context
+without relying on web documentation or private compiler constructs.
 
 All editing features for comments, definitions, statements, and expressions
 must reuse localized revisioned replacements, atomic transactions,
