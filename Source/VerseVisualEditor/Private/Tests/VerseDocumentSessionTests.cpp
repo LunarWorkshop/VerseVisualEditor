@@ -213,6 +213,91 @@ bool FVerseDocumentSessionReparseTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseIfPredicateReparseTest,
+	"VerseVisualEditor.Prototype.FailureContexts.IfPredicateReparse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseIfPredicateReparseTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"ReparseIf(Input : int)<computes> : int =\n"
+		"    if (Input > 0):\n"
+		"        Input\n"
+		"    else:\n"
+		"        0\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	auto FindFunction = [&Session]() -> const FVerseVisualTile*
+	{
+		return Session.GetTiles().FindByPredicate([](const FVerseVisualTile& Tile)
+		{
+			return Tile.Kind == EVerseVisualTileKind::Definition
+				&& Tile.DefinitionKind == VerseSyntaxKind::Function;
+		});
+	};
+	const FVerseVisualTile* OriginalFunction = FindFunction();
+	if (!TestNotNull(TEXT("Initial if function parses"), OriginalFunction))
+	{
+		return false;
+	}
+	const TArray<FVerseVisualTile> OriginalGraph =
+		FVerseVisualTileBuilder::BuildFunctionGraph(
+			*OriginalFunction,
+			Session.GetParseSnapshot());
+	if (!TestTrue(TEXT("Initial if owns one failable predicate"),
+		OriginalGraph.Num() == 3
+			&& !OriginalGraph[1].Children.IsEmpty()
+			&& OriginalGraph[1].Children[0].Kind
+				== EVerseVisualTileKind::FailableBlock))
+	{
+		return false;
+	}
+	const FVerseDocumentRevision OriginalPredicateRevision =
+		OriginalGraph[1].Children[0].Range.Revision;
+
+	const FUtf8StringView Current = View(Session.GetCurrentUtf8());
+	const FUtf8StringView PredicateTail = UTF8TEXTVIEW("Input > 0)");
+	const int32 PredicateOffset = Current.Find(PredicateTail);
+	if (!TestTrue(TEXT("Predicate insertion point is found"), PredicateOffset != INDEX_NONE))
+	{
+		return false;
+	}
+	FText Error;
+	TestTrue(TEXT("A localized predicate edit is accepted"),
+		Session.Replace(
+			FVerseTextRange(
+				Session.GetRevision(),
+				{PredicateOffset + PredicateTail.Len() - 1, 0}),
+			UTF8TEXTVIEW("; Input < 10"),
+			Error));
+
+	const FVerseVisualTile* UpdatedFunction = FindFunction();
+	if (!TestNotNull(TEXT("Edited if function reparses"), UpdatedFunction))
+	{
+		return false;
+	}
+	const TArray<FVerseVisualTile> UpdatedGraph =
+		FVerseVisualTileBuilder::BuildFunctionGraph(
+			*UpdatedFunction,
+			Session.GetParseSnapshot());
+	TestTrue(TEXT("Edited source rebuilds a fresh two-expression predicate block"),
+		UpdatedGraph.Num() == 3
+			&& !UpdatedGraph[1].Children.IsEmpty()
+			&& UpdatedGraph[1].Children[0].Kind
+				== EVerseVisualTileKind::FailableBlock
+			&& UpdatedGraph[1].Children[0].Children.Num() == 2
+			&& UpdatedGraph[1].Children[0].Range.Revision == Session.GetRevision()
+			&& UpdatedGraph[1].Children[0].Range.Revision
+				!= OriginalPredicateRevision);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseDocumentSessionSaveTest,
 	"VerseVisualEditor.Foundation.DocumentSession.Save",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

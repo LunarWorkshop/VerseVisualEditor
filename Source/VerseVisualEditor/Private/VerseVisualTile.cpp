@@ -93,10 +93,34 @@ namespace
 			FVerseVisualExpressionDescriptor::FControlRegion& VisualRegion =
 				Result.ControlRegions.AddDefaulted_GetRef();
 			VisualRegion.Range = MakeTextRange(Revision, Region.Range);
+			VisualRegion.InteriorRange = MakeTextRange(Revision, Region.InteriorRange);
+			VisualRegion.OpeningPunctuationRange =
+				MakeTextRange(Revision, Region.OpeningPunctuationRange);
+			VisualRegion.ClosingPunctuationRange =
+				MakeTextRange(Revision, Region.ClosingPunctuationRange);
 			VisualRegion.Kind = Region.Kind;
 			VisualRegion.PunctuationStyle = Region.PunctuationStyle;
+			if (Region.EmptyBodyInsertionByte != INDEX_NONE)
+			{
+				VisualRegion.EmptyBodyInsertionAnchor = FVerseTextRange(
+					Revision,
+					FVerseByteRange::FromBounds(
+						Region.EmptyBodyInsertionByte,
+						Region.EmptyBodyInsertionByte));
+			}
 			VisualRegion.FirstOperandIndex = Region.FirstOperandIndex;
 			VisualRegion.OperandCount = Region.OperandCount;
+			for (const FVerseExpressionControlItem& Item : Region.Items)
+			{
+				FVerseVisualExpressionDescriptor::FControlRegion::FItem& VisualItem =
+					VisualRegion.Items.AddDefaulted_GetRef();
+				VisualItem.ExpressionRange = MakeTextRange(Revision, Item.ExpressionRange);
+				VisualItem.LeadingTriviaRange =
+					MakeTextRange(Revision, Item.LeadingTriviaRange);
+				VisualItem.TrailingTriviaRange =
+					MakeTextRange(Revision, Item.TrailingTriviaRange);
+				VisualItem.Separator = Item.Separator;
+			}
 		}
 		return Result;
 	}
@@ -293,7 +317,9 @@ namespace
 			Tile.Children.Add(MakeExpressionTile(
 				Operand,
 				Snapshot,
-				Descriptor.Kind == EVerseExpressionKind::Control && !bConditionOperand,
+				Descriptor.Kind == EVerseExpressionKind::Control
+					&& (!bConditionOperand
+						|| Descriptor.ControlKind == EVerseControlKind::If),
 				false));
 		}
 		if (Descriptor.Kind == EVerseExpressionKind::Control
@@ -303,34 +329,54 @@ namespace
 				Descriptor.ControlRegions.FindByPredicate(
 					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
 					{
-						return Region.Kind == EVerseControlRegionKind::Condition
-							&& Region.OperandCount > 0;
+						return Region.Kind == EVerseControlRegionKind::Condition;
 					});
 			if (ConditionRegion != nullptr
-				&& Tile.Children.IsValidIndex(ConditionRegion->FirstOperandIndex))
+				&& ConditionRegion->FirstOperandIndex >= 0
+				&& ConditionRegion->FirstOperandIndex <= Tile.Children.Num()
+				&& ConditionRegion->OperandCount >= 0
+				&& ConditionRegion->FirstOperandIndex + ConditionRegion->OperandCount
+					<= Tile.Children.Num())
 			{
-				const FVerseVisualExpressionDescriptor& Condition =
-					Descriptor.Operands[ConditionRegion->FirstOperandIndex];
-				FVerseVisualSocket& Input = Tile.ValueInputs.AddDefaulted_GetRef();
-				Input.IntrinsicTypeName = TEXT("logic");
-				Input.bConnected = Condition.LiteralKind == EVerseLiteralKind::None;
-				if (Condition.LiteralKind != EVerseLiteralKind::None)
+				const int32 FirstConditionIndex = ConditionRegion->FirstOperandIndex;
+				FVerseVisualTile FailablePredicate;
+				FailablePredicate.Kind = EVerseVisualTileKind::FailableBlock;
+				FailablePredicate.Range = ConditionRegion->Range;
+				FailablePredicate.FirstSourceLine =
+					Snapshot.GetDocument()->GetOriginalLineNumber(
+						ConditionRegion->Range.BeginByte);
+				FailablePredicate.LastSourceLine =
+					Snapshot.GetDocument()->GetOriginalLineNumber(FMath::Max(
+						ConditionRegion->Range.BeginByte,
+						ConditionRegion->Range.EndByte() - 1));
+				FailablePredicate.VstNodeType = Descriptor.VstNodeType;
+				FailablePredicate.VstTag = Descriptor.VstTag;
+				FailablePredicate.bHasInternalExecutionEntry = true;
+				FailablePredicate.ControlRegions.Add(*ConditionRegion);
+				FailablePredicate.ControlRegions[0].FirstOperandIndex = 0;
+				for (int32 Offset = 0; Offset < ConditionRegion->OperandCount; ++Offset)
 				{
-					Input.InlineLiteralRange = Condition.Range;
-					Input.InlineLiteralKind = Condition.LiteralKind;
+					FailablePredicate.Children.Add(
+						MoveTemp(Tile.Children[FirstConditionIndex + Offset]));
 				}
-				else
+				Tile.Children.RemoveAt(
+					FirstConditionIndex,
+					ConditionRegion->OperandCount,
+					EAllowShrinking::No);
+				Tile.Children.Insert(MoveTemp(FailablePredicate), FirstConditionIndex);
+
+				const int32 IndexDelta = 1 - ConditionRegion->OperandCount;
+				for (FVerseVisualExpressionDescriptor::FControlRegion& Region :
+					Tile.ControlRegions)
 				{
-					FVerseVisualTile& ConditionTile =
-						Tile.Children[ConditionRegion->FirstOperandIndex];
-					if (ConditionTile.ValueOutputs.IsEmpty())
+					if (Region.Kind == EVerseControlRegionKind::Condition
+						&& Region.FirstOperandIndex == FirstConditionIndex)
 					{
-						ConditionTile.ValueOutputs.Add(MakeSocket({}, TEXT("logic"), true));
+						Region.OperandCount = 1;
 					}
-					else
+					else if (Region.FirstOperandIndex >= FirstConditionIndex)
 					{
-						ConditionTile.ValueOutputs[0].bConnected = true;
-						ConditionTile.ValueOutputs[0].IntrinsicTypeName = TEXT("logic");
+						Region.FirstOperandIndex += IndexDelta;
 					}
 				}
 			}

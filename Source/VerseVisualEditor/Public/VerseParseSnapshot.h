@@ -60,13 +60,36 @@ enum class EVerseControlRegionKind : uint8
 	Else,
 };
 
+enum class EVerseClauseItemSeparator : uint8
+{
+	None,
+	Newline,
+	Semicolon,
+	Mixed,
+	EndOfClause,
+};
+
+/** Source-exact occurrence of one ordered expression inside a control clause. */
+struct VERSEVISUALEDITOR_API FVerseExpressionControlItem
+{
+	FVerseByteRange ExpressionRange;
+	FVerseByteRange LeadingTriviaRange;
+	FVerseByteRange TrailingTriviaRange;
+	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+};
+
 struct VERSEVISUALEDITOR_API FVerseExpressionControlRegion
 {
 	FVerseByteRange Range;
+	FVerseByteRange InteriorRange;
+	FVerseByteRange OpeningPunctuationRange;
+	FVerseByteRange ClosingPunctuationRange;
 	EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
 	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	int32 EmptyBodyInsertionByte = INDEX_NONE;
 	int32 FirstOperandIndex = 0;
 	int32 OperandCount = 0;
+	TArray<FVerseExpressionControlItem> Items;
 };
 
 inline bool IsVerseBinaryOperatorExpression(EVerseExpressionKind Kind)
@@ -128,15 +151,6 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 	FVerseExpressionType Type;
 	TArray<FVerseExpressionDescriptor> Operands;
 	TArray<FVerseExpressionControlRegion> ControlRegions;
-};
-
-enum class EVerseClauseItemSeparator : uint8
-{
-	None,
-	Newline,
-	Semicolon,
-	Mixed,
-	EndOfClause,
 };
 
 /** A root expression's occurrence within an executable clause. */

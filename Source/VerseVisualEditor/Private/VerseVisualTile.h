@@ -72,11 +72,24 @@ struct FVerseVisualExpressionDescriptor
 	TArray<FVerseVisualExpressionDescriptor> Operands;
 	struct FControlRegion
 	{
+		struct FItem
+		{
+			FVerseTextRange ExpressionRange;
+			FVerseTextRange LeadingTriviaRange;
+			FVerseTextRange TrailingTriviaRange;
+			EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+		};
+
 		FVerseTextRange Range;
+		FVerseTextRange InteriorRange;
+		FVerseTextRange OpeningPunctuationRange;
+		FVerseTextRange ClosingPunctuationRange;
 		EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
 		EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+		FVerseTextRange EmptyBodyInsertionAnchor;
 		int32 FirstOperandIndex = 0;
 		int32 OperandCount = 0;
+		TArray<FItem> Items;
 	};
 	TArray<FControlRegion> ControlRegions;
 };

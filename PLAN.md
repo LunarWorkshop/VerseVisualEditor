@@ -680,7 +680,7 @@ without changing any control tile yet.
 This slice produces the common visual container that `if`, `for`, and later
 failure-context owners will reuse.
 
-#### 16.3. Place the failable predicate inside `if`
+#### 16.3. Place the failable predicate inside `if` (complete)
 
 - Derive an `if` failure-context descriptor from the VST. It must retain the
   owner's identity, exact source range, ordered predicate expression ranges,

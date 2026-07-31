@@ -577,7 +577,82 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			&& If->ControlRegions.Num() == 3
 			&& If->ControlRegions[0].Kind == EVerseControlRegionKind::Condition
 			&& If->ControlRegions[1].Kind == EVerseControlRegionKind::Body
+			&& If->ControlRegions[1].PunctuationStyle
+				== EVerseClausePunctuationStyle::ColonOrIndentation
 			&& If->ControlRegions[2].Kind == EVerseControlRegionKind::Else);
+		if (If->ControlRegions.Num() == 3)
+		{
+			const FVerseExpressionControlRegion& Predicate = If->ControlRegions[0];
+			TestTrue(TEXT("If predicate retains its exact VST-owned clause range"),
+				Predicate.Range.IsSet()
+				&& Predicate.InteriorRange.IsSet()
+				&& Predicate.InteriorRange.BeginByte >= Predicate.Range.BeginByte
+				&& Predicate.InteriorRange.EndByte() <= Predicate.Range.EndByte());
+			TestTrue(TEXT("If predicate retains ordered source-exact items"),
+				Predicate.Items.Num() == Predicate.OperandCount
+				&& Predicate.Items.Num() == 1
+				&& Predicate.Items[0].ExpressionRange
+					== If->Operands[Predicate.FirstOperandIndex].Range
+				&& Predicate.Items[0].Separator
+					== EVerseClauseItemSeparator::EndOfClause);
+			TestTrue(TEXT("If predicate retains a source insertion point"),
+				Predicate.EmptyBodyInsertionByte != INDEX_NONE
+				&& Predicate.EmptyBodyInsertionByte
+					>= Predicate.InteriorRange.BeginByte
+				&& Predicate.EmptyBodyInsertionByte
+					<= Predicate.InteriorRange.EndByte());
+		}
+	}
+	if (const FVerseExpressionDescriptor* If =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlIfMultiple")))
+	{
+		const FVerseExpressionControlRegion* Predicate =
+			If->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		TestTrue(TEXT("Multiple predicates retain their order and separators"),
+			Predicate != nullptr
+				&& Predicate->OperandCount == 2
+				&& Predicate->Items.Num() == 2
+				&& Predicate->Items[0].Separator
+					== EVerseClauseItemSeparator::Semicolon
+				&& Predicate->Items[1].Separator
+					== EVerseClauseItemSeparator::EndOfClause);
+	}
+	if (const FVerseExpressionDescriptor* If =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlIfBraces")))
+	{
+		const FVerseExpressionControlRegion* Body =
+			If->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+		TestTrue(TEXT("Brace-form if retains exact body punctuation"),
+			Body != nullptr
+				&& Body->PunctuationStyle == EVerseClausePunctuationStyle::Braces
+				&& Snapshot.GetSourceView(Body->OpeningPunctuationRange)
+					== UTF8TEXTVIEW("{")
+				&& Snapshot.GetSourceView(Body->ClosingPunctuationRange)
+					== UTF8TEXTVIEW("}"));
+	}
+	if (const FVerseExpressionDescriptor* If =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlIfNested")))
+	{
+		const FVerseExpressionControlRegion* Body =
+			If->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+		TestTrue(TEXT("Nested failure contexts remain recursive VST descriptors"),
+			Body != nullptr
+				&& Body->OperandCount == 1
+				&& If->Operands.IsValidIndex(Body->FirstOperandIndex)
+				&& If->Operands[Body->FirstOperandIndex].ControlKind
+					== EVerseControlKind::If);
 	}
 	if (const FVerseExpressionDescriptor* For = FindOnlyExpression(UTF8TEXTVIEW("ControlFor")))
 	{

@@ -550,20 +550,128 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		{
 			const FVerseVisualTile& IfTile = IfGraph[1];
 			const int32 ConditionIndex = IfTile.ControlRegions[0].FirstOperandIndex;
-			TestTrue(TEXT("If exposes one connected Boolean condition input"),
-				IfTile.ValueInputs.Num() == 1
-				&& IfTile.ValueInputs[0].IntrinsicTypeName == TEXT("logic")
-				&& IfTile.ValueInputs[0].bConnected);
-			if (TestTrue(TEXT("If condition expression remains available"),
+			TestTrue(TEXT("If no longer synthesizes a Boolean condition input"),
+				IfTile.ValueInputs.IsEmpty());
+			if (TestTrue(TEXT("If owns one reusable failable predicate block"),
 				IfTile.Children.IsValidIndex(ConditionIndex)))
 			{
-				const FVerseVisualTile& Condition = IfTile.Children[ConditionIndex];
-				TestTrue(TEXT("If condition is a value expression rather than an execution body"),
-					!Condition.bHasExecutionInput
-					&& !Condition.bHasExecutionOutput
-					&& Condition.ValueOutputs.Num() == 1
-					&& Condition.ValueOutputs[0].bConnected);
+				const FVerseVisualTile& Predicate = IfTile.Children[ConditionIndex];
+				TestTrue(TEXT("If predicate is contained and discards its final value"),
+					Predicate.Kind == EVerseVisualTileKind::FailableBlock
+					&& Predicate.bHasInternalExecutionEntry
+					&& Predicate.ValueOutputs.IsEmpty()
+					&& Predicate.VstNodeType == IfTile.VstNodeType
+					&& Predicate.VstTag == IfTile.VstTag
+					&& Predicate.Children.Num() == 1);
+				if (!Predicate.Children.IsEmpty())
+				{
+					TestTrue(TEXT("Predicate expressions form an internal execution chain"),
+						Predicate.Children[0].bHasExecutionInput
+						&& Predicate.Children[0].bHasExecutionOutput);
+				}
+				TestTrue(TEXT("Predicate descriptor remains revision-specific and source exact"),
+					Predicate.Range.Revision == IfTile.Range.Revision
+					&& Predicate.ControlRegions.Num() == 1
+					&& Predicate.ControlRegions[0].Range == Predicate.Range
+					&& Predicate.ControlRegions[0].Items.Num() == 1);
 			}
+		}
+	}
+	const FVerseVisualTile* MultipleIfFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlIfMultiple"));
+	if (TestNotNull(TEXT("Multiple-predicate if fixture exists"), MultipleIfFunction))
+	{
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*MultipleIfFunction, Snapshot);
+		if (TestTrue(TEXT("Multiple predicates use one contained failable block"),
+			Graph.Num() == 3 && Graph[1].Children.Num() >= 1))
+		{
+			const FVerseVisualTile& Predicate = Graph[1].Children[0];
+			TestTrue(TEXT("Every ordered predicate expression remains in the block"),
+				Predicate.Kind == EVerseVisualTileKind::FailableBlock
+					&& Predicate.Children.Num() == 2
+					&& Predicate.ControlRegions.Num() == 1
+					&& Predicate.ControlRegions[0].Items.Num() == 2
+					&& Predicate.ControlRegions[0].Items[0].Separator
+						== EVerseClauseItemSeparator::Semicolon);
+		}
+	}
+
+	const FVerseVisualTile* BraceIfFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlIfBraces"));
+	if (TestNotNull(TEXT("Brace-form if fixture exists"), BraceIfFunction))
+	{
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*BraceIfFunction, Snapshot);
+		const FVerseVisualExpressionDescriptor::FControlRegion* Body =
+			Graph.Num() == 3
+				? Graph[1].ControlRegions.FindByPredicate(
+					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Body;
+					})
+				: nullptr;
+		TestTrue(TEXT("Brace-form if survives into the revision-specific tile tree"),
+			Body != nullptr
+				&& Body->PunctuationStyle == EVerseClausePunctuationStyle::Braces
+				&& Body->OpeningPunctuationRange.Revision == Graph[1].Range.Revision);
+	}
+
+	const FVerseVisualTile* NestedIfFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlIfNested"));
+	if (TestNotNull(TEXT("Nested-if fixture exists"), NestedIfFunction))
+	{
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*NestedIfFunction, Snapshot);
+		const FVerseVisualTile* NestedIf = Graph.Num() == 3
+			? Graph[1].Children.FindByPredicate([](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::Expression
+						&& Child.ControlKind == EVerseControlKind::If;
+				})
+			: nullptr;
+		TestTrue(TEXT("Nested if owns its own nested failable predicate block"),
+			NestedIf != nullptr
+				&& NestedIf->Children.ContainsByPredicate([](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::FailableBlock;
+				}));
+	}
+	if (IfFunction != nullptr && !IfFunction->BodyClause.Items.IsEmpty())
+	{
+		FVerseVisualTile EmptyPredicateFunction = *IfFunction;
+		FVerseVisualExpressionDescriptor& IfDescriptor =
+			EmptyPredicateFunction.BodyClause.Items[0].Expression;
+		FVerseVisualExpressionDescriptor::FControlRegion* PredicateRegion =
+			IfDescriptor.ControlRegions.FindByPredicate(
+				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		if (PredicateRegion != nullptr && PredicateRegion->OperandCount == 1)
+		{
+			IfDescriptor.Operands.RemoveAt(PredicateRegion->FirstOperandIndex);
+			PredicateRegion->OperandCount = 0;
+			PredicateRegion->Items.Reset();
+			for (FVerseVisualExpressionDescriptor::FControlRegion& Region :
+				IfDescriptor.ControlRegions)
+			{
+				if (Region.Kind != EVerseControlRegionKind::Condition)
+				{
+					--Region.FirstOperandIndex;
+				}
+			}
+			const TArray<FVerseVisualTile> EmptyGraph =
+				FVerseVisualTileBuilder::BuildFunctionGraph(
+					EmptyPredicateFunction,
+					Snapshot);
+			TestTrue(TEXT("An empty predicate still produces an editable failable block"),
+				EmptyGraph.Num() == 3
+					&& !EmptyGraph[1].Children.IsEmpty()
+					&& EmptyGraph[1].Children[0].Kind
+						== EVerseVisualTileKind::FailableBlock
+					&& EmptyGraph[1].Children[0].Children.IsEmpty()
+					&& EmptyGraph[1].Children[0].bHasInternalExecutionEntry);
 		}
 	}
 

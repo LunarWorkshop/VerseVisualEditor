@@ -71,6 +71,24 @@ ControlIf(Input : int)<computes> : int =
     else:
         0
 
+ControlIfMultiple(Input : int)<computes> : int =
+    if (Input > 0; Input < 10):
+        Input
+    else:
+        0
+
+ControlIfBraces(Input : int)<computes> : int =
+    if (Input > 0) { Input } else { 0 }
+
+ControlIfNested(Input : int)<computes> : int =
+    if (Input > 0):
+        if (Input < 10):
+            Input
+        else:
+            10
+    else:
+        0
+
 ControlFor(Values : []int)<computes> : void =
     for (Value : Values):
         Value

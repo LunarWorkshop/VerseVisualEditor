@@ -607,7 +607,13 @@ namespace VerseParseSnapshotBuilder
 				Result.ControlRegions.AddDefaulted_GetRef();
 			Region.Range = SourceIndex.ToRange(Clause.Whence());
 			Region.Kind = Kind;
-			Region.PunctuationStyle = ToClausePunctuationStyle(Clause.GetPunctuation());
+			const FVerseClauseDescriptor ClauseDescriptor =
+				MakeClauseDescriptor(Clause, Region.Range, SourceIndex);
+			Region.InteriorRange = ClauseDescriptor.InteriorRange;
+			Region.OpeningPunctuationRange = ClauseDescriptor.OpeningPunctuationRange;
+			Region.ClosingPunctuationRange = ClauseDescriptor.ClosingPunctuationRange;
+			Region.PunctuationStyle = ClauseDescriptor.PunctuationStyle;
+			Region.EmptyBodyInsertionByte = ClauseDescriptor.EmptyBodyInsertionByte;
 			Region.FirstOperandIndex = Result.Operands.Num();
 			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause.GetChildren())
 			{
@@ -619,6 +625,40 @@ namespace VerseParseSnapshotBuilder
 				}
 			}
 			Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;
+			for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+			{
+				const int32 OperandIndex = Region.FirstOperandIndex + Offset;
+				const FVerseByteRange ExpressionRange = Result.Operands[OperandIndex].Range;
+				FVerseExpressionControlItem& Item = Region.Items.AddDefaulted_GetRef();
+				Item.ExpressionRange = ExpressionRange;
+				const int32 LeadingBegin = Offset == 0
+					? Region.InteriorRange.BeginByte
+					: Result.Operands[OperandIndex - 1].Range.EndByte();
+				if (Region.InteriorRange.IsSet()
+					&& LeadingBegin < ExpressionRange.BeginByte)
+				{
+					Item.LeadingTriviaRange = FVerseByteRange::FromBounds(
+						LeadingBegin,
+						ExpressionRange.BeginByte);
+				}
+				const int32 TrailingEnd = Offset + 1 < Region.OperandCount
+					? Result.Operands[OperandIndex + 1].Range.BeginByte
+					: Region.InteriorRange.EndByte();
+				if (ExpressionRange.EndByte() < TrailingEnd)
+				{
+					Item.TrailingTriviaRange = FVerseByteRange::FromBounds(
+						ExpressionRange.EndByte(),
+						TrailingEnd);
+				}
+				const FUtf8StringView Trivia = Item.TrailingTriviaRange.IsSet()
+					? SourceIndex.GetSource().Mid(
+						Item.TrailingTriviaRange.BeginByte,
+						Item.TrailingTriviaRange.NumBytes)
+					: FUtf8StringView();
+				Item.Separator = ClassifySeparator(
+					Trivia,
+					Offset == Region.OperandCount - 1);
+			}
 		};
 
 		if (const Verse::Vst::FlowIf* FlowIf = Node.AsNullable<Verse::Vst::FlowIf>())
