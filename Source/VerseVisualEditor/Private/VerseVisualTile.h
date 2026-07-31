@@ -12,6 +12,7 @@ enum class EVerseVisualTileKind : uint8
 	Definition,
 	Comment,
 	Expression,
+	FailableBlock,
 	FunctionEntry,
 	FunctionReturn,
 	Unknown
@@ -147,6 +148,8 @@ struct FVerseVisualTile
 	int32 ExtraBlankLineCount = 0;
 	bool bHasExecutionInput = false;
 	bool bHasExecutionOutput = false;
+	/** A list-capable failure context starts its ordered child chain inside the tile. */
+	bool bHasInternalExecutionEntry = false;
 	bool bExecutionInputConnected = false;
 	bool bExecutionOutputConnected = false;
 	bool bImplicitReturnValue = false;

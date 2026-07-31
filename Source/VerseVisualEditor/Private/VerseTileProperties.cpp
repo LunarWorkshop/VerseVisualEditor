@@ -14,6 +14,8 @@ namespace
 			return TEXT("Definition");
 		case EVerseVisualTileKind::Comment:
 			return TEXT("Comment");
+		case EVerseVisualTileKind::FailableBlock:
+			return TEXT("Failable Block");
 		default:
 			return TEXT("Unknown");
 		}

@@ -496,9 +496,11 @@ namespace
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
 		FOnVerseSocketDragStarted OnSocketDragStarted,
-		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted)
+		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
+		TSharedPtr<SWidget> BodyOverride = nullptr)
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
+		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
 		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
 			|| Tile.Kind == EVerseVisualTileKind::FunctionReturn;
 		const bool bIdentifier = bExpression
@@ -511,6 +513,10 @@ namespace
 		if (bFunctionBoundary)
 		{
 			TileColor = FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("6a3083")));
+		}
+		else if (bFailableBlock)
+		{
+			TileColor = FLinearColor(0.13f, 0.12f, 0.08f, 1.0f);
 		}
 		else if (bCall)
 		{
@@ -528,8 +534,10 @@ namespace
 		{
 			TileColor = FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
 		}
-		TSharedRef<SWidget> Body = SNullWidget::NullWidget;
-		if (bExpression && !bIdentifier && !bControl)
+		TSharedRef<SWidget> Body = BodyOverride.IsValid()
+			? BodyOverride.ToSharedRef()
+			: SNullWidget::NullWidget;
+		if (!BodyOverride.IsValid() && bExpression && !bIdentifier && !bControl)
 		{
 			Body = SNew(SBorder)
 				.BorderImage(nullptr)
@@ -570,7 +578,7 @@ namespace
 			.HeaderPadding(Tile.Kind == EVerseVisualTileKind::FunctionEntry
 				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
-			.ShowBody(bExpression && !bIdentifier && !bControl)
+			.ShowBody(bFailableBlock || (bExpression && !bIdentifier && !bControl))
 			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
 			.ExecutionOutputConnectedStates(MoveTemp(ExecutionOutputConnectedStates))
 			.OnSocketDragStarted(OnSocketDragStarted)
@@ -650,6 +658,82 @@ namespace
 	{
 		constexpr float OperandColumnWidth = 190.0f;
 		constexpr float OperandWireSpace = 72.0f;
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			TSharedRef<SVerticalBox> Chain = SNew(SVerticalBox);
+			TArray<FVerseGraphConnection> Connections;
+			TArray<TSharedPtr<SVerseTile>> ChildRoots;
+			for (int32 ChildIndex = 0; ChildIndex < Tile.Children.Num(); ++ChildIndex)
+			{
+				FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
+					Tile.Children[ChildIndex],
+					Document,
+					OnSocketDragStarted,
+					OnInlineLiteralCommitted);
+				Chain->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Left)
+				.Padding(0.0f, ChildIndex == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
+				[
+					ChildRow.Widget
+				];
+				Connections.Append(ChildRow.Connections);
+				ChildRoots.Add(ChildRow.RootTile);
+			}
+
+			const TSharedRef<SVerseTile> BlockTile = BuildFunctionGraphTile(
+				Tile,
+				Document,
+				OnSocketDragStarted,
+				OnInlineLiteralCommitted,
+				Chain);
+			if (!ChildRoots.IsEmpty())
+			{
+				const TSharedPtr<SWidget> Entry =
+					BlockTile->GetInternalExecutionEntryAnchor();
+				const TSharedPtr<SWidget> FirstInput =
+					ChildRoots[0]->GetExecutionInputAnchor();
+				if (Entry.IsValid() && FirstInput.IsValid())
+				{
+					Connections.Add({
+						Entry,
+						FirstInput,
+						EVerseGraphConnectionAxis::Vertical,
+						FLinearColor::White,
+						2.5f,
+						0});
+				}
+				for (int32 ChildIndex = 1; ChildIndex < ChildRoots.Num(); ++ChildIndex)
+				{
+					const TSharedPtr<SWidget> Source =
+						ChildRoots[ChildIndex - 1]->GetExecutionOutputAnchor();
+					const TSharedPtr<SWidget> Target =
+						ChildRoots[ChildIndex]->GetExecutionInputAnchor();
+					if (Source.IsValid() && Target.IsValid())
+					{
+						Connections.Add({
+							Source,
+							Target,
+							EVerseGraphConnectionAxis::Vertical,
+							FLinearColor::White,
+							2.5f,
+							Tile.Children[ChildIndex - 1].ExtraBlankLineCount});
+					}
+				}
+			}
+			return {
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SBox).WidthOverride(OperandColumnWidth + OperandWireSpace)
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					BlockTile
+				],
+				BlockTile,
+				MoveTemp(Connections)};
+		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control

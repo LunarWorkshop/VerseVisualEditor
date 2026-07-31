@@ -7,6 +7,18 @@
 class FVerseDocument;
 struct FSlateRoundedBoxBrush;
 
+struct FVerseFailablePatternSegment
+{
+	FVector2D Start;
+	FVector2D End;
+};
+
+/** Local-space diamond crosshatch clipped to a failable block's interior. */
+TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D Size);
+
+/** Local-space centers of the four failable-block corner diamonds. */
+TStaticArray<FVector2D, 4> BuildVerseFailableCornerCenters(FVector2D Size);
+
 struct FVerseSocketDragStart
 {
 	TSharedPtr<SWidget> Anchor;
@@ -66,6 +78,10 @@ public:
 	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return GetValueInputAnchor(0); }
 	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
 	TSharedPtr<SWidget> GetExecutionInputAnchor() const { return ExecutionInputAnchor; }
+	TSharedPtr<SWidget> GetInternalExecutionEntryAnchor() const
+	{
+		return InternalExecutionEntryAnchor;
+	}
 	TSharedPtr<SWidget> GetExecutionOutputAnchor(int32 Index = 0) const
 	{
 		return ExecutionOutputAnchors.IsValidIndex(Index)
@@ -115,6 +131,7 @@ private:
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
 	TSharedPtr<SWidget> ExecutionInputAnchor;
+	TSharedPtr<SWidget> InternalExecutionEntryAnchor;
 	TArray<TSharedPtr<SWidget>> ExecutionOutputAnchors;
 	TSharedPtr<SWidget> OperatorLineWidget;
 	TSharedPtr<SWidget> HeaderSocketRow;

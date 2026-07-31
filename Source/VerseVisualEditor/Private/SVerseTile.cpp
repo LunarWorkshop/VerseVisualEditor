@@ -22,6 +22,46 @@
 
 #define LOCTEXT_NAMESPACE "SVerseTile"
 
+TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D Size)
+{
+	TArray<FVerseFailablePatternSegment> Segments;
+	if (Size.X <= 0.0f || Size.Y <= 0.0f)
+	{
+		return Segments;
+	}
+
+	constexpr float HalfWidth = 12.0f;
+	constexpr float HalfHeight = 18.0f;
+	for (float CenterY = 0.0f; CenterY <= Size.Y + HalfHeight; CenterY += HalfHeight)
+	{
+		const bool bOffsetRow = FMath::RoundToInt(CenterY / HalfHeight) % 2 != 0;
+		for (float CenterX = bOffsetRow ? 0.0f : -HalfWidth;
+			CenterX <= Size.X + HalfWidth;
+			CenterX += HalfWidth * 2.0f)
+		{
+			const FVector2D Top(CenterX, CenterY - HalfHeight);
+			const FVector2D Right(CenterX + HalfWidth, CenterY);
+			const FVector2D Bottom(CenterX, CenterY + HalfHeight);
+			const FVector2D Left(CenterX - HalfWidth, CenterY);
+			Segments.Append({
+				{Top, Right},
+				{Right, Bottom},
+				{Bottom, Left},
+				{Left, Top}});
+		}
+	}
+	return Segments;
+}
+
+TStaticArray<FVector2D, 4> BuildVerseFailableCornerCenters(FVector2D Size)
+{
+	return TStaticArray<FVector2D, 4>(
+		FVector2D::ZeroVector,
+		FVector2D(Size.X, 0.0f),
+		FVector2D(0.0f, Size.Y),
+		Size);
+}
+
 namespace
 {
 	float GetVerseGraphMajorGridWidth()
@@ -184,6 +224,73 @@ namespace
 		FLinearColor Color = FLinearColor::White;
 		bool bConnected = false;
 	};
+
+	class SVerseFailableBlockInterior final : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseFailableBlockInterior) {}
+			SLATE_DEFAULT_SLOT(FArguments, Content)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			SetCanTick(false);
+			SetClipping(EWidgetClipping::ClipToBounds);
+			ChildSlot
+			.Padding(8.0f)
+			[
+				InArgs._Content.Widget
+			];
+		}
+
+		virtual int32 OnPaint(
+			const FPaintArgs& Args,
+			const FGeometry& AllottedGeometry,
+			const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements,
+			int32 LayerId,
+			const FWidgetStyle& InWidgetStyle,
+			bool bParentEnabled) const override
+		{
+			static const FSlateColorBrush WhiteBrush(FLinearColor::White);
+			const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
+			FSlateDrawElement::MakeBox(
+				OutDrawElements,
+				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
+				&WhiteBrush,
+				ESlateDrawEffect::None,
+				FLinearColor(0.055f, 0.045f, 0.012f, 1.0f) * WidgetTint);
+
+			const FLinearColor PatternColor =
+				FLinearColor(0.32f, 0.25f, 0.035f, 1.0f) * WidgetTint;
+			for (const FVerseFailablePatternSegment& Segment :
+				BuildVerseFailablePatternSegments(AllottedGeometry.GetLocalSize()))
+			{
+				TArray<FVector2f> Points({
+					FVector2f(Segment.Start),
+					FVector2f(Segment.End)});
+				FSlateDrawElement::MakeLines(
+					OutDrawElements,
+					LayerId + 1,
+					AllottedGeometry.ToPaintGeometry(),
+					MoveTemp(Points),
+					ESlateDrawEffect::None,
+					PatternColor,
+					true,
+					1.0f);
+			}
+
+			return SCompoundWidget::OnPaint(
+				Args,
+				AllottedGeometry,
+				MyCullingRect,
+				OutDrawElements,
+				LayerId + 2,
+				InWidgetStyle,
+				bParentEnabled);
+		}
+	};
 }
 
 void SVerseTile::Construct(const FArguments& InArgs)
@@ -227,6 +334,32 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.OperatorRange.IsSet();
 	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
+	TSharedRef<SWidget> BodyContent = InArgs._BodyContent.Widget;
+	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	{
+		TSharedRef<SVerticalBox> FailureChain = SNew(SVerticalBox);
+		if (Tile.bHasInternalExecutionEntry)
+		{
+			FailureChain->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			.Padding(8.0f, 0.0f, 0.0f, 4.0f)
+			[
+				SAssignNew(InternalExecutionEntryAnchor, SVerseTileExecutionPin)
+					.Input(false)
+					.Connected(!Tile.Children.IsEmpty())
+			];
+		}
+		FailureChain->AddSlot()
+		.AutoHeight()
+		[
+			BodyContent
+		];
+		BodyContent = SNew(SVerseFailableBlockInterior)
+		[
+			FailureChain
+		];
+	}
 
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
@@ -310,7 +443,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				.BorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
 				.Padding(0.0f)
 				[
-					InArgs._BodyContent.Widget
+					BodyContent
 				]
 			]
 			+ SVerticalBox::Slot()
@@ -322,6 +455,33 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		]
 	;
 
+	TSharedRef<SWidget> DecoratedTileSurface = TileSurface;
+	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	{
+		TSharedRef<SOverlay> Decorated = SNew(SOverlay);
+		Decorated->AddSlot()[TileSurface];
+		const FLinearColor FailureColor = GetVerseFailureDecorationColor();
+		auto AddCorner = [&](EHorizontalAlignment Horizontal, EVerticalAlignment Vertical,
+			FVector2D Offset)
+		{
+			Decorated->AddSlot()
+			.HAlign(Horizontal)
+			.VAlign(Vertical)
+			[
+				SNew(SVerseFailableValuePin)
+					.Color(FailureColor)
+					.Connected(true)
+					.Visibility(EVisibility::HitTestInvisible)
+					.RenderTransform(FSlateRenderTransform(Offset))
+			];
+		};
+		AddCorner(HAlign_Left, VAlign_Top, FVector2D(-5.5f, -5.5f));
+		AddCorner(HAlign_Right, VAlign_Top, FVector2D(5.5f, -5.5f));
+		AddCorner(HAlign_Left, VAlign_Bottom, FVector2D(-5.5f, 5.5f));
+		AddCorner(HAlign_Right, VAlign_Bottom, FVector2D(5.5f, 5.5f));
+		DecoratedTileSurface = Decorated;
+	}
+
 	TSharedRef<SOverlay> TileAndOutput = SNew(SOverlay);
 	TileAndOutput->AddSlot()
 	[
@@ -329,7 +489,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			TileSurface
+			DecoratedTileSurface
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -769,6 +929,8 @@ FText SVerseTile::GetKindText() const
 	{
 	case EVerseVisualTileKind::Definition: return FText::FromName(Tile.DefinitionKind);
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
+	case EVerseVisualTileKind::FailableBlock:
+		return LOCTEXT("FailableBlockKind", "Failable Block");
 	case EVerseVisualTileKind::Expression:
 		if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)
 		{

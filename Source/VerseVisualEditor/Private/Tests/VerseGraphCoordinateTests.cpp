@@ -1,9 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "SVerseGraphSurface.h"
+#include "SVerseTile.h"
 #include "VerseGraphCoordinates.h"
 
 #include "Misc/AutomationTest.h"
+#include "Widgets/Layout/SBox.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseGraphWindowOriginTest,
@@ -146,6 +148,100 @@ bool FVerseGraphFailureMarkerCoordinatesTest::RunTest(const FString& Parameters)
 			FString::Printf(TEXT("Zoom %.1f keeps markers on the wire"), Zoom),
 			!Zoomed.IsEmpty());
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseFailableBlockPaintGeometryTest,
+	"VerseVisualEditor.Graph.FailableBlock.PaintGeometry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
+{
+	for (const FVector2D Size : {FVector2D(120.0f, 80.0f), FVector2D(420.0f, 310.0f)})
+	{
+		const TArray<FVerseFailablePatternSegment> Pattern =
+			BuildVerseFailablePatternSegments(Size);
+		TestTrue(TEXT("Empty and populated block sizes produce a diamond pattern"),
+			!Pattern.IsEmpty());
+
+		bool bTouchesLeft = false;
+		bool bTouchesRight = false;
+		bool bTouchesTop = false;
+		bool bTouchesBottom = false;
+		for (const FVerseFailablePatternSegment& Segment : Pattern)
+		{
+			for (const FVector2D Point : {Segment.Start, Segment.End})
+			{
+				bTouchesLeft |= Point.X <= 0.0f;
+				bTouchesRight |= Point.X >= Size.X;
+				bTouchesTop |= Point.Y <= 0.0f;
+				bTouchesBottom |= Point.Y >= Size.Y;
+			}
+		}
+		TestTrue(TEXT("Pattern reaches every clipped interior edge"),
+			bTouchesLeft && bTouchesRight && bTouchesTop && bTouchesBottom);
+
+		const TStaticArray<FVector2D, 4> Corners =
+			BuildVerseFailableCornerCenters(Size);
+		TestEqual(TEXT("Top-left decoration is local"), Corners[0], FVector2D::ZeroVector);
+		TestEqual(TEXT("Top-right decoration is local"), Corners[1], FVector2D(Size.X, 0.0f));
+		TestEqual(TEXT("Bottom-left decoration is local"), Corners[2], FVector2D(0.0f, Size.Y));
+		TestEqual(TEXT("Bottom-right decoration is local"), Corners[3], Size);
+
+		const FVector2D WindowOffset(377.0f, 211.0f);
+		const TStaticArray<FVector2D, 4> MovedCorners =
+			BuildVerseFailableCornerCenters(Size);
+		for (int32 Index = 0; Index < Corners.Num(); ++Index)
+		{
+			TestEqual(
+				TEXT("Moving the window does not enter local decoration geometry"),
+				MovedCorners[Index],
+				Corners[Index]);
+			TestEqual(
+				TEXT("Paint geometry applies the window offset exactly once"),
+				MovedCorners[Index] + WindowOffset,
+				Corners[Index] + WindowOffset);
+		}
+	}
+
+	FVerseVisualTile EmptyBlock;
+	EmptyBlock.Kind = EVerseVisualTileKind::FailableBlock;
+	EmptyBlock.bHasInternalExecutionEntry = true;
+	const TSharedRef<SVerseTile> EmptyWidget =
+		SNew(SVerseTile)
+		.Tile(EmptyBlock)
+		.TileColor(FLinearColor::Black)
+		.ShowBody(true)
+		.BodyContent()
+		[
+			SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)
+		];
+	EmptyWidget->SlatePrepass();
+	TestTrue(TEXT("List-capable empty block exposes its internal execution entry"),
+		EmptyWidget->GetInternalExecutionEntryAnchor().IsValid());
+
+	FVerseVisualTile PopulatedBlock = EmptyBlock;
+	PopulatedBlock.Children.AddDefaulted();
+	FVerseVisualSocket& Result = PopulatedBlock.ValueOutputs.AddDefaulted_GetRef();
+	Result.SemanticTypeName = TEXT("int");
+	Result.Outcome = EVerseExpressionOutcome::FailableValue;
+	const TSharedRef<SVerseTile> PopulatedWidget =
+		SNew(SVerseTile)
+		.Tile(PopulatedBlock)
+		.TileColor(FLinearColor::Black)
+		.ShowBody(true)
+		.IsSelected(true)
+		.BodyContent()
+		[
+			SNew(SBox).WidthOverride(260.0f).HeightOverride(180.0f)
+		];
+	PopulatedWidget->SlatePrepass();
+	TestTrue(TEXT("Result-producing block exposes its right-edge value anchor"),
+		PopulatedWidget->GetFirstValueOutputAnchor().IsValid());
+	TestTrue(TEXT("Populated block expands to contain its ordered child area"),
+		PopulatedWidget->GetDesiredSize().X > EmptyWidget->GetDesiredSize().X
+			&& PopulatedWidget->GetDesiredSize().Y > EmptyWidget->GetDesiredSize().Y);
 	return true;
 }
 

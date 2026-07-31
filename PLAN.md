@@ -652,7 +652,7 @@ substep must leave a visible, usable result and must be completed in order.
 This slice visibly distinguishes values whose failure is still propagating
 without changing any control tile yet.
 
-#### 16.2. Reusable failable-block tile
+#### 16.2. Reusable failable-block tile (complete)
 
 - Add a selectable failable-block representation using the shared
   `SVerseTile` behavior, line numbers, golden selection outline, Details panel,
