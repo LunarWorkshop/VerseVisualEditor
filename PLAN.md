@@ -721,7 +721,7 @@ This slice makes the new representation visible in every parsed `if`.
 This slice makes identifiers created by successful predicates visibly usable
 inside the True body.
 
-#### 16.5. Edit ordered expressions inside failable blocks
+#### 16.5. Edit ordered expressions inside failable blocks (complete)
 
 - Generalize executable-clause editing so function bodies and list-capable
   failable blocks use the same insertion, deletion, and layout mechanisms.

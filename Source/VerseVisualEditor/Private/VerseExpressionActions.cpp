@@ -331,6 +331,8 @@ namespace
 			Candidate.Action->Category = LOCTEXT("VariablesCategory", "Variables");
 			Candidate.Action->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 			Candidate.Action->IdentifierNameRange = Parameter.NameRange;
+			Candidate.Action->SourceSpelling =
+				Document.DecodeOriginalRange(Parameter.NameRange);
 			Candidate.OutputType = {
 				Parameter.TypeRange,
 				NAME_None,
@@ -366,6 +368,62 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 			Result.Add(MoveTemp(Candidate.Action));
 		}
 	}
+	return Result;
+}
+
+TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll(
+	TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
+	const FVerseDocument& Document,
+	FVerseTextRange ScopeAnchorRange,
+	const FString& FilePath,
+	TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> SemanticSnapshots)
+{
+	TArray<TSharedPtr<FVerseExpressionAction>> Result;
+	for (const FVerseSemanticCandidate& Candidate :
+		FVerseSemanticCandidateProvider::BuildAll(
+			SemanticSnapshots,
+			FilePath,
+			ScopeAnchorRange.BeginByte,
+			Document))
+	{
+		TSharedPtr<FVerseExpressionAction> Action =
+			BuildSemanticExpressionAction(Candidate);
+		if (Action.IsValid())
+		{
+			if (Action->ModuleCategory.IsEmpty())
+			{
+				Action->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+			}
+			Result.Add(MoveTemp(Action));
+		}
+	}
+
+	// Syntax-only identifiers remain safe when the exact semantic snapshot is
+	// unavailable; insertion is still prospectively parsed before mutation.
+	if (!SemanticSnapshots.ContainsByPredicate(
+		[&FilePath, Revision = ScopeAnchorRange.Revision](const auto& Snapshot)
+		{
+			return Snapshot.IsValid() && Snapshot->Describes(FilePath, Revision);
+		}))
+	{
+		for (const FVerseFunctionNavigationParameter& Parameter : Parameters)
+		{
+			TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
+			Action->SourceForm = EVerseExpressionSourceForm::IdentifierReference;
+			Action->SourceSpelling = Document.DecodeOriginalRange(Parameter.NameRange);
+			Action->DisplayName = FText::FromString(Action->SourceSpelling);
+			Action->Category = LOCTEXT("VariablesCategory", "Variables");
+			Action->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+			Result.Add(MoveTemp(Action));
+		}
+	}
+	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
+	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	IfAction->SourceSpelling = TEXT("if (true?) {}");
+	IfAction->DisplayName = LOCTEXT("CreateIfExpression", "If");
+	IfAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
+	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+	Result.Add(MoveTemp(IfAction));
 	return Result;
 }
 
@@ -417,6 +475,111 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 	return Result;
 }
 
+bool BuildVerseExpressionActionSource(
+	const FVerseExpressionAction& Action,
+	FStringView BoundExpressionSource,
+	FString& OutSource,
+	FText& OutError)
+{
+	if (Action.SourceForm == EVerseExpressionSourceForm::IdentifierReference)
+	{
+		if (Action.SourceSpelling.IsEmpty())
+		{
+			OutError = LOCTEXT("MissingIdentifierSpelling", "The selected identifier has no source spelling.");
+			return false;
+		}
+		OutSource = Action.SourceSpelling;
+		return true;
+	}
+	if (Action.SourceForm == EVerseExpressionSourceForm::StructuralExpression)
+	{
+		if (Action.SourceSpelling.IsEmpty())
+		{
+			OutError = LOCTEXT("MissingStructuralSource", "The selected structural expression has no source template.");
+			return false;
+		}
+		OutSource = Action.SourceSpelling;
+		return true;
+	}
+	if (Action.SourceSpelling.IsEmpty())
+	{
+		OutError = LOCTEXT(
+			"MissingExpressionSpelling",
+			"The selected expression has no source spelling.");
+		return false;
+	}
+	TArray<FString> Inputs = Action.InputDefaultSources;
+	if (Action.BoundInputIndex != INDEX_NONE)
+	{
+		if (!Inputs.IsValidIndex(Action.BoundInputIndex)
+			|| BoundExpressionSource.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = LOCTEXT(
+				"InvalidBoundExpressionInput",
+				"The selected expression cannot preserve the dragged input.");
+			return false;
+		}
+		Inputs[Action.BoundInputIndex] = FString(BoundExpressionSource).TrimStartAndEnd();
+	}
+	if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
+	{
+		OutError = LOCTEXT(
+			"MissingExpressionInputDefault",
+			"The selected expression has an input with no source-safe default.");
+		return false;
+	}
+	switch (Action.SourceForm)
+	{
+	case EVerseExpressionSourceForm::OrdinaryCall:
+	{
+		TArray<FString> Arguments;
+		Arguments.Reserve(Inputs.Num());
+		for (int32 Index = 0; Index < Inputs.Num(); ++Index)
+		{
+			const bool bNamed = Action.NamedInputs.IsValidIndex(Index)
+				&& Action.NamedInputs[Index];
+			const FString Name = Action.InputNames.IsValidIndex(Index)
+				? Action.InputNames[Index]
+				: FString();
+			Arguments.Add(bNamed && !Name.IsEmpty()
+				? FString::Printf(TEXT("?%s := %s"), *Name, *Inputs[Index])
+				: Inputs[Index]);
+		}
+		OutSource = Action.bUsesFailureCallSyntax
+			? FString::Printf(TEXT("%s[%s]"), *Action.SourceSpelling, *FString::Join(Arguments, TEXT(", ")))
+			: FString::Printf(TEXT("%s(%s)"), *Action.SourceSpelling, *FString::Join(Arguments, TEXT(", ")));
+		return true;
+	}
+	case EVerseExpressionSourceForm::InfixOperator:
+		if (Inputs.Num() == 2)
+		{
+			OutSource = FString::Printf(TEXT("%s %s %s"), *Inputs[0], *Action.SourceSpelling, *Inputs[1]);
+			return true;
+		}
+		OutError = LOCTEXT("InvalidInfixInputs", "An infix operator requires exactly two operands.");
+		return false;
+	case EVerseExpressionSourceForm::PrefixOperator:
+		if (Inputs.Num() == 1)
+		{
+			OutSource = FString::Printf(TEXT("%s %s"), *Action.SourceSpelling, *Inputs[0]);
+			return true;
+		}
+		OutError = LOCTEXT("InvalidPrefixInputs", "A prefix operator requires exactly one operand.");
+		return false;
+	case EVerseExpressionSourceForm::PostfixOperator:
+		if (Inputs.Num() == 1)
+		{
+			OutSource = FString::Printf(TEXT("%s%s"), *Inputs[0], *Action.SourceSpelling);
+			return true;
+		}
+		OutError = LOCTEXT("InvalidPostfixInputs", "A postfix operator requires exactly one operand.");
+		return false;
+	default:
+		OutError = LOCTEXT("InvalidExpressionSourceForm", "The selected expression source form is unsupported.");
+		return false;
+	}
+}
+
 bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
@@ -429,117 +592,22 @@ bool TryApplyVerseExpressionAction(
 		return false;
 	}
 	const TSharedRef<const FVerseDocument> Document = Session.GetParseSnapshot().GetDocument();
-	const FString Existing =
-		Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
+	const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
 	FString Replacement;
-	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Unsupported;
-	if (Action.SourceForm == EVerseExpressionSourceForm::IdentifierReference)
+	if (!BuildVerseExpressionActionSource(Action, Existing, Replacement, OutError))
 	{
-		Replacement = Action.SourceSpelling.IsEmpty()
-			? Document->DecodeOriginalRange(Action.IdentifierNameRange)
-			: Action.SourceSpelling;
-		RequiredKind = EVerseExpressionKind::Identifier;
+		return false;
 	}
-	else
+	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Unsupported;
+	switch (Action.SourceForm)
 	{
-		if (Action.SourceSpelling.IsEmpty())
-		{
-			OutError = LOCTEXT(
-				"MissingExpressionSpelling",
-				"The selected expression has no source spelling.");
-			return false;
-		}
-		TArray<FString> Inputs = Action.InputDefaultSources;
-		if (Action.BoundInputIndex != INDEX_NONE)
-		{
-			if (!Inputs.IsValidIndex(Action.BoundInputIndex) || Existing.IsEmpty())
-			{
-				OutError = LOCTEXT(
-					"InvalidBoundExpressionInput",
-					"The selected expression cannot preserve the dragged input.");
-				return false;
-			}
-			Inputs[Action.BoundInputIndex] = Existing;
-		}
-		if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
-		{
-			OutError = LOCTEXT(
-				"MissingExpressionInputDefault",
-				"The selected expression has an input with no source-safe default.");
-			return false;
-		}
-		switch (Action.SourceForm)
-		{
-		case EVerseExpressionSourceForm::OrdinaryCall:
-		{
-			TArray<FString> Arguments;
-			Arguments.Reserve(Inputs.Num());
-			for (int32 Index = 0; Index < Inputs.Num(); ++Index)
-			{
-				const bool bNamed = Action.NamedInputs.IsValidIndex(Index)
-					&& Action.NamedInputs[Index];
-				const FString Name = Action.InputNames.IsValidIndex(Index)
-					? Action.InputNames[Index]
-					: FString();
-				Arguments.Add(bNamed && !Name.IsEmpty()
-					? FString::Printf(TEXT("?%s := %s"), *Name, *Inputs[Index])
-					: Inputs[Index]);
-			}
-			Replacement = Action.bUsesFailureCallSyntax
-				? FString::Printf(
-					TEXT("%s[%s]"),
-					*Action.SourceSpelling,
-					*FString::Join(Arguments, TEXT(", ")))
-				: FString::Printf(
-					TEXT("%s(%s)"),
-					*Action.SourceSpelling,
-					*FString::Join(Arguments, TEXT(", ")));
-			RequiredKind = EVerseExpressionKind::Call;
-			break;
-		}
-		case EVerseExpressionSourceForm::InfixOperator:
-			if (Inputs.Num() != 2)
-			{
-				OutError = LOCTEXT(
-					"InvalidInfixInputs",
-					"An infix operator requires exactly two operands.");
-				return false;
-			}
-			Replacement = FString::Printf(
-				TEXT("%s %s %s"),
-				*Inputs[0], *Action.SourceSpelling, *Inputs[1]);
-			RequiredKind = EVerseExpressionKind::BinaryOperator;
-			break;
-		case EVerseExpressionSourceForm::PrefixOperator:
-			if (Inputs.Num() != 1)
-			{
-				OutError = LOCTEXT(
-					"InvalidPrefixInputs",
-					"A prefix operator requires exactly one operand.");
-				return false;
-			}
-			Replacement = FString::Printf(
-				TEXT("%s %s"), *Action.SourceSpelling, *Inputs[0]);
-			RequiredKind = EVerseExpressionKind::UnaryOperator;
-			break;
-		case EVerseExpressionSourceForm::PostfixOperator:
-			if (Inputs.Num() != 1)
-			{
-				OutError = LOCTEXT(
-					"InvalidPostfixInputs",
-					"A postfix operator requires exactly one operand.");
-				return false;
-			}
-			Replacement = FString::Printf(
-				TEXT("%s%s"), *Inputs[0], *Action.SourceSpelling);
-			RequiredKind = EVerseExpressionKind::UnaryOperator;
-			break;
-		default:
-			OutError = LOCTEXT(
-				"InvalidExpressionSourceForm",
-				"The selected expression source form is unsupported.");
-			return false;
-		}
+	case EVerseExpressionSourceForm::IdentifierReference: RequiredKind = EVerseExpressionKind::Identifier; break;
+	case EVerseExpressionSourceForm::OrdinaryCall: RequiredKind = EVerseExpressionKind::Call; break;
+	case EVerseExpressionSourceForm::InfixOperator: RequiredKind = EVerseExpressionKind::BinaryOperator; break;
+	case EVerseExpressionSourceForm::PrefixOperator:
+	case EVerseExpressionSourceForm::PostfixOperator: RequiredKind = EVerseExpressionKind::UnaryOperator; break;
+	case EVerseExpressionSourceForm::StructuralExpression: RequiredKind = EVerseExpressionKind::Control; break;
+	default: break;
 	}
 
 	FUtf8String ReplacementUtf8(Replacement);

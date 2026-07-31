@@ -54,6 +54,54 @@ bool FVerseDocumentSession::Replace(
 	return true;
 }
 
+bool FVerseDocumentSession::ReplaceMany(
+	TConstArrayView<FVerseDocumentEdit> Edits,
+	FText& OutError)
+{
+	if (Edits.IsEmpty())
+	{
+		OutError = LOCTEXT("EmptyEditTransaction", "The edit transaction is empty.");
+		return false;
+	}
+
+	TArray<FVerseDocumentEdit> Sorted(Edits);
+	Sorted.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
+	{
+		return Left.Range.BeginByte > Right.Range.BeginByte;
+	});
+	for (int32 Index = 0; Index < Sorted.Num(); ++Index)
+	{
+		if (Sorted[Index].Range.Revision != Revision)
+		{
+			OutError = LOCTEXT("StaleEditTransaction", "An edit range belongs to an obsolete document revision.");
+			return false;
+		}
+		if (Index + 1 < Sorted.Num()
+			&& Sorted[Index + 1].Range.EndByte() > Sorted[Index].Range.BeginByte)
+		{
+			OutError = LOCTEXT("OverlappingEditTransaction", "The edit transaction contains overlapping ranges.");
+			return false;
+		}
+	}
+
+	FVerseEditBuffer Candidate = EditBuffer;
+	for (const FVerseDocumentEdit& Edit : Sorted)
+	{
+		if (!Candidate.Replace(Edit.Range, Edit.Replacement, OutError))
+		{
+			return false;
+		}
+	}
+
+	EditBuffer = MoveTemp(Candidate);
+	++Revision.Value;
+	++ContentStateId.Value;
+	MaterializedSource.Reset();
+	RebuildDerivedRepresentations();
+	OutError = FText::GetEmpty();
+	return true;
+}
+
 void FVerseDocumentSession::Reload(TSharedRef<const FVerseDocument> InDocument)
 {
 	OriginalDocument = MoveTemp(InDocument);

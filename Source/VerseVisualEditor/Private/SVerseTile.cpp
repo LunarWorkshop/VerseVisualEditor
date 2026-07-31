@@ -2,6 +2,7 @@
 
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Input/DragAndDrop.h"
 #include "GraphEditorSettings.h"
 #include "Rendering/DrawElements.h"
 #include "Settings/EditorStyleSettings.h"
@@ -21,6 +22,30 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SVerseTile"
+
+namespace
+{
+	class FVerseClauseTileDragDropOp final : public FDragDropOperation
+	{
+	public:
+		DRAG_DROP_OPERATOR_TYPE(FVerseClauseTileDragDropOp, FDragDropOperation)
+
+		FVerseVisualClauseDescriptor Clause;
+		int32 ItemIndex = INDEX_NONE;
+
+		static TSharedRef<FVerseClauseTileDragDropOp> New(
+			const FVerseVisualClauseDescriptor& InClause,
+			int32 InItemIndex)
+		{
+			TSharedRef<FVerseClauseTileDragDropOp> Operation =
+				MakeShared<FVerseClauseTileDragDropOp>();
+			Operation->Clause = InClause;
+			Operation->ItemIndex = InItemIndex;
+			Operation->Construct();
+			return Operation;
+		}
+	};
+}
 
 TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D Size)
 {
@@ -60,6 +85,15 @@ TStaticArray<FVector2D, 4> BuildVerseFailableCornerCenters(FVector2D Size)
 		FVector2D(Size.X, 0.0f),
 		FVector2D(0.0f, Size.Y),
 		Size);
+}
+
+FVector2D GetVerseExecutionPinAnchorCoordinate(bool bInput, bool bCompact)
+{
+	if (bInput)
+	{
+		return FVector2D(0.5f, 24.0f / 32.0f);
+	}
+	return FVector2D(0.5f, 8.0f / (bCompact ? 20.0f : 48.0f));
 }
 
 namespace
@@ -133,7 +167,8 @@ namespace
 			const FWidgetStyle& InWidgetStyle,
 			bool bParentEnabled) const override
 		{
-			const FVector2D PinCenter = bInput ? FVector2D(24.0f, 24.0f) : FVector2D(12.0f, 8.0f);
+			const FVector2D PinCenter = AllottedGeometry.GetLocalSize()
+				* GetVerseExecutionPinAnchorCoordinate(bInput, bCompact);
 			const FSlateBrush* PinBrush = FAppStyle::GetBrush(
 				bConnected ? "Graph.ExecPin.Connected" : "Graph.ExecPin.Disconnected");
 			const FVector2D PinSize = PinBrush->ImageSize;
@@ -321,6 +356,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	OnOpened = InArgs._OnOpened;
 	OnSocketDragStarted = InArgs._OnSocketDragStarted;
 	OnInlineLiteralCommitted = InArgs._OnInlineLiteralCommitted;
+	OnClauseReordered = InArgs._OnClauseReordered;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
 	bShowBody = InArgs._ShowBody;
 	bCollapsible = bShowBody && !(
@@ -353,16 +389,30 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		TSharedRef<SVerticalBox> FailureChain = SNew(SVerticalBox);
 		if (Tile.bHasInternalExecutionEntry)
 		{
+			const TSharedRef<SVerseTileExecutionPin> EntryPin =
+				SNew(SVerseTileExecutionPin)
+				.Input(false)
+				.Connected(!Tile.Children.IsEmpty())
+				.Compact(true)
+				.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, -2.0f)));
+			InternalExecutionEntryAnchor = EntryPin;
 			FailureChain->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Center)
 			.Padding(0.0f, 0.0f, 0.0f, 4.0f)
 			[
-				SAssignNew(InternalExecutionEntryAnchor, SVerseTileExecutionPin)
-					.Input(false)
-					.Connected(!Tile.Children.IsEmpty())
-					.Compact(true)
-					.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, -2.0f)))
+				SNew(SBorder)
+				.BorderImage(nullptr)
+				.Padding(0.0f)
+				.OnMouseButtonDown(
+					this,
+					&SVerseTile::HandleClauseInsertionMouseButtonDown,
+					TSharedPtr<SWidget>(EntryPin),
+					GetVerseExecutionPinAnchorCoordinate(false, true),
+					0)
+				[
+					EntryPin
+				]
 			];
 		}
 		FailureChain->AddSlot()
@@ -593,11 +643,22 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		TSharedRef<SHorizontalBox> OutputRow = SNew(SHorizontalBox);
 		for (int32 OutputIndex = 0; OutputIndex < OutputCount; ++OutputIndex)
 		{
+			int32 ClauseInsertionIndex = INDEX_NONE;
+			if (OutputIndex == 0 && Tile.EditableClause.IsSet())
+			{
+				ClauseInsertionIndex = Tile.ClauseItemIndex == INDEX_NONE
+					? 0
+					: Tile.ClauseItemIndex + 1;
+			}
 			const float OutputColumnWidth = OutputIndex == 0 ? 72.0f : 64.0f;
 			const bool bConnected = InArgs._ExecutionOutputConnectedStates.IsValidIndex(OutputIndex)
 				? InArgs._ExecutionOutputConnectedStates[OutputIndex]
 				: Tile.bExecutionOutputConnected;
-			TSharedPtr<SVerseTileExecutionPin> OutputAnchor;
+			const TSharedRef<SVerseTileExecutionPin> OutputAnchor =
+				SNew(SVerseTileExecutionPin)
+				.Input(false)
+				.Connected(bConnected)
+				.Compact(bCompactExecutionSpacing);
 			OutputRow->AddSlot()
 			.AutoWidth()
 			[
@@ -624,10 +685,20 @@ void SVerseTile::Construct(const FArguments& InArgs)
 						? FMargin(12.0f, 4.0f, 0.0f, 0.0f)
 						: FMargin(0.0f, 4.0f, 0.0f, 0.0f))
 					[
-						SAssignNew(OutputAnchor, SVerseTileExecutionPin)
-						.Input(false)
-						.Connected(bConnected)
-						.Compact(bCompactExecutionSpacing)
+						SNew(SBorder)
+						.BorderImage(nullptr)
+						.Padding(0.0f)
+						.OnMouseButtonDown(
+							this,
+							&SVerseTile::HandleClauseInsertionMouseButtonDown,
+							TSharedPtr<SWidget>(OutputAnchor),
+							GetVerseExecutionPinAnchorCoordinate(
+								false,
+								bCompactExecutionSpacing),
+							ClauseInsertionIndex)
+						[
+							OutputAnchor
+						]
 					]
 				]
 			];
@@ -1017,6 +1088,33 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	return OnSocketDragStarted.Execute(DragStart);
 }
 
+FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
+	const FGeometry& Geometry,
+	const FPointerEvent& MouseEvent,
+	TSharedPtr<SWidget> Anchor,
+	FVector2D AnchorCoordinate,
+	int32 InsertIndex)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
+		|| !Tile.EditableClause.IsSet()
+		|| InsertIndex == INDEX_NONE
+		|| !OnSocketDragStarted.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	FVerseSocketDragStart DragStart;
+	DragStart.Purpose = FVerseSocketDragStart::EPurpose::ClauseInsertion;
+	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.AnchorCoordinate = AnchorCoordinate;
+	DragStart.Tile = Tile;
+	DragStart.Clause = Tile.EditableClause;
+	DragStart.ClauseInsertionIndex = InsertIndex;
+	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
+	DragStart.WireColor = FLinearColor::White;
+	DragStart.bOutput = true;
+	return OnSocketDragStarted.Execute(DragStart);
+}
+
 FText SVerseTile::Decode(FVerseByteRange Range) const
 {
 	return Document.IsValid() && Range.IsSet()
@@ -1137,6 +1235,44 @@ FReply SVerseTile::OnMouseButtonDoubleClick(
 		: FReply::Unhandled();
 }
 
+FReply SVerseTile::OnDragDetected(
+	const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (!Tile.EditableClause.IsSet()
+		|| Tile.ClauseItemIndex == INDEX_NONE
+		|| !OnClauseReordered.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	return FReply::Handled().BeginDragDrop(
+		FVerseClauseTileDragDropOp::New(
+			Tile.EditableClause.GetValue(), Tile.ClauseItemIndex));
+}
+
+FReply SVerseTile::OnDrop(
+	const FGeometry& MyGeometry,
+	const FDragDropEvent& DragDropEvent)
+{
+	const TSharedPtr<FVerseClauseTileDragDropOp> Operation =
+		DragDropEvent.GetOperationAs<FVerseClauseTileDragDropOp>();
+	if (!Operation.IsValid()
+		|| !Tile.EditableClause.IsSet()
+		|| Tile.ClauseItemIndex == INDEX_NONE
+		|| !OnClauseReordered.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	const FVerseVisualClauseDescriptor& TargetClause =
+		Tile.EditableClause.GetValue();
+	const bool bSameClause = Operation->Clause.InteriorRange
+		== TargetClause.InteriorRange;
+	return bSameClause
+		? OnClauseReordered.Execute(
+			TargetClause, Operation->ItemIndex, Tile.ClauseItemIndex)
+		: FReply::Unhandled();
+}
+
 FReply SVerseTile::HandleTileMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
@@ -1150,9 +1286,19 @@ FReply SVerseTile::HandleHeaderMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
-	return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && OnSelected.IsBound()
-		? OnSelected.Execute()
-		: FReply::Unhandled();
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
+		|| !OnSelected.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	FReply Reply = OnSelected.Execute();
+	if (Tile.EditableClause.IsSet()
+		&& Tile.ClauseItemIndex != INDEX_NONE
+		&& OnClauseReordered.IsBound())
+	{
+		Reply.DetectDrag(SharedThis(this), EKeys::LeftMouseButton);
+	}
+	return Reply;
 }
 
 FReply SVerseTile::ToggleExpanded()

@@ -12,6 +12,7 @@ public:
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
 		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
+		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
 

@@ -172,6 +172,9 @@ struct FVerseVisualTile
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 	TArray<FVerseVisualSocket> ValueInputs;
 	TArray<FVerseVisualSocket> ValueOutputs;
+	/** Ordered clause containing this statement-level tile, when directly editable. */
+	TOptional<FVerseVisualClauseDescriptor> EditableClause;
+	int32 ClauseItemIndex = INDEX_NONE;
 	int32 ExtraBlankLineCount = 0;
 	bool bHasExecutionInput = false;
 	bool bHasExecutionOutput = false;

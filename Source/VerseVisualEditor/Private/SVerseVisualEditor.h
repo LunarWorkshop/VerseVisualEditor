@@ -170,6 +170,10 @@ private:
 		FVerseTextRange LiteralRange,
 		FText NewSourceText,
 		TSharedPtr<FOpenVerseDocument> OpenDocument);
+	FReply HandleClauseReordered(
+		const FVerseVisualClauseDescriptor& Clause,
+		int32 FromIndex,
+		int32 ToIndex);
 	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
 		bool bOnlyCleanDocuments = false) const;
 	void QueueSemanticAnalysis(bool bDebounce);

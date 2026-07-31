@@ -9,6 +9,12 @@
 
 class FText;
 
+struct FVerseDocumentEdit
+{
+	FVerseTextRange Range;
+	FUtf8String Replacement;
+};
+
 /** Coordinates authoritative editable source and all revision-specific derived representations. */
 class FVerseDocumentSession
 {
@@ -17,6 +23,8 @@ public:
 	~FVerseDocumentSession();
 
 	bool Replace(FVerseTextRange Range, FUtf8StringView Replacement, FText& OutError);
+	/** Applies non-overlapping current-revision edits atomically as one revision. */
+	bool ReplaceMany(TConstArrayView<FVerseDocumentEdit> Edits, FText& OutError);
 	void Reload(TSharedRef<const FVerseDocument> InDocument);
 	bool SaveToFile(const FString& FilePath, FText& OutError);
 	TArray<uint8> BuildCurrentFileBytes() const;

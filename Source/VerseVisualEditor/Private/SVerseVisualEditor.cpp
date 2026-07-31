@@ -34,6 +34,7 @@
 #include "SGraphPalette.h"
 #include "UnrealEdGlobals.h"
 #include "VerseDocument.h"
+#include "VerseClauseEditing.h"
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
 #include "VerseExternalChange.h"
@@ -141,6 +142,10 @@ struct FVerseCompilationLifetimeToken
 
 namespace
 {
+	DECLARE_DELEGATE_RetVal_OneParam(
+		FReply, FOnVerseFunctionGraphTileSelected, const FVerseVisualTile&);
+	DECLARE_DELEGATE_RetVal_OneParam(
+		bool, FIsVerseFunctionGraphTileSelected, FVerseTextRange);
 	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
 
 	void ReportRetainedSnapshot(
@@ -499,7 +504,10 @@ namespace
 		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
 		TSharedPtr<SWidget> BodyOverride = nullptr,
 		bool bCompactExecutionSpacing = false,
-		TSharedPtr<SWidget> BodyUnderlay = nullptr)
+		TSharedPtr<SWidget> BodyUnderlay = nullptr,
+		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
+		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
+		FOnVerseClauseReordered OnClauseReordered = {})
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
@@ -589,8 +597,20 @@ namespace
 			.CompactExecutionSpacing(bCompactExecutionSpacing)
 			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
 			.ExecutionOutputConnectedStates(MoveTemp(ExecutionOutputConnectedStates))
+			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
+			{
+				return IsTileSelected.IsBound()
+					&& IsTileSelected.Execute(Range);
+			})
+			.OnSelected(FOnClicked::CreateLambda([Tile, OnTileSelected]()
+			{
+				return OnTileSelected.IsBound()
+					? OnTileSelected.Execute(Tile)
+					: FReply::Unhandled();
+			}))
 			.OnSocketDragStarted(OnSocketDragStarted)
 			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
+			.OnClauseReordered(OnClauseReordered)
 			.BodyUnderlay()
 			[
 				BodyUnderlay.IsValid()
@@ -669,7 +689,10 @@ namespace
 		TSharedRef<const FVerseDocument> Document,
 		FOnVerseSocketDragStarted OnSocketDragStarted,
 		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
-		bool bCompactOperands = false)
+		bool bCompactOperands = false,
+		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
+		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
+		FOnVerseClauseReordered OnClauseReordered = {})
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -692,7 +715,10 @@ namespace
 					Document,
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
-					true);
+					true,
+					OnTileSelected,
+					IsTileSelected,
+					OnClauseReordered);
 				Chain->AddSlot()
 				.AutoHeight()
 				.HAlign(HAlign_Center)
@@ -711,7 +737,10 @@ namespace
 				OnInlineLiteralCommitted,
 				Chain,
 				bCompactOperands,
-				ConnectionLayer);
+				ConnectionLayer,
+				OnTileSelected,
+				IsTileSelected,
+				OnClauseReordered);
 			if (!ChildRoots.IsEmpty())
 			{
 				const TSharedPtr<SWidget> Entry =
@@ -793,7 +822,10 @@ namespace
 					Document,
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
-					true);
+					true,
+					OnTileSelected,
+					IsTileSelected,
+					OnClauseReordered);
 				PredicatePresentation = PredicateRow.Widget;
 				PredicateTile = PredicateRow.RootTile;
 				Connections.Append(PredicateRow.Connections);
@@ -804,7 +836,11 @@ namespace
 				OnSocketDragStarted,
 				OnInlineLiteralCommitted,
 				nullptr,
-				bCompactOperands);
+				bCompactOperands,
+				nullptr,
+				OnTileSelected,
+				IsTileSelected,
+				OnClauseReordered);
 			if (PredicateTile.IsValid())
 			{
 				const TSharedPtr<SWidget> Source =
@@ -850,7 +886,10 @@ namespace
 							Document,
 							OnSocketDragStarted,
 							OnInlineLiteralCommitted,
-							bCompactOperands);
+							bCompactOperands,
+							OnTileSelected,
+							IsTileSelected,
+							OnClauseReordered);
 						Branch->AddSlot()
 						.AutoHeight()
 						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
@@ -958,7 +997,11 @@ namespace
 			OnSocketDragStarted,
 			OnInlineLiteralCommitted,
 			nullptr,
-			bCompactOperands);
+			bCompactOperands,
+			nullptr,
+			OnTileSelected,
+			IsTileSelected,
+			OnClauseReordered);
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
 			TArray<FVerseGraphConnection> Connections;
@@ -998,10 +1041,13 @@ namespace
 					}
 					FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
 					Tile.Children[ChildIndex],
-					Document,
-					OnSocketDragStarted,
-					OnInlineLiteralCommitted,
-					bCompactOperands);
+						Document,
+						OnSocketDragStarted,
+						OnInlineLiteralCommitted,
+						bCompactOperands,
+						OnTileSelected,
+						IsTileSelected,
+						OnClauseReordered);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
@@ -1121,7 +1167,10 @@ namespace
 					Document,
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
-					true);
+					true,
+					OnTileSelected,
+					IsTileSelected,
+					OnClauseReordered);
 				OperandTiles[Index] = OperandRow.RootTile;
 				Presentation = OperandRow.Widget;
 				Connections.Append(MoveTemp(OperandRow.Connections));
@@ -2792,6 +2841,42 @@ void SVerseVisualEditor::InvalidateCompilationResult(
 
 FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (InKeyEvent.GetKey() == EKeys::Delete
+		&& ActiveDocument.IsValid()
+		&& ActiveDocument->SelectedTile.IsSet())
+	{
+		const FVerseVisualTile Selected = ActiveDocument->SelectedTile.GetValue();
+		if (Selected.EditableClause.IsSet()
+			&& Selected.ClauseItemIndex != INDEX_NONE)
+		{
+			FText Error;
+			if (!FVerseClauseEditing::DeleteExpression(
+				*ActiveDocument->Session,
+				Selected.EditableClause.GetValue(),
+				Selected.ClauseItemIndex,
+				Error))
+			{
+				ActiveDocument->LoadError = Error;
+				bLocalCompilePanelOpen = true;
+				return FReply::Handled();
+			}
+			ActiveDocument->SelectedTile.Reset();
+			ActiveDocument->LoadError = FText::GetEmpty();
+			ActiveDocument->bIsTemporary = false;
+			QueueSemanticAnalysis(true);
+			InvalidateCompilationResult(ActiveDocument);
+			if (CompilationMode == EVerseCompilationMode::Continuous)
+			{
+				QueueCompilation(ActiveDocument, true);
+			}
+			ReconcileFunctionTabs(
+				*ActiveDocument,
+				FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+			RebuildDocumentTabs();
+			RefreshActiveDocument();
+			return FReply::Handled();
+		}
+	}
 	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::S)
 	{
 		if (InKeyEvent.IsAltDown())
@@ -2865,24 +2950,41 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 		SemanticWorkspace
 			? SemanticWorkspace->GetCandidateSnapshots()
 			: TArray<TSharedPtr<const FVerseSemanticSnapshot>>();
-	ExpressionActions = FVerseExpressionActionQuery::Build(
-		Tab.Parameters,
-		SocketDrag->Socket,
-		SocketDrag->bOutput,
-		Document,
-		SocketDrag->Tile.Range,
-		ActiveDocument->FilePath,
-		SemanticSnapshots);
-	const FString SocketType = GetVisualTypeName(
-		SocketDrag->Socket.TypeRange,
-		SocketDrag->Socket.IntrinsicTypeName,
-		Document,
-		SocketDrag->Socket.SemanticTypeName);
-	const FText ContextDescription = FText::Format(
-		SocketDrag->bOutput
-			? LOCTEXT("ExpressionConsumerTypeContext", "Actions taking {0}")
-			: LOCTEXT("ExpressionProducerTypeContext", "Actions providing {0}"),
-		FText::FromString(GetActionMenuTypeName(SocketType)));
+	const bool bClauseInsertion = SocketDrag->Purpose
+		== FVerseSocketDragStart::EPurpose::ClauseInsertion;
+	FVerseTextRange SearchScopeRange = SocketDrag->Tile.Range;
+	if (bClauseInsertion && SocketDrag->Clause.IsSet())
+	{
+		const FVerseVisualClauseDescriptor& Clause = SocketDrag->Clause.GetValue();
+		SearchScopeRange = !Clause.Items.IsEmpty()
+			? Clause.Items[FMath::Clamp(
+				SocketDrag->ClauseInsertionIndex,
+				0,
+				Clause.Items.Num() - 1)].Expression.Range
+			: Clause.InteriorRange;
+	}
+	ExpressionActions = bClauseInsertion
+		? FVerseExpressionActionQuery::BuildAll(
+			Tab.Parameters, Document, SearchScopeRange,
+			ActiveDocument->FilePath, SemanticSnapshots)
+		: FVerseExpressionActionQuery::Build(
+			Tab.Parameters, SocketDrag->Socket, SocketDrag->bOutput,
+			Document, SocketDrag->Tile.Range,
+			ActiveDocument->FilePath, SemanticSnapshots);
+	const FString SocketType = bClauseInsertion
+		? FString()
+		: GetVisualTypeName(
+			SocketDrag->Socket.TypeRange,
+			SocketDrag->Socket.IntrinsicTypeName,
+			Document,
+			SocketDrag->Socket.SemanticTypeName);
+	const FText ContextDescription = bClauseInsertion
+		? LOCTEXT("ExpressionInsertionContext", "All expressions")
+		: FText::Format(
+			SocketDrag->bOutput
+				? LOCTEXT("ExpressionConsumerTypeContext", "Actions taking {0}")
+				: LOCTEXT("ExpressionProducerTypeContext", "Actions providing {0}"),
+			FText::FromString(GetActionMenuTypeName(SocketType)));
 	const FSlateBrush* ContextTypeIcon = FAppStyle::GetBrush(
 		SocketType.TrimStartAndEnd().StartsWith(TEXT("[]"))
 			? TEXT("Graph.ArrayPin.Connected")
@@ -2890,7 +2992,9 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 	TSharedRef<SVerseExpressionSearch> Search = SNew(SVerseExpressionSearch)
 		.Actions(ExpressionActions)
 		.ContextDescription(ContextDescription)
-		.ContextTypeColor(GetBlueprintPinColor(SocketType))
+		.ContextTypeColor(bClauseInsertion
+			? FLinearColor::White
+			: GetBlueprintPinColor(SocketType))
 		.ContextTypeIcon(ContextTypeIcon)
 		.OnChosen(FOnVerseExpressionChosen::CreateSP(this, &SVerseVisualEditor::ApplyExpressionAction));
 	ExpressionMenu = FSlateApplication::Get().PushMenu(
@@ -2939,11 +3043,21 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		return;
 	}
 	FText Error;
-	if (!TryApplyVerseExpressionAction(
-		*ActiveDocument->Session,
-		SocketDrag->Tile.Range,
-		*Action,
-		Error))
+	const bool bApplied = SocketDrag->Purpose
+		== FVerseSocketDragStart::EPurpose::ClauseInsertion
+		&& SocketDrag->Clause.IsSet()
+		? FVerseClauseEditing::InsertExpression(
+			*ActiveDocument->Session,
+			SocketDrag->Clause.GetValue(),
+			SocketDrag->ClauseInsertionIndex,
+			*Action,
+			Error)
+		: TryApplyVerseExpressionAction(
+			*ActiveDocument->Session,
+			SocketDrag->Tile.Range,
+			*Action,
+			Error);
+	if (!bApplied)
 	{
 		ActiveDocument->LoadError = Error;
 		bLocalCompilePanelOpen = true;
@@ -3013,6 +3127,40 @@ void SVerseVisualEditor::HandleInlineLiteralCommitted(
 	{
 		RefreshActiveDocument();
 	}
+}
+
+FReply SVerseVisualEditor::HandleClauseReordered(
+	const FVerseVisualClauseDescriptor& Clause,
+	int32 FromIndex,
+	int32 ToIndex)
+{
+	if (!ActiveDocument.IsValid() || !ActiveDocument->Session.IsValid())
+	{
+		return FReply::Unhandled();
+	}
+	FText Error;
+	if (!FVerseClauseEditing::ReorderExpression(
+		*ActiveDocument->Session, Clause, FromIndex, ToIndex, Error))
+	{
+		ActiveDocument->LoadError = Error;
+		bLocalCompilePanelOpen = true;
+		return FReply::Handled();
+	}
+	ActiveDocument->SelectedTile.Reset();
+	ActiveDocument->LoadError = FText::GetEmpty();
+	ActiveDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(ActiveDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(ActiveDocument, true);
+	}
+	ReconcileFunctionTabs(
+		*ActiveDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+	RebuildDocumentTabs();
+	RefreshActiveDocument();
+	return FReply::Handled();
 }
 
 void SVerseVisualEditor::HandleTreeItemDoubleClicked(TSharedPtr<FVerseFileTreeItem> Item)
@@ -3642,6 +3790,21 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		TSharedPtr<SVerseTile> ReturnTile;
 		EVerseExpressionOutcome ImplicitReturnOutcome =
 			EVerseExpressionOutcome::Unresolved;
+		const FOnVerseFunctionGraphTileSelected OnFunctionTileSelected =
+			FOnVerseFunctionGraphTileSelected::CreateLambda(
+				[this, OpenDocument = ActiveDocument](const FVerseVisualTile& Tile)
+				{
+					HandleTileSelected(Tile, OpenDocument);
+					return FReply::Handled();
+				});
+		const FIsVerseFunctionGraphTileSelected IsFunctionTileSelected =
+			FIsVerseFunctionGraphTileSelected::CreateLambda(
+				[OpenDocument = ActiveDocument](FVerseTextRange Range)
+				{
+					return OpenDocument.IsValid()
+						&& OpenDocument->SelectedTile.IsSet()
+						&& OpenDocument->SelectedTile->Range == Range;
+				});
 		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
 		{
 			const FVerseVisualTile& Tile = FunctionTab.GraphTiles[Index];
@@ -3661,7 +3824,12 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				FOnVerseInlineLiteralCommitted::CreateSP(
 					this,
 					&SVerseVisualEditor::HandleInlineLiteralCommitted,
-					ActiveDocument));
+					ActiveDocument),
+			false,
+			OnFunctionTileSelected,
+			IsFunctionTileSelected,
+			FOnVerseClauseReordered::CreateSP(
+				this, &SVerseVisualEditor::HandleClauseReordered));
 			const bool bPairWithImplicitReturn = Tile.bImplicitReturnValue
 				&& FunctionTab.GraphTiles.IsValidIndex(Index + 1)
 				&& FunctionTab.GraphTiles[Index + 1].Kind
@@ -3692,7 +3860,14 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					FOnVerseInlineLiteralCommitted::CreateSP(
 						this,
 						&SVerseVisualEditor::HandleInlineLiteralCommitted,
-						ActiveDocument));
+						ActiveDocument),
+					nullptr,
+					false,
+					nullptr,
+					OnFunctionTileSelected,
+					IsFunctionTileSelected,
+					FOnVerseClauseReordered::CreateSP(
+						this, &SVerseVisualEditor::HandleClauseReordered));
 				GraphRow.RootTile->SlatePrepass();
 				ReturnRoot->SlatePrepass();
 				const float ReturnTopPadding =
@@ -3798,6 +3973,10 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					this, &SVerseVisualEditor::HandleConnectionDropped))
 				.OnConnectionCancelled(FSimpleDelegate::CreateSP(
 					this, &SVerseVisualEditor::HandleConnectionCancelled))
+				.OnBackgroundClicked(FSimpleDelegate::CreateSP(
+					this,
+					&SVerseVisualEditor::HandleTileSelectionCleared,
+					ActiveDocument))
 				[
 					FunctionContent
 				];

@@ -463,12 +463,17 @@ void SVerseGraphSurface::PaintPreviewConnection(
 		return;
 	}
 	const FVersePaintPoint Free = VerseCanvasToPaint(GetPaintSpaceGeometry(), PreviewEndpoint);
-	const FVersePaintPoint Fixed = AnchorPoint(ConnectionDrag->Anchor);
+	const FVersePaintPoint Fixed = AnchorPoint(
+		ConnectionDrag->Anchor,
+		ConnectionDrag->AnchorCoordinate);
 	const FVersePaintPoint Start = ConnectionDrag->bOutput ? Fixed : Free;
 	const FVersePaintPoint End = ConnectionDrag->bOutput ? Free : Fixed;
 	DrawSpline(
 		OutDrawElements, LayerId, Start, End,
-		EVerseGraphConnectionAxis::Horizontal, 2.0f,
+		ConnectionDrag->Purpose == FVerseSocketDragStart::EPurpose::ClauseInsertion
+			? EVerseGraphConnectionAxis::Vertical
+			: EVerseGraphConnectionAxis::Horizontal,
+		2.0f,
 		ConnectionDrag->WireColor);
 	if (ConnectionDrag->Outcome == EVerseExpressionOutcome::FailableValue
 		|| ConnectionDrag->Outcome == EVerseExpressionOutcome::FailureOnly)

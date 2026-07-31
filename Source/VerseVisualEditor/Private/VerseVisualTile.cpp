@@ -356,11 +356,42 @@ namespace
 				FailablePredicate.bHasInternalExecutionEntry = true;
 				FailablePredicate.ControlRegions.Add(*ConditionRegion);
 				FailablePredicate.ControlRegions[0].FirstOperandIndex = 0;
+				FailablePredicate.BodyClause.InteriorRange = ConditionRegion->InteriorRange;
+				FailablePredicate.BodyClause.OpeningPunctuationRange =
+					ConditionRegion->OpeningPunctuationRange;
+				FailablePredicate.BodyClause.ClosingPunctuationRange =
+					ConditionRegion->ClosingPunctuationRange;
+				FailablePredicate.BodyClause.PunctuationStyle =
+					ConditionRegion->PunctuationStyle;
+				FailablePredicate.BodyClause.EmptyBodyInsertionAnchor =
+					ConditionRegion->EmptyBodyInsertionAnchor;
 				for (int32 Offset = 0; Offset < ConditionRegion->OperandCount; ++Offset)
 				{
-					FailablePredicate.Children.Add(
-						MoveTemp(Tile.Children[FirstConditionIndex + Offset]));
+					FVerseVisualTile Child =
+						MoveTemp(Tile.Children[FirstConditionIndex + Offset]);
+					FVerseVisualClauseItemDescriptor& ClauseItem =
+						FailablePredicate.BodyClause.Items.AddDefaulted_GetRef();
+					ClauseItem.Expression = Descriptor.Operands[
+						ConditionRegion->FirstOperandIndex + Offset];
+					if (ConditionRegion->Items.IsValidIndex(Offset))
+					{
+						const auto& RegionItem = ConditionRegion->Items[Offset];
+						ClauseItem.LeadingTriviaRange = RegionItem.LeadingTriviaRange;
+						ClauseItem.TrailingTriviaRange = RegionItem.TrailingTriviaRange;
+						ClauseItem.Separator = RegionItem.Separator;
+					}
+					Child.EditableClause = FailablePredicate.BodyClause;
+					Child.ClauseItemIndex = Offset;
+					FailablePredicate.Children.Add(MoveTemp(Child));
 				}
+				// Every child must see the final descriptor rather than a partial copy.
+				for (int32 Offset = 0; Offset < FailablePredicate.Children.Num(); ++Offset)
+				{
+					FailablePredicate.Children[Offset].EditableClause =
+						FailablePredicate.BodyClause;
+					FailablePredicate.Children[Offset].ClauseItemIndex = Offset;
+				}
+				FailablePredicate.EditableClause = FailablePredicate.BodyClause;
 				Tile.Children.RemoveAt(
 					FirstConditionIndex,
 					ConditionRegion->OperandCount,
@@ -506,6 +537,8 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		: FunctionTile.FirstSourceLine;
 	Entry.bHasExecutionOutput = true;
 	Entry.bExecutionOutputConnected = true;
+	Entry.EditableClause = FunctionTile.BodyClause;
+	Entry.ClauseItemIndex = INDEX_NONE;
 	for (const FVerseVisualFunctionParameter& Parameter : FunctionTile.FunctionParameters)
 	{
 		FVerseVisualSocket& Socket = Entry.ValueOutputs.AddDefaulted_GetRef();
@@ -518,14 +551,17 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		: FString();
 	const bool bHasReturnValue = !ReturnType.IsEmpty()
 		&& !ReturnType.Equals(TEXT("void"), ESearchCase::IgnoreCase);
-	for (const FVerseVisualClauseItemDescriptor& Item : FunctionTile.BodyClause.Items)
+	for (int32 ItemIndex = 0; ItemIndex < FunctionTile.BodyClause.Items.Num(); ++ItemIndex)
 	{
+		const FVerseVisualClauseItemDescriptor& Item = FunctionTile.BodyClause.Items[ItemIndex];
 		FVerseVisualTile Expression = MakeExpressionTile(
 			Item.Expression,
 			Snapshot,
 			true,
 			Item.bIsFinalValuePosition && bHasReturnValue);
 		Expression.ExtraBlankLineCount = Item.ExtraBlankLineCount;
+		Expression.EditableClause = FunctionTile.BodyClause;
+		Expression.ClauseItemIndex = ItemIndex;
 		if (!Expression.TypeRange.IsSet()
 			&& Expression.IntrinsicTypeName.IsNone()
 			&& Expression.bImplicitReturnValue)

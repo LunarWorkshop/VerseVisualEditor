@@ -19,20 +19,39 @@ TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D
 /** Local-space centers of the four failable-block corner diamonds. */
 TStaticArray<FVector2D, 4> BuildVerseFailableCornerCenters(FVector2D Size);
 
+/** Normalized location at which an execution pin actually paints its home plate. */
+FVector2D GetVerseExecutionPinAnchorCoordinate(bool bInput, bool bCompact);
+
 struct FVerseSocketDragStart
 {
+	enum class EPurpose : uint8
+	{
+		ValueConnection,
+		ClauseInsertion,
+	};
+
 	TSharedPtr<SWidget> Anchor;
+	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVerseVisualTile Tile;
 	FVerseVisualSocket Socket;
+	TOptional<FVerseVisualClauseDescriptor> Clause;
 	FVerseDesktopPoint DesktopPosition;
 	FLinearColor WireColor = FLinearColor::White;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	bool bOutput = false;
 	int32 SocketIndex = INDEX_NONE;
+	int32 ClauseInsertionIndex = INDEX_NONE;
+	EPurpose Purpose = EPurpose::ValueConnection;
 };
 
 DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnVerseSocketDragStarted, const FVerseSocketDragStart&);
 DECLARE_DELEGATE_TwoParams(FOnVerseInlineLiteralCommitted, FVerseTextRange, FText);
+DECLARE_DELEGATE_RetVal_ThreeParams(
+	FReply,
+	FOnVerseClauseReordered,
+	const FVerseVisualClauseDescriptor&,
+	int32,
+	int32);
 
 /** Canvas-independent rendering of every Verse visual tile kind. */
 class SVerseTile final : public SCompoundWidget
@@ -65,6 +84,7 @@ public:
 		SLATE_EVENT(FOnClicked, OnOpened)
 		SLATE_EVENT(FOnVerseSocketDragStarted, OnSocketDragStarted)
 		SLATE_EVENT(FOnVerseInlineLiteralCommitted, OnInlineLiteralCommitted)
+		SLATE_EVENT(FOnVerseClauseReordered, OnClauseReordered)
 		SLATE_NAMED_SLOT(FArguments, BodyUnderlay)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
@@ -105,6 +125,12 @@ public:
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
 		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnDragDetected(
+		const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
+	virtual FReply OnDrop(
+		const FGeometry& MyGeometry,
+		const FDragDropEvent& DragDropEvent) override;
 
 private:
 	TSharedRef<SWidget> BuildHeader(bool bCompact, const FText& DiagnosticText) const;
@@ -116,6 +142,12 @@ private:
 		FVerseVisualSocket Socket,
 		bool bOutput,
 		int32 SocketIndex);
+	FReply HandleClauseInsertionMouseButtonDown(
+		const FGeometry& Geometry,
+		const FPointerEvent& MouseEvent,
+		TSharedPtr<SWidget> Anchor,
+		FVector2D AnchorCoordinate,
+		int32 InsertIndex);
 	FText Decode(FVerseByteRange Range) const;
 	FText GetKindText() const;
 	FText GetNameText() const;
@@ -138,6 +170,7 @@ private:
 	FOnClicked OnOpened;
 	FOnVerseSocketDragStarted OnSocketDragStarted;
 	FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted;
+	FOnVerseClauseReordered OnClauseReordered;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;

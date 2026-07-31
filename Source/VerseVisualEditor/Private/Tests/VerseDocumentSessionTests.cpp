@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseDocumentSession.h"
+#include "VerseClauseEditing.h"
+#include "VerseExpressionActions.h"
 #include "VerseExternalChange.h"
 #include "VerseIdentifier.h"
 
@@ -140,8 +142,16 @@ bool FVerseDocumentSessionRangeValidationTest::RunTest(const FString& Parameters
 	TestEqual(TEXT("Successful replacement increments revision exactly once"), Session.GetRevision().Value, uint64(1));
 	TestFalse(TEXT("A range from the prior revision is stale"),
 		Session.Replace(RevisionZeroRange, UTF8TEXTVIEW("R"), Error));
-	TestEqual(TEXT("Stale edit rejection preserves current text"),
-		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("QβZ"));
+	const FVerseDocumentRevision TransactionRevision = Session.GetRevision();
+	const TArray<FVerseDocumentEdit> Transaction = {
+		{FVerseTextRange(TransactionRevision, {0, 1}), FUtf8String(UTF8TEXT("A"))},
+		{FVerseTextRange(TransactionRevision, {3, 1}), FUtf8String(UTF8TEXT("B"))}};
+	TestTrue(TEXT("Non-overlapping localized edits apply atomically"),
+		Session.ReplaceMany(Transaction, Error));
+	TestEqual(TEXT("An atomic transaction advances one revision"),
+		Session.GetRevision().Value, uint64(2));
+	TestEqual(TEXT("Both atomic replacements are visible"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("AβB"));
 	return true;
 }
 
@@ -294,6 +304,177 @@ bool FVerseIfPredicateReparseTest::RunTest(const FString& Parameters)
 			&& UpdatedGraph[1].Children[0].Range.Revision == Session.GetRevision()
 			&& UpdatedGraph[1].Children[0].Range.Revision
 				!= OriginalPredicateRevision);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseOrderedClauseEditingTest,
+	"VerseVisualEditor.Prototype.FailureContexts.OrderedClauseEditing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"EditPredicate(MaybeValue : ?int)<allocates><reads> : int =\r\n"
+		"    if (Value := MaybeValue?; <# fixed comment #> var Mutable : int = Value):\n"
+		"        Value + Mutable\r\n"
+		"    else:\n"
+		"        0\r\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	auto FindPredicate = [&]() -> const FVerseVisualTile*
+	{
+		const FVerseVisualTile* Function = Session.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		if (Function == nullptr)
+		{
+			return nullptr;
+		}
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Session.GetParseSnapshot());
+		for (const FVerseVisualTile& Tile : Graph)
+		{
+			if (Tile.ControlKind == EVerseControlKind::If && !Tile.Children.IsEmpty()
+				&& Tile.Children[0].Kind == EVerseVisualTileKind::FailableBlock)
+			{
+				// Return a stable copy because Graph is local.
+				static FVerseVisualTile Predicate;
+				Predicate = Tile.Children[0];
+				return &Predicate;
+			}
+		}
+		return nullptr;
+	};
+
+	const FVerseVisualTile* Predicate = FindPredicate();
+	if (!TestNotNull(TEXT("The fixture exposes an editable predicate clause"), Predicate))
+	{
+		return false;
+	}
+	TestEqual(TEXT("The initial predicate contains two expressions"),
+		Predicate->BodyClause.Items.Num(), 2);
+
+	FVerseExpressionAction InsertAction;
+	InsertAction.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	InsertAction.SourceSpelling = TEXT("MaybeValue?");
+	FText Error;
+	TestTrue(TEXT("Insertion after the first predicate expression succeeds"),
+		FVerseClauseEditing::InsertExpression(
+			Session, Predicate->BodyClause, 1, InsertAction, Error));
+	TestEqual(TEXT("Insertion advances exactly one document revision"),
+		Session.GetRevision().Value, uint64(1));
+	TestTrue(TEXT("Mixed line endings remain byte-exact outside the insertion"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(TEXT("\r\n    if"))
+		&& FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(TEXT("body")) == false);
+
+	Predicate = FindPredicate();
+	if (!TestNotNull(TEXT("The inserted predicate reparses"), Predicate))
+	{
+		return false;
+	}
+	TestEqual(TEXT("The predicate now contains three expressions"),
+		Predicate->BodyClause.Items.Num(), 3);
+	TestTrue(TEXT("Reordering stays within the same clause"),
+		FVerseClauseEditing::ReorderExpression(
+			Session, Predicate->BodyClause, 0, 2, Error));
+	const FString Reordered = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+	TestTrue(TEXT("Ambiguous comment trivia remains at its original clause slot"),
+		Reordered.Contains(TEXT("<# fixed comment #>")));
+
+	Predicate = FindPredicate();
+	if (!TestNotNull(TEXT("The reordered predicate reparses"), Predicate))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Deleting the middle expression succeeds"),
+		FVerseClauseEditing::DeleteExpression(
+			Session, Predicate->BodyClause, 1, Error));
+	Predicate = FindPredicate();
+	TestTrue(TEXT("Deletion rebuilds a two-expression clause"),
+		Predicate != nullptr && Predicate->BodyClause.Items.Num() == 2);
+	TestTrue(TEXT("Unowned comment bytes survive insertion, reorder, and delete"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(
+			TEXT("<# fixed comment #>")));
+	const FVerseVisualTile* UpdatedFunction = Session.GetTiles().FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.DefinitionKind == VerseSyntaxKind::Function;
+		});
+	if (TestNotNull(TEXT("The containing function remains recognized"), UpdatedFunction))
+	{
+		FVerseExpressionAction FunctionInsert;
+		FunctionInsert.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+		FunctionInsert.SourceSpelling = TEXT("0");
+		TestTrue(TEXT("The same editor inserts into an ordinary function body"),
+			FVerseClauseEditing::InsertExpression(
+				Session, UpdatedFunction->BodyClause, 0, FunctionInsert, Error));
+		const FVerseVisualTile* RebuiltFunction = Session.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		TestTrue(TEXT("Function-body insertion reparses as another ordered item"),
+			RebuiltFunction != nullptr && RebuiltFunction->BodyClause.Items.Num() == 2);
+	}
+
+	const TSharedPtr<FVerseDocument> EmptyDocument = MakeDocument(
+		*this,
+		UTF8TEXTVIEW("EmptyFunction()<computes> : void = {}\n"));
+	if (TestTrue(TEXT("Empty function fixture parses"), EmptyDocument.IsValid()))
+	{
+		FVerseDocumentSession EmptySession(EmptyDocument.ToSharedRef());
+		const FVerseVisualTile* EmptyFunction = EmptySession.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		if (TestNotNull(TEXT("Empty function exposes its editable clause"), EmptyFunction))
+		{
+			FVerseExpressionAction IfAction;
+			IfAction.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+			IfAction.SourceSpelling = TEXT("if (true?) {}");
+			TestTrue(
+				TEXT("An empty if with a valid default condition inserts into an empty function"),
+				FVerseClauseEditing::InsertExpression(
+					EmptySession,
+					EmptyFunction->BodyClause,
+					0,
+					IfAction,
+					Error));
+			const FVerseVisualTile* RebuiltEmptyFunction =
+				EmptySession.GetTiles().FindByPredicate(
+					[](const FVerseVisualTile& Tile)
+					{
+						return Tile.DefinitionKind == VerseSyntaxKind::Function;
+					});
+			if (TestNotNull(TEXT("Function remains recognized after if insertion"), RebuiltEmptyFunction))
+			{
+				const TArray<FVerseVisualTile> Graph =
+					FVerseVisualTileBuilder::BuildFunctionGraph(
+						*RebuiltEmptyFunction,
+						EmptySession.GetParseSnapshot());
+				const FVerseVisualTile* IfTile = Graph.FindByPredicate(
+					[](const FVerseVisualTile& Tile)
+					{
+						return Tile.ControlKind == EVerseControlKind::If;
+					});
+				TestTrue(
+					TEXT("Inserted if rebuilds with its automatic failable context"),
+					IfTile != nullptr
+						&& !IfTile->Children.IsEmpty()
+						&& IfTile->Children[0].Kind
+							== EVerseVisualTileKind::FailableBlock
+						&& IfTile->Children[0].Children.Num() == 1);
+			}
+		}
+	}
 	return true;
 }
 

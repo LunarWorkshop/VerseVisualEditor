@@ -81,6 +81,28 @@ bool FVerseGraphScaleRoundTripTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseExecutionPinAnchorTest,
+	"VerseVisualEditor.Graph.Coordinates.ExecutionPinAnchor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
+{
+	TestEqual(
+		TEXT("Input home plate uses its painted center"),
+		GetVerseExecutionPinAnchorCoordinate(true, false),
+		FVector2D(0.5f, 0.75f));
+	TestEqual(
+		TEXT("Full output home plate uses its painted center"),
+		GetVerseExecutionPinAnchorCoordinate(false, false),
+		FVector2D(0.5f, 1.0f / 6.0f));
+	TestEqual(
+		TEXT("Compact output home plate uses its painted center"),
+		GetVerseExecutionPinAnchorCoordinate(false, true),
+		FVector2D(0.5f, 0.4f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseGraphCursorAnchoredZoomTest,
 	"VerseVisualEditor.Graph.Coordinates.CursorAnchoredZoom",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

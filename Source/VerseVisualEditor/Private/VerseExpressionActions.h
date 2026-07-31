@@ -17,6 +17,8 @@ enum class EVerseExpressionSourceForm : uint8
 	InfixOperator,
 	PrefixOperator,
 	PostfixOperator,
+	/** Parser-known construct with a complete source-safe template. */
+	StructuralExpression,
 };
 
 /** One expression creation choice which is valid at a particular typed socket. */
@@ -39,6 +41,13 @@ struct FVerseExpressionAction
 	TArray<bool> NamedInputs;
 };
 
+/** Materializes one action's source recipe without mutating a document. */
+bool BuildVerseExpressionActionSource(
+	const FVerseExpressionAction& Action,
+	FStringView BoundExpressionSource,
+	FString& OutSource,
+	FText& OutError);
+
 /** Discovers expression actions from the current lexical scope and the expression registry. */
 class FVerseExpressionActionQuery
 {
@@ -54,6 +63,13 @@ public:
 		bool bDraggingFromOutput,
 		const FVerseDocument& Document,
 		FVerseTextRange ExpressionRange,
+		const FString& FilePath,
+		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> SemanticSnapshots);
+	/** Builds untyped actions for a new expression position in an ordered clause. */
+	static TArray<TSharedPtr<FVerseExpressionAction>> BuildAll(
+		TConstArrayView<FVerseFunctionNavigationParameter> Parameters,
+		const FVerseDocument& Document,
+		FVerseTextRange ScopeAnchorRange,
 		const FString& FilePath,
 		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> SemanticSnapshots);
 };

@@ -24,3 +24,12 @@ PredicateBinding(MaybeValue : ?int)<allocates><reads> : int =
         Value + MutableValue
     else:
         0
+
+EditableNestedPredicate(Input : int)<computes> : int =
+    if (Input > 0; <# comment remains fixed when ownership is ambiguous #> Input < 10):
+        if (Input <> 5):
+            Input
+        else:
+            0
+    else:
+        0

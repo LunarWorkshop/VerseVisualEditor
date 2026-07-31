@@ -46,6 +46,12 @@ public:
 		int32 ExpressionBeginByte,
 		bool bDraggingFromOutput,
 		const FVerseDocument& Document);
+	/** Returns every source-creatable expression visible at an untyped clause insertion point. */
+	static TArray<FVerseSemanticCandidate> BuildAll(
+		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
+		const FString& FilePath,
+		int32 ExpressionBeginByte,
+		const FVerseDocument& Document);
 
 	/** Bind existing expression tiles to the exact compiler-owned syntax/semantic graph. */
 	static void BindFunctionGraph(

@@ -13,6 +13,7 @@ void SVerseFunctionCanvas::Construct(
 		.Connections(InArgs._Connections)
 		.OnConnectionDropped(InArgs._OnConnectionDropped)
 		.OnConnectionCancelled(InArgs._OnConnectionCancelled)
+		.OnBackgroundClicked(InArgs._OnBackgroundClicked)
 		[
 			InArgs._Content.Widget
 		]

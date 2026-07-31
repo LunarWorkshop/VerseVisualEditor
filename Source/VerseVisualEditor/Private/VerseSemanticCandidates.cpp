@@ -775,6 +775,106 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 	return Result;
 }
 
+TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::BuildAll(
+	TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
+	const FString& FilePath,
+	int32 ExpressionBeginByte,
+	const FVerseDocument& Document)
+{
+	TArray<FVerseSemanticCandidate> Result;
+	TSet<FString> Seen;
+	for (const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot : Snapshots)
+	{
+		if (!Snapshot.IsValid() || !Snapshot->GetProgram().IsValid())
+		{
+			continue;
+		}
+		const Verse::Vst::Node* Node = FindSemanticNode(
+			*Snapshot, FilePath, ExpressionBeginByte, Document);
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+		const uLang::CScope* ActiveScope = FindActiveScope(*Node, Program);
+		if (ActiveScope == nullptr)
+		{
+			continue;
+		}
+		const uLang::CAstPackage* Package = ActiveScope->GetPackage();
+		const uint32 UploadedVersion = Package
+			? Package->_UploadedAtFNVersion
+			: VerseFN::UploadedAtFNVersion::Latest;
+
+		for (const uLang::CDefinition* Definition :
+			CollectVisibleDefinitions(*ActiveScope, Program))
+		{
+			if (!IsVisibleAtCurrentPackageVersion(*Definition, *ActiveScope, Package))
+			{
+				continue;
+			}
+			FVerseSemanticCandidate Candidate;
+			if (const uLang::CDataDefinition* Data =
+				Definition->AsNullable<uLang::CDataDefinition>())
+			{
+				if (Data->IsInstanceMember() || !Data->IsAccessibleFrom(*ActiveScope)
+					|| GetDataValueType(*Data) == nullptr)
+				{
+					continue;
+				}
+				Candidate.Kind = EVerseSemanticCandidateKind::Identifier;
+				Candidate.DataDefinition = Data;
+			}
+			else if (const uLang::CFunction* Function =
+				Definition->AsNullable<uLang::CFunction>())
+			{
+				if (!Function->IsAccessibleFrom(*ActiveScope)
+					|| Function->IsInstanceMember()
+					|| Function->_Signature.GetFunctionType() == nullptr
+					|| Function->GetName() == Program._IntrinsicSymbols._OpNameCall)
+				{
+					continue;
+				}
+				Candidate.Function = Function;
+				Candidate.InstantiatedFunctionType = uLang::SemanticTypeUtils::Instantiate(
+					Function->_Signature.GetFunctionType(), UploadedVersion);
+				if (Candidate.InstantiatedFunctionType == nullptr)
+				{
+					continue;
+				}
+				const bool bExtensionMethod = Function->_ExtensionFieldAccessorKind ==
+					uLang::EExtensionFieldAccessorKind::ExtensionMethod;
+				Candidate.Kind = EVerseSemanticCandidateKind::Function;
+				if (!bExtensionMethod
+					&& Program._IntrinsicSymbols.IsOperatorOpName(Function->GetName()))
+				{
+					Candidate.Kind = EVerseSemanticCandidateKind::InfixOperator;
+				}
+				else if (Program._IntrinsicSymbols.IsPrefixOpName(Function->GetName()))
+				{
+					Candidate.Kind = EVerseSemanticCandidateKind::PrefixOperator;
+				}
+				else if (Program._IntrinsicSymbols.IsPostfixOpName(Function->GetName()))
+				{
+					Candidate.Kind = EVerseSemanticCandidateKind::PostfixOperator;
+				}
+			}
+			else
+			{
+				continue;
+			}
+			Candidate.Snapshot = Snapshot;
+			const FString Key = SemanticCandidateKey(Candidate);
+			if (!Seen.Contains(Key))
+			{
+				Seen.Add(Key);
+				Result.Add(MoveTemp(Candidate));
+			}
+		}
+	}
+	return Result;
+}
+
 void FVerseSemanticCandidateProvider::BindFunctionGraph(
 	TArray<FVerseVisualTile>& GraphTiles,
 	const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
