@@ -45,8 +45,7 @@ private:
 	TSharedRef<SWidget> BuildTileSequence(
 		TConstArrayView<struct FVerseVisualTile> TilesToBuild,
 		int32 SharedDiagnosticTileIndex,
-		bool bShowEmptyDocumentMessage,
-		bool bIncludeFunctionsInCompactStack);
+		bool bShowEmptyDocumentMessage);
 	TSharedRef<SWidget> BuildTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	TSharedRef<SWidget> BuildStructuralTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
 	TSharedRef<SWidget> BuildCompactTile(const struct FVerseVisualTile& Tile, int32 TileIndex);
