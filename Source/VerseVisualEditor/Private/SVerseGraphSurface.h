@@ -6,6 +6,7 @@
 #include "VerseCanvasViewState.h"
 #include "VerseGraphCoordinates.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/SLeafWidget.h"
 
 class SScaleBox;
 class SBox;
@@ -29,6 +30,33 @@ struct FVerseGraphConnection
 	FVector2D SourceAnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVector2D TargetAnchorCoordinate = FVector2D(0.5f, 0.5f);
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+};
+
+/** A painter-ordered wire pass placed beneath the child widgets of one container. */
+class SVerseGraphConnectionLayer final : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SVerseGraphConnectionLayer) {}
+		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	void SetConnections(TArray<FVerseGraphConnection> InConnections);
+	virtual FVector2D ComputeDesiredSize(float) const override
+	{
+		return FVector2D::ZeroVector;
+	}
+	virtual int32 OnPaint(
+		const FPaintArgs& Args,
+		const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId,
+		const FWidgetStyle& InWidgetStyle,
+		bool bParentEnabled) const override;
+
+private:
+	TArray<FVerseGraphConnection> Connections;
 };
 
 /** Samples decoration centers from the same Hermite spline used for graph wires. */

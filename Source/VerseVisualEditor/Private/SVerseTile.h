@@ -45,6 +45,7 @@ public:
 		, _ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
 		, _ShowBody(true)
 		, _Compact(false)
+		, _CompactExecutionSpacing(false)
 		, _IsSelected(false)
 	{}
 		SLATE_ARGUMENT(FVerseVisualTile, Tile)
@@ -55,6 +56,7 @@ public:
 		SLATE_ARGUMENT(FMargin, ArrowPadding)
 		SLATE_ARGUMENT(bool, ShowBody)
 		SLATE_ARGUMENT(bool, Compact)
+		SLATE_ARGUMENT(bool, CompactExecutionSpacing)
 		SLATE_ARGUMENT(FText, DiagnosticText)
 		SLATE_ARGUMENT(TArray<FText>, ExecutionOutputLabels)
 		SLATE_ARGUMENT(TArray<bool>, ExecutionOutputConnectedStates)
@@ -63,6 +65,7 @@ public:
 		SLATE_EVENT(FOnClicked, OnOpened)
 		SLATE_EVENT(FOnVerseSocketDragStarted, OnSocketDragStarted)
 		SLATE_EVENT(FOnVerseInlineLiteralCommitted, OnInlineLiteralCommitted)
+		SLATE_NAMED_SLOT(FArguments, BodyUnderlay)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
 

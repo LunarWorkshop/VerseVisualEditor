@@ -99,21 +99,29 @@ namespace
 	class SVerseTileExecutionPin final : public SLeafWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SVerseTileExecutionPin) {}
+		SLATE_BEGIN_ARGS(SVerseTileExecutionPin)
+			: _Input(false)
+			, _Connected(false)
+			, _Compact(false)
+		{}
 			SLATE_ARGUMENT(bool, Input)
 			SLATE_ARGUMENT(bool, Connected)
+			SLATE_ARGUMENT(bool, Compact)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			bInput = InArgs._Input;
 			bConnected = InArgs._Connected;
+			bCompact = InArgs._Compact;
 			SetCanTick(false);
 		}
 
 		virtual FVector2D ComputeDesiredSize(float) const override
 		{
-			return bInput ? FVector2D(48.0f, 32.0f) : FVector2D(24.0f, 48.0f);
+			return bInput
+				? FVector2D(48.0f, 32.0f)
+				: FVector2D(24.0f, bCompact ? 20.0f : 48.0f);
 		}
 
 		virtual int32 OnPaint(
@@ -147,6 +155,7 @@ namespace
 	private:
 		bool bInput = false;
 		bool bConnected = false;
+		bool bCompact = false;
 	};
 
 	class SVerseFailableValuePin final : public SLeafWidget
@@ -237,7 +246,7 @@ namespace
 			SetCanTick(false);
 			SetClipping(EWidgetClipping::ClipToBounds);
 			ChildSlot
-			.Padding(8.0f)
+			.Padding(0.0f)
 			[
 				InArgs._Content.Widget
 			];
@@ -318,6 +327,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.OperatorRange.IsSet());
 	const bool bHasLabeledExecutionOutputs = !InArgs._ExecutionOutputLabels.IsEmpty();
+	const bool bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	if (Tile.bHasExecutionInput)
@@ -342,22 +352,33 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		{
 			FailureChain->AddSlot()
 			.AutoHeight()
-			.HAlign(HAlign_Left)
-			.Padding(8.0f, 0.0f, 0.0f, 4.0f)
+			.HAlign(HAlign_Center)
+			.Padding(0.0f, 0.0f, 0.0f, 4.0f)
 			[
 				SAssignNew(InternalExecutionEntryAnchor, SVerseTileExecutionPin)
 					.Input(false)
 					.Connected(!Tile.Children.IsEmpty())
+					.Compact(true)
+					.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, -2.0f)))
 			];
 		}
 		FailureChain->AddSlot()
 		.AutoHeight()
+		.Padding(20.0f)
 		[
 			BodyContent
 		];
 		BodyContent = SNew(SVerseFailableBlockInterior)
 		[
-			FailureChain
+			SNew(SOverlay)
+			+ SOverlay::Slot()
+			[
+				InArgs._BodyUnderlay.Widget
+			]
+			+ SOverlay::Slot()
+			[
+				FailureChain
+			]
 		];
 	}
 
@@ -366,7 +387,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.OnMouseButtonDown(this, &SVerseTile::HandleTileMouseButtonDown)
 		.BorderImage(OuterBrush.Get())
 		.BorderBackgroundColor(this, &SVerseTile::GetOutlineColor)
-		.Padding(1.0f)
+		.Padding(Tile.Kind == EVerseVisualTileKind::FailableBlock ? 2.0f : 1.0f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
@@ -472,7 +493,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.Color(FailureColor)
 					.Connected(true)
 					.Visibility(EVisibility::HitTestInvisible)
-					.RenderTransform(FSlateRenderTransform(Offset))
+					.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+					.RenderTransform(FSlateRenderTransform(
+						FScale2D(0.82f, 1.18f),
+						Offset))
 			];
 		};
 		AddCorner(HAlign_Left, VAlign_Top, FVector2D(-5.5f, -5.5f));
@@ -495,7 +519,9 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		[
 			SNew(SBox)
-			.HeightOverride(Tile.bHasExecutionOutput ? 41.0f : 0.0f)
+			.HeightOverride(Tile.bHasExecutionOutput
+				? (bCompactExecutionSpacing ? 12.0f : 41.0f)
+				: 0.0f)
 		]
 	];
 
@@ -539,6 +565,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 						SAssignNew(OutputAnchor, SVerseTileExecutionPin)
 						.Input(false)
 						.Connected(bConnected)
+						.Compact(bCompactExecutionSpacing)
 					]
 				]
 			];
@@ -669,7 +696,10 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	if (!Lines.IsEmpty())
 	{
 		const float LineLeftPadding = bShowBody ? -19.0f : 0.0f;
-		Header->AddSlot().AutoHeight().Padding(LineLeftPadding, 6.0f, 0.0f, 0.0f)
+		const float LineTopPadding =
+			Tile.Kind == EVerseVisualTileKind::FailableBlock ? 10.0f : 6.0f;
+		Header->AddSlot().AutoHeight().Padding(
+			LineLeftPadding, LineTopPadding, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
 			.Text(Lines)
@@ -715,7 +745,10 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			: Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
-		const FText Name = !Socket.SemanticName.IsEmpty()
+		const FText Name = Tile.Kind == EVerseVisualTileKind::Expression
+			&& Tile.OperatorRange.IsSet()
+			? FText::GetEmpty()
+			: !Socket.SemanticName.IsEmpty()
 			? FText::FromString(Socket.SemanticName)
 			: Decode(Socket.NameRange);
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
@@ -930,7 +963,7 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Definition: return FText::FromName(Tile.DefinitionKind);
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::FailableBlock:
-		return LOCTEXT("FailableBlockKind", "Failable Block");
+		return FText::GetEmpty();
 	case EVerseVisualTileKind::Expression:
 		if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)
 		{

@@ -497,7 +497,9 @@ namespace
 		TSharedRef<const FVerseDocument> Document,
 		FOnVerseSocketDragStarted OnSocketDragStarted,
 		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
-		TSharedPtr<SWidget> BodyOverride = nullptr)
+		TSharedPtr<SWidget> BodyOverride = nullptr,
+		bool bCompactExecutionSpacing = false,
+		TSharedPtr<SWidget> BodyUnderlay = nullptr)
 	{
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
@@ -578,13 +580,23 @@ namespace
 			.HeaderPadding(Tile.Kind == EVerseVisualTileKind::FunctionEntry
 				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
 				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
+			.ArrowPadding(bFailableBlock
+				? FMargin(8.0f, 4.0f, 3.0f, 0.0f)
+				: FMargin(8.0f, 14.0f, 3.0f, 0.0f))
 			.ShowBody(BodyOverride.IsValid()
 				|| bFailableBlock
 				|| (bExpression && !bIdentifier && !bControl))
+			.CompactExecutionSpacing(bCompactExecutionSpacing)
 			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
 			.ExecutionOutputConnectedStates(MoveTemp(ExecutionOutputConnectedStates))
 			.OnSocketDragStarted(OnSocketDragStarted)
 			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
+			.BodyUnderlay()
+			[
+				BodyUnderlay.IsValid()
+					? BodyUnderlay.ToSharedRef()
+					: SNullWidget::NullWidget
+			]
 			.BodyContent()
 			[
 				Body
@@ -656,13 +668,21 @@ namespace
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
 		FOnVerseSocketDragStarted OnSocketDragStarted,
-		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted)
+		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
+		bool bCompactOperands = false)
 	{
-		constexpr float OperandColumnWidth = 190.0f;
-		constexpr float OperandWireSpace = 72.0f;
+		constexpr float StandardOperandColumnWidth = 190.0f;
+		constexpr float StandardOperandWireSpace = 72.0f;
+		constexpr float CompactOperandWireSpace = 20.0f;
+		const float OperandColumnWidth = StandardOperandColumnWidth;
+		const float OperandWireSpace = bCompactOperands
+			? CompactOperandWireSpace
+			: StandardOperandWireSpace;
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
 			TSharedRef<SVerticalBox> Chain = SNew(SVerticalBox);
+			TSharedRef<SVerseGraphConnectionLayer> ConnectionLayer =
+				SNew(SVerseGraphConnectionLayer);
 			TArray<FVerseGraphConnection> Connections;
 			TArray<TSharedPtr<SVerseTile>> ChildRoots;
 			for (int32 ChildIndex = 0; ChildIndex < Tile.Children.Num(); ++ChildIndex)
@@ -671,10 +691,11 @@ namespace
 					Tile.Children[ChildIndex],
 					Document,
 					OnSocketDragStarted,
-					OnInlineLiteralCommitted);
+					OnInlineLiteralCommitted,
+					true);
 				Chain->AddSlot()
 				.AutoHeight()
-				.HAlign(HAlign_Left)
+				.HAlign(HAlign_Center)
 				.Padding(0.0f, ChildIndex == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
 				[
 					ChildRow.Widget
@@ -688,7 +709,9 @@ namespace
 				Document,
 				OnSocketDragStarted,
 				OnInlineLiteralCommitted,
-				Chain);
+				Chain,
+				bCompactOperands,
+				ConnectionLayer);
 			if (!ChildRoots.IsEmpty())
 			{
 				const TSharedPtr<SWidget> Entry =
@@ -704,6 +727,10 @@ namespace
 						FLinearColor::White,
 						2.5f,
 						0});
+					Connections.Last().SourceAnchorCoordinate =
+						FVector2D(0.5f, 8.0f / 20.0f);
+					Connections.Last().TargetAnchorCoordinate =
+						FVector2D(0.5f, 24.0f / 32.0f);
 				}
 				for (int32 ChildIndex = 1; ChildIndex < ChildRoots.Num(); ++ChildIndex)
 				{
@@ -720,9 +747,14 @@ namespace
 							FLinearColor::White,
 							2.5f,
 							Tile.Children[ChildIndex - 1].ExtraBlankLineCount});
+						Connections.Last().SourceAnchorCoordinate =
+							FVector2D(0.5f, 8.0f / 20.0f);
+						Connections.Last().TargetAnchorCoordinate =
+							FVector2D(0.5f, 24.0f / 32.0f);
 					}
 				}
 			}
+			ConnectionLayer->SetConnections(MoveTemp(Connections));
 			return {
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
@@ -734,7 +766,7 @@ namespace
 					BlockTile
 				],
 				BlockTile,
-				MoveTemp(Connections)};
+				{}};
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
@@ -755,16 +787,34 @@ namespace
 					Tile.Children[ConditionRegion->FirstOperandIndex],
 					Document,
 					OnSocketDragStarted,
-					OnInlineLiteralCommitted);
+					OnInlineLiteralCommitted,
+					bCompactOperands);
 				PredicatePresentation = PredicateRow.RootTile;
 				Connections.Append(PredicateRow.Connections);
 			}
+			PredicatePresentation =
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(14.0f, 10.0f, 14.0f, 5.0f)
+				[
+					SNew(STextBlock)
+						.Text(LOCTEXT("IfConditionLabel", "Condition"))
+						.TextStyle(FAppStyle::Get(), "Graph.Node.PinName")
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(14.0f, 0.0f, 14.0f, 14.0f)
+				[
+					PredicatePresentation
+				];
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 				Tile,
 				Document,
 				OnSocketDragStarted,
 				OnInlineLiteralCommitted,
-				PredicatePresentation);
+				PredicatePresentation,
+				bCompactOperands);
 
 			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind, int32 OutputIndex)
 			{
@@ -790,7 +840,8 @@ namespace
 							Tile.Children[ChildIndex],
 							Document,
 							OnSocketDragStarted,
-							OnInlineLiteralCommitted);
+							OnInlineLiteralCommitted,
+							bCompactOperands);
 						Branch->AddSlot()
 						.AutoHeight()
 						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
@@ -824,7 +875,9 @@ namespace
 						FLinearColor::White,
 						2.5f,
 						0,
-						FVector2D(0.5f, 8.0f / 48.0f),
+						FVector2D(
+							0.5f,
+							8.0f / (bCompactOperands ? 20.0f : 48.0f)),
 						FVector2D(0.5f, 24.0f / 32.0f)});
 				}
 				return Branch;
@@ -876,7 +929,12 @@ namespace
 				MoveTemp(Connections)};
 		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
-			Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted);
+			Tile,
+			Document,
+			OnSocketDragStarted,
+			OnInlineLiteralCommitted,
+			nullptr,
+			bCompactOperands);
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
 			TArray<FVerseGraphConnection> Connections;
@@ -915,10 +973,11 @@ namespace
 						continue;
 					}
 					FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
-						Tile.Children[ChildIndex],
-						Document,
-						OnSocketDragStarted,
-						OnInlineLiteralCommitted);
+					Tile.Children[ChildIndex],
+					Document,
+					OnSocketDragStarted,
+					OnInlineLiteralCommitted,
+					bCompactOperands);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
@@ -1005,6 +1064,10 @@ namespace
 			|| Tile.ExpressionKind == EVerseExpressionKind::Definition;
 		if (!bHasOperandLayout || Tile.Children.IsEmpty())
 		{
+			if (bCompactOperands)
+			{
+				return {RootTile, RootTile, {}};
+			}
 			return {
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
@@ -1040,14 +1103,22 @@ namespace
 				Presentation
 			];
 		}
+		TSharedRef<SWidget> OperandPresentation = OperandColumn;
+		if (!bCompactOperands)
+		{
+			OperandPresentation =
+				SNew(SBox)
+					.WidthOverride(OperandColumnWidth)
+					.HAlign(HAlign_Right)
+					[
+						OperandColumn
+					];
+		}
 		TSharedRef<SWidget> Subtree =
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 			[
-				SNew(SBox)
-				.WidthOverride(OperandColumnWidth)
-				.HAlign(HAlign_Right)
-				[ OperandColumn ]
+				OperandPresentation
 			]
 			+ SHorizontalBox::Slot().AutoWidth()
 			[

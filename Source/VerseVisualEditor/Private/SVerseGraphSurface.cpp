@@ -121,6 +121,83 @@ namespace
 				GetVerseFailureDecorationColor());
 		}
 	}
+
+	void PaintConnectionRecord(
+		const FVerseGraphConnection& Connection,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId)
+	{
+		const TSharedPtr<SWidget> Source = Connection.SourceAnchor.Pin();
+		const TSharedPtr<SWidget> Target = Connection.TargetAnchor.Pin();
+		if (!Source.IsValid() || !Target.IsValid())
+		{
+			return;
+		}
+		const FVersePaintPoint Start = AnchorPoint(
+			Source, Connection.SourceAnchorCoordinate);
+		const FVersePaintPoint End = AnchorPoint(
+			Target, Connection.TargetAnchorCoordinate);
+		DrawSpline(
+			OutDrawElements, LayerId, Start, End,
+			Connection.Axis, Connection.Thickness, Connection.Color);
+		if (Connection.Outcome == EVerseExpressionOutcome::FailableValue
+			|| Connection.Outcome == EVerseExpressionOutcome::FailureOnly)
+		{
+			DrawFailureMarkers(
+				OutDrawElements, LayerId, Start, End, Connection.Axis);
+		}
+		for (int32 Index = 0;
+			Index < Connection.ExtraBlankLineMarkers;
+			++Index)
+		{
+			const float Alpha = static_cast<float>(Index + 1)
+				/ static_cast<float>(Connection.ExtraBlankLineMarkers + 1);
+			const FVector2D Center =
+				FMath::Lerp(Start.Value, End.Value, Alpha);
+			TArray<FVector2f> Points({
+				FVector2f(Center - FVector2D(6.0f, 0.0f)),
+				FVector2f(Center + FVector2D(6.0f, 0.0f))});
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				LayerId,
+				FPaintGeometry(),
+				MoveTemp(Points),
+				ESlateDrawEffect::None,
+				Connection.Color,
+				true,
+				Connection.Thickness);
+		}
+	}
+}
+
+void SVerseGraphConnectionLayer::Construct(const FArguments& InArgs)
+{
+	Connections = InArgs._Connections;
+	SetCanTick(false);
+	SetVisibility(EVisibility::HitTestInvisible);
+}
+
+void SVerseGraphConnectionLayer::SetConnections(
+	TArray<FVerseGraphConnection> InConnections)
+{
+	Connections = MoveTemp(InConnections);
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+int32 SVerseGraphConnectionLayer::OnPaint(
+	const FPaintArgs& Args,
+	const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect,
+	FSlateWindowElementList& OutDrawElements,
+	int32 LayerId,
+	const FWidgetStyle& InWidgetStyle,
+	bool bParentEnabled) const
+{
+	for (const FVerseGraphConnection& Connection : Connections)
+	{
+		PaintConnectionRecord(Connection, OutDrawElements, LayerId);
+	}
+	return LayerId;
 }
 
 void SVerseGraphSurface::Construct(
@@ -334,7 +411,8 @@ int32 SVerseGraphSurface::OnPaint(
 		Args, AllottedGeometry, MyCullingRect, OutDrawElements,
 		LayerId + 3, InWidgetStyle, bParentEnabled);
 	OutDrawElements.PushClip(FSlateClippingZone(CanvasGeometry));
-	const int32 ConnectionLayer = PaintConnections(OutDrawElements, LayerId + 2);
+	const int32 ConnectionLayer =
+		PaintConnections(OutDrawElements, LayerId + 2);
 	OutDrawElements.PopClip();
 
 	int32 ResultLayer = FMath::Max(ContentLayer, ConnectionLayer);
@@ -373,37 +451,7 @@ void SVerseGraphSurface::PaintConnection(
 	FSlateWindowElementList& OutDrawElements,
 	int32 LayerId) const
 {
-	const TSharedPtr<SWidget> Source = Connection.SourceAnchor.Pin();
-	const TSharedPtr<SWidget> Target = Connection.TargetAnchor.Pin();
-	if (!Source.IsValid() || !Target.IsValid())
-	{
-		return;
-	}
-	const FVersePaintPoint Start = AnchorPoint(
-		Source, Connection.SourceAnchorCoordinate);
-	const FVersePaintPoint End = AnchorPoint(
-		Target, Connection.TargetAnchorCoordinate);
-	DrawSpline(
-		OutDrawElements, LayerId, Start, End,
-		Connection.Axis, Connection.Thickness, Connection.Color);
-	if (Connection.Outcome == EVerseExpressionOutcome::FailableValue
-		|| Connection.Outcome == EVerseExpressionOutcome::FailureOnly)
-	{
-		DrawFailureMarkers(
-			OutDrawElements, LayerId, Start, End, Connection.Axis);
-	}
-	for (int32 Index = 0; Index < Connection.ExtraBlankLineMarkers; ++Index)
-	{
-		const float Alpha = static_cast<float>(Index + 1)
-			/ static_cast<float>(Connection.ExtraBlankLineMarkers + 1);
-		const FVector2D Center = FMath::Lerp(Start.Value, End.Value, Alpha);
-		TArray<FVector2f> Points({
-			FVector2f(Center - FVector2D(6.0f, 0.0f)),
-			FVector2f(Center + FVector2D(6.0f, 0.0f))});
-		FSlateDrawElement::MakeLines(
-			OutDrawElements, LayerId, FPaintGeometry(), MoveTemp(Points),
-			ESlateDrawEffect::None, Connection.Color, true, Connection.Thickness);
-	}
+	PaintConnectionRecord(Connection, OutDrawElements, LayerId);
 }
 
 void SVerseGraphSurface::PaintPreviewConnection(
