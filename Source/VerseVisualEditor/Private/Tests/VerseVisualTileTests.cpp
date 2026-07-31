@@ -439,7 +439,7 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& GraphTiles[1].bHasExecutionInput
 			&& GraphTiles[1].bHasExecutionOutput
 			&& GraphTiles[1].bExecutionInputConnected
-			&& GraphTiles[1].bExecutionOutputConnected
+			&& !GraphTiles[1].bExecutionOutputConnected
 			&& GraphTiles[1].bImplicitReturnValue
 			&& GraphTiles[1].ValueInputs.Num() == 2
 			&& GraphTiles[1].ValueInputs[0].bConnected
@@ -787,6 +787,9 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				TEXT("Empty function graph omits the implicit return tile"),
 				EmptyGraph[0].Kind,
 				EVerseVisualTileKind::FunctionEntry);
+			TestFalse(
+				TEXT("Empty function entry has an unconnected execution output"),
+				EmptyGraph[0].bExecutionOutputConnected);
 		}
 	}
 

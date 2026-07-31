@@ -579,7 +579,10 @@ namespace
 					return Region.Kind == EVerseControlRegionKind::Else
 						&& Region.OperandCount > 0;
 				});
-			ExecutionOutputConnectedStates = {true, bHasTrueBody, bHasFalseBody};
+			ExecutionOutputConnectedStates = {
+				Tile.bExecutionOutputConnected,
+				bHasTrueBody,
+				bHasFalseBody};
 		}
 		return SNew(SVerseTile)
 			.Tile(Tile)

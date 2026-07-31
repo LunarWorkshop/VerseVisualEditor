@@ -295,8 +295,6 @@ namespace
 				FMath::Max(Descriptor.Range.BeginByte, Descriptor.Range.EndByte() - 1));
 			Tile.bHasExecutionInput = true;
 			Tile.bHasExecutionOutput = true;
-			Tile.bExecutionInputConnected = true;
-			Tile.bExecutionOutputConnected = true;
 			Tile.bImplicitReturnValue = bImplicitReturnValue;
 		}
 
@@ -504,6 +502,71 @@ namespace
 		}
 		return Tile;
 	}
+
+	void SetSequentialExecutionConnections(
+		TConstArrayView<FVerseVisualTile*> Sequence,
+		bool bHasIncomingConnection)
+	{
+		for (int32 Index = 0; Index < Sequence.Num(); ++Index)
+		{
+			FVerseVisualTile& Tile = *Sequence[Index];
+			Tile.bExecutionInputConnected = Tile.bHasExecutionInput
+				&& (Index > 0 || bHasIncomingConnection);
+			Tile.bExecutionOutputConnected = Tile.bHasExecutionOutput
+				&& Index + 1 < Sequence.Num();
+		}
+	}
+
+	void SetNestedExecutionConnections(FVerseVisualTile& Tile)
+	{
+		for (FVerseVisualTile& Child : Tile.Children)
+		{
+			SetNestedExecutionConnections(Child);
+		}
+
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			TArray<FVerseVisualTile*> Sequence;
+			Sequence.Reserve(Tile.Children.Num());
+			for (FVerseVisualTile& Child : Tile.Children)
+			{
+				if (Child.bHasExecutionInput || Child.bHasExecutionOutput)
+				{
+					Sequence.Add(&Child);
+				}
+			}
+			SetSequentialExecutionConnections(Sequence, Tile.bHasInternalExecutionEntry);
+			return;
+		}
+
+		if (Tile.ExpressionKind != EVerseExpressionKind::Control)
+		{
+			return;
+		}
+
+		for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
+			Tile.ControlRegions)
+		{
+			if (Region.Kind == EVerseControlRegionKind::Condition)
+			{
+				continue;
+			}
+
+			TArray<FVerseVisualTile*> Sequence;
+			Sequence.Reserve(Region.OperandCount);
+			for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+			{
+				const int32 ChildIndex = Region.FirstOperandIndex + Offset;
+				if (Tile.Children.IsValidIndex(ChildIndex)
+					&& (Tile.Children[ChildIndex].bHasExecutionInput
+						|| Tile.Children[ChildIndex].bHasExecutionOutput))
+				{
+					Sequence.Add(&Tile.Children[ChildIndex]);
+				}
+			}
+			SetSequentialExecutionConnections(Sequence, true);
+		}
+	}
 }
 
 TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(
@@ -536,7 +599,6 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 			FMath::Max(FunctionTile.HeaderRange.BeginByte, FunctionTile.HeaderRange.EndByte() - 1))
 		: FunctionTile.FirstSourceLine;
 	Entry.bHasExecutionOutput = true;
-	Entry.bExecutionOutputConnected = true;
 	Entry.EditableClause = FunctionTile.BodyClause;
 	Entry.ClauseItemIndex = INDEX_NONE;
 	for (const FVerseVisualFunctionParameter& Parameter : FunctionTile.FunctionParameters)
@@ -574,6 +636,22 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		}
 		GraphTiles.Add(MoveTemp(Expression));
 	}
+
+	for (FVerseVisualTile& Tile : GraphTiles)
+	{
+		SetNestedExecutionConnections(Tile);
+	}
+	TArray<FVerseVisualTile*> RootSequence;
+	RootSequence.Reserve(GraphTiles.Num());
+	for (FVerseVisualTile& Tile : GraphTiles)
+	{
+		if (Tile.bHasExecutionInput || Tile.bHasExecutionOutput)
+		{
+			RootSequence.Add(&Tile);
+		}
+	}
+	SetSequentialExecutionConnections(RootSequence, false);
+
 	if (FunctionTile.BodyClause.Items.IsEmpty() || !bHasReturnValue)
 	{
 		return GraphTiles;

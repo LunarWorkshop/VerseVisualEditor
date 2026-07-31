@@ -366,15 +366,21 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
+	TSharedPtr<SVerseTileExecutionPin> ExecutionInputPin;
 	if (Tile.bHasExecutionInput)
 	{
+		ExecutionInputPin =
+			SNew(SVerseTileExecutionPin)
+			.Input(true)
+			.Connected(Tile.bExecutionInputConnected);
+		ExecutionInputAnchor = ExecutionInputPin;
 		TileWithExecution->AddSlot()
 		.AutoHeight()
 		.HAlign(HAlign_Left)
 		[
-			SAssignNew(ExecutionInputAnchor, SVerseTileExecutionPin)
-			.Input(true)
-			.Connected(Tile.bExecutionInputConnected)
+			SNew(SBox)
+			.WidthOverride(48.0f)
+			.HeightOverride(32.0f)
 		];
 	}
 	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
@@ -718,7 +724,27 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	[
 		TileAndOutput
 	];
-	ChildSlot[TileWithExecution];
+	if (ExecutionInputPin.IsValid())
+	{
+		ChildSlot
+		[
+			SNew(SOverlay)
+			+ SOverlay::Slot()
+			[
+				TileWithExecution
+			]
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Left)
+			.VAlign(VAlign_Top)
+			[
+				ExecutionInputPin.ToSharedRef()
+			]
+		];
+	}
+	else
+	{
+		ChildSlot[TileWithExecution];
+	}
 }
 
 float SVerseTile::GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const
