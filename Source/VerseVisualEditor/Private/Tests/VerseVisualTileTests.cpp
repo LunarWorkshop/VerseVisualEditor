@@ -790,6 +790,22 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	const FVerseVisualTile* VoidFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("ControlLoop"));
+	if (TestNotNull(TEXT("Non-empty void function visual definition exists"), VoidFunction))
+	{
+		const TArray<FVerseVisualTile> VoidGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*VoidFunction, Snapshot);
+		TestFalse(
+			TEXT("Non-empty void function graph omits the implicit return tile"),
+			VoidGraph.ContainsByPredicate([](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == EVerseVisualTileKind::FunctionReturn;
+			}));
+	}
+
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(*Function, Snapshot);
 	const FVerseTileProperty* Access = Properties.FindByPredicate([](const FVerseTileProperty& Property)
 	{

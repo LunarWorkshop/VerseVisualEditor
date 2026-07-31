@@ -574,7 +574,7 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		}
 		GraphTiles.Add(MoveTemp(Expression));
 	}
-	if (FunctionTile.BodyClause.Items.IsEmpty())
+	if (FunctionTile.BodyClause.Items.IsEmpty() || !bHasReturnValue)
 	{
 		return GraphTiles;
 	}
