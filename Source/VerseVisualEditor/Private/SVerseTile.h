@@ -85,6 +85,14 @@ public:
 	{
 		return InternalExecutionEntryAnchor;
 	}
+	TSharedPtr<SWidget> GetFailureContextInputAnchor() const
+	{
+		return FailureContextInputAnchor;
+	}
+	TSharedPtr<SWidget> GetFailureContextOutputAnchor() const
+	{
+		return FailureContextOutputAnchor;
+	}
 	TSharedPtr<SWidget> GetExecutionOutputAnchor(int32 Index = 0) const
 	{
 		return ExecutionOutputAnchors.IsValidIndex(Index)
@@ -135,6 +143,8 @@ private:
 	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
 	TSharedPtr<SWidget> ExecutionInputAnchor;
 	TSharedPtr<SWidget> InternalExecutionEntryAnchor;
+	TSharedPtr<SWidget> FailureContextInputAnchor;
+	TSharedPtr<SWidget> FailureContextOutputAnchor;
 	TArray<TSharedPtr<SWidget>> ExecutionOutputAnchors;
 	TSharedPtr<SWidget> OperatorLineWidget;
 	TSharedPtr<SWidget> HeaderSocketRow;

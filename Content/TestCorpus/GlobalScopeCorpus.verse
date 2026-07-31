@@ -32,10 +32,13 @@ CorpusEnumOne := enum { First, Second }
 CorpusEnumTwo := enum { Alpha, Beta }
 
 MapRangeUnclamped(Value: float, InLow: float, InHigh: float, OutLow: float, OutHigh: float) : float =
-    Denom: float = InHigh - InLow;
-    if (Denom = 0.0):
-        return OutLow;
-    OutLow + (OutHigh - OutLow) * ((Value - InLow) / Denom);
+    if:
+        Denom: float = InHigh - InLow
+        Denom <> 0.0
+    then:
+        OutLow + (OutHigh - OutLow) * ((Value - InLow) / Denom)
+    else:
+        OutLow
 
 CorpusFunctionEmpty() : void = {
 }
@@ -90,6 +93,14 @@ CorpusFunctionCall(Input : int)<computes> : int =
 CorpusFunctionIf(Input : int)<computes> : float =
     if (Input >= 1):
         return 42.0
+    69.0
+
+CorpusFunctionIfWithDefinitions(Input : int)<computes> : float =
+    if:
+        Variable: float = 42.0
+        Input >= 1
+    then:
+        return Variable
     69.0
 
 CorpusFunctionFor(Input : int)<computes><reads><allocates><writes> : int =

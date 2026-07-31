@@ -269,10 +269,10 @@ namespace
 				AllottedGeometry.ToPaintGeometry(),
 				&WhiteBrush,
 				ESlateDrawEffect::None,
-				FLinearColor(0.055f, 0.045f, 0.012f, 1.0f) * WidgetTint);
+				FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14"))) * WidgetTint);
 
 			const FLinearColor PatternColor =
-				FLinearColor(0.32f, 0.25f, 0.035f, 1.0f) * WidgetTint;
+				FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b"))) * WidgetTint;
 			for (const FVerseFailablePatternSegment& Segment :
 				BuildVerseFailablePatternSegments(AllottedGeometry.GetLocalSize()))
 			{
@@ -343,6 +343,9 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	}
 	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.OperatorRange.IsSet();
+	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Control
+		&& Tile.ControlKind == EVerseControlKind::If;
 	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
 	TSharedRef<SWidget> BodyContent = InArgs._BodyContent.Widget;
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
@@ -364,7 +367,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		}
 		FailureChain->AddSlot()
 		.AutoHeight()
-		.Padding(20.0f)
+		.Padding(FMargin(20.0f, 20.0f, 20.0f, 28.0f))
 		[
 			BodyContent
 		];
@@ -380,6 +383,30 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				FailureChain
 			]
 		];
+	}
+	TSharedRef<SWidget> FailureContextInputWidget = SNullWidget::NullWidget;
+	if (bIfTile)
+	{
+		const TSharedRef<SVerseFailableValuePin> Pin =
+			SNew(SVerseFailableValuePin)
+				.Color(GetVerseFailureDecorationColor())
+				.Connected(true)
+				.Visibility(EVisibility::HitTestInvisible)
+				.RenderTransform(FSlateRenderTransform(FVector2D(-5.5f, 0.0f)));
+		FailureContextInputAnchor = Pin;
+		FailureContextInputWidget = Pin;
+	}
+	TSharedRef<SWidget> FailureContextOutputWidget = SNullWidget::NullWidget;
+	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	{
+		const TSharedRef<SVerseFailableValuePin> Pin =
+			SNew(SVerseFailableValuePin)
+				.Color(GetVerseFailureDecorationColor())
+				.Connected(true)
+				.Visibility(EVisibility::HitTestInvisible)
+				.RenderTransform(FSlateRenderTransform(FVector2D(5.5f, 0.0f)));
+		FailureContextOutputAnchor = Pin;
+		FailureContextOutputWidget = Pin;
 	}
 
 	TSharedRef<SBorder> TileSurface =
@@ -419,6 +446,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.AutoWidth()
 					.VAlign(VAlign_Center)
 					[
+						FailureContextInputWidget
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
 						BuildSocketColumn(Tile.ValueInputs, false)
 					]
 					+ SHorizontalBox::Slot()
@@ -451,6 +484,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.VAlign(VAlign_Center)
 					[
 						BuildSocketColumn(Tile.ValueOutputs, true)
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						FailureContextOutputWidget
 					]
 					]
 				]
@@ -963,7 +1002,7 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Definition: return FText::FromName(Tile.DefinitionKind);
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::FailableBlock:
-		return FText::GetEmpty();
+		return LOCTEXT("FailableBlockConditionKind", "Condition");
 	case EVerseVisualTileKind::Expression:
 		if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)
 		{

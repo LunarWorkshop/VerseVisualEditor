@@ -755,6 +755,10 @@ namespace
 				}
 			}
 			ConnectionLayer->SetConnections(MoveTemp(Connections));
+			if (bCompactOperands)
+			{
+				return {BlockTile, BlockTile, {}};
+			}
 			return {
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
@@ -773,6 +777,7 @@ namespace
 		{
 			TArray<FVerseGraphConnection> Connections;
 			TSharedRef<SWidget> PredicatePresentation = SNullWidget::NullWidget;
+			TSharedPtr<SVerseTile> PredicateTile;
 			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
 				Tile.ControlRegions.FindByPredicate(
 					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
@@ -788,33 +793,37 @@ namespace
 					Document,
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
-					bCompactOperands);
-				PredicatePresentation = PredicateRow.RootTile;
+					true);
+				PredicatePresentation = PredicateRow.Widget;
+				PredicateTile = PredicateRow.RootTile;
 				Connections.Append(PredicateRow.Connections);
 			}
-			PredicatePresentation =
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(14.0f, 10.0f, 14.0f, 5.0f)
-				[
-					SNew(STextBlock)
-						.Text(LOCTEXT("IfConditionLabel", "Condition"))
-						.TextStyle(FAppStyle::Get(), "Graph.Node.PinName")
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(14.0f, 0.0f, 14.0f, 14.0f)
-				[
-					PredicatePresentation
-				];
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 				Tile,
 				Document,
 				OnSocketDragStarted,
 				OnInlineLiteralCommitted,
-				PredicatePresentation,
+				nullptr,
 				bCompactOperands);
+			if (PredicateTile.IsValid())
+			{
+				const TSharedPtr<SWidget> Source =
+					PredicateTile->GetFailureContextOutputAnchor();
+				const TSharedPtr<SWidget> Target =
+					RootTile->GetFailureContextInputAnchor();
+				if (Source.IsValid() && Target.IsValid())
+				{
+					Connections.Add({
+						Source,
+						Target,
+						EVerseGraphConnectionAxis::Horizontal,
+						GetVerseFailureDecorationColor(),
+						2.5f,
+						0});
+					Connections.Last().Outcome =
+						EVerseExpressionOutcome::FailureOnly;
+				}
+			}
 
 			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind, int32 OutputIndex)
 			{
@@ -887,8 +896,12 @@ namespace
 				BuildExecutionBranch(EVerseControlRegionKind::Body, 1);
 			const TSharedRef<SVerticalBox> FalseBranch =
 				BuildExecutionBranch(EVerseControlRegionKind::Else, 2);
+			PredicatePresentation->SlatePrepass();
 			RootTile->SlatePrepass();
-			const float ExecutionSpineOffset = OperandColumnWidth + OperandWireSpace;
+			const float PredicateColumnWidth = FMath::Max(
+				OperandColumnWidth,
+				PredicatePresentation->GetDesiredSize().X);
+			const float ExecutionSpineOffset = PredicateColumnWidth + OperandWireSpace;
 			const float BranchLeftPadding =
 				ExecutionSpineOffset + RootTile->GetDesiredSize().X + 24.0f;
 			return {
@@ -896,9 +909,20 @@ namespace
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth()
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
 					[
-						SNew(SBox).WidthOverride(ExecutionSpineOffset)
+						SNew(SBox)
+							.MinDesiredWidth(OperandColumnWidth)
+							.HAlign(HAlign_Right)
+							[
+								PredicatePresentation
+							]
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SNew(SBox).WidthOverride(OperandWireSpace)
 					]
 					+ SHorizontalBox::Slot().AutoWidth()
 					[
