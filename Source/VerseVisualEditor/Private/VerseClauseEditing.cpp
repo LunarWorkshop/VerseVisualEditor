@@ -115,6 +115,111 @@ namespace
 		return nullptr;
 	}
 
+	FString TileKindName(EVerseVisualTileKind Kind)
+	{
+		const UEnum* Enum = StaticEnum<EVerseVisualTileKind>();
+		return Enum != nullptr
+			? Enum->GetNameStringByValue(static_cast<int64>(Kind))
+			: TEXT("Unrecognized Tile Kind");
+	}
+
+	FString SourceSubstringInRange(
+		FUtf8StringView Source,
+		FVerseByteRange Range,
+		int32 MaxCharacters)
+	{
+		if (!Range.IsSet()
+			|| Range.BeginByte < 0
+			|| Range.EndByte() > Source.Len())
+		{
+			return TEXT("<range is outside candidate source>");
+		}
+		const FUtf8StringView Substring = Source.Mid(Range.BeginByte, Range.NumBytes);
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Substring.GetData()),
+			Substring.Len());
+		FString Result(Converted.Length(), Converted.Get());
+		Result.LeftInline(MaxCharacters);
+		Result.ReplaceInline(TEXT("\r"), TEXT("\\r"));
+		Result.ReplaceInline(TEXT("\n"), TEXT("\\n"));
+		Result.ReplaceInline(TEXT("\t"), TEXT("\\t"));
+		return Result;
+	}
+
+	void AppendBodyClauseSearchTiles(
+		FString& Out,
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FUtf8StringView CandidateSource)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			Out += FString::Printf(
+				TEXT("\n%s: bodyRange=[%d,%d) text=\"%s\""),
+				*TileKindName(Tile.Kind),
+				Tile.BodyClause.InteriorRange.BeginByte,
+				Tile.BodyClause.InteriorRange.EndByte(),
+				*SourceSubstringInRange(
+					CandidateSource,
+					Tile.BodyClause.InteriorRange,
+					40));
+			AppendBodyClauseSearchTiles(Out, Tile.Children, CandidateSource);
+		}
+	}
+
+	void AppendRegionSearchTiles(
+		FString& Out,
+		TConstArrayView<FVerseVisualTile> Tiles,
+		int32 Depth)
+	{
+		for (int32 Index = 0; Index < Tiles.Num(); ++Index)
+		{
+			const FVerseVisualTile& Tile = Tiles[Index];
+			Out += FString::Printf(
+				TEXT("\n%stile[%d]: kind=%d controlKind=%d range=[%d,%d) regions=%d"),
+				*FString::ChrN(Depth * 2, TEXT(' ')),
+				Index,
+				static_cast<int32>(Tile.Kind),
+				static_cast<int32>(Tile.ControlKind),
+				Tile.Range.BeginByte,
+				Tile.Range.EndByte(),
+				Tile.ControlRegions.Num());
+			for (int32 RegionIndex = 0; RegionIndex < Tile.ControlRegions.Num(); ++RegionIndex)
+			{
+				const FVerseVisualExpressionDescriptor::FControlRegion& Region =
+					Tile.ControlRegions[RegionIndex];
+				const int32 RegionOpening = Region.OpeningPunctuationRange.IsSet()
+					? Region.OpeningPunctuationRange.BeginByte
+					: Region.InteriorRange.BeginByte;
+				Out += FString::Printf(
+					TEXT("\n%s  region[%d]: kind=%d opening=%d items=%d"),
+					*FString::ChrN(Depth * 2, TEXT(' ')),
+					RegionIndex,
+					static_cast<int32>(Region.Kind),
+					RegionOpening,
+					Region.Items.Num());
+			}
+			AppendRegionSearchTiles(Out, Tile.Children, Depth + 1);
+		}
+	}
+
+	FString SourceSubstringAt(FUtf8StringView Source, int32 BeginByte)
+	{
+		if (BeginByte < 0 || BeginByte > Source.Len())
+		{
+			return TEXT("<opening byte is outside candidate source>");
+		}
+		const FUtf8StringView Substring = Source.Mid(BeginByte);
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Substring.GetData()),
+			Substring.Len());
+		FString Result(Converted.Length(), Converted.Get());
+		Result.LeftInline(40);
+		Result.ReplaceInline(TEXT("\r"), TEXT("\\r"));
+		Result.ReplaceInline(TEXT("\n"), TEXT("\\n"));
+		Result.ReplaceInline(TEXT("\t"), TEXT("\\t"));
+		return Result;
+	}
+
 	bool ValidateCandidate(
 		const FVerseDocumentSession& Session,
 		const FVerseVisualClauseDescriptor& Clause,
@@ -141,29 +246,72 @@ namespace
 		const int32 OpeningByte = Clause.OpeningPunctuationRange.IsSet()
 			? Clause.OpeningPunctuationRange.BeginByte
 			: Clause.InteriorRange.BeginByte;
-		if (const FVerseVisualClauseDescriptor* BodyClause =
-			FindBodyClause(Tiles, OpeningByte))
+		const FVerseVisualClauseDescriptor* MatchedBodyClause =
+			FindBodyClause(Tiles, OpeningByte);
+		if (MatchedBodyClause != nullptr)
 		{
-			if (BodyClause->Items.Num() == ExpectedItemCount)
+			if (MatchedBodyClause->Items.Num() == ExpectedItemCount)
 			{
 				return true;
 			}
 		}
 		const TArray<FVerseFunctionNavigationItem> Functions =
 			FVerseFunctionNavigationBuilder::Build(Tiles, Snapshot);
+		const FVerseVisualExpressionDescriptor::FControlRegion* MatchedRegion = nullptr;
 		for (const FVerseFunctionNavigationItem& Function : Functions)
 		{
 			if (const auto* Region = FindRegion(Function.GraphTiles, OpeningByte))
 			{
+				MatchedRegion = Region;
 				if (Region->Items.Num() == ExpectedItemCount)
 				{
 					return true;
 				}
 			}
 		}
-		OutError = LOCTEXT(
-			"ClauseEditRejected",
-			"The edit would not produce a valid ordered Verse clause.");
+
+		if (MatchedBodyClause == nullptr && MatchedRegion == nullptr)
+		{
+			FString Message = FString::Printf(
+				TEXT("The edit was rejected because the edited Verse clause could not be found after reparsing the proposed source.\nCandidate source: \"%s\"\nSearch for byte %d in the following body-clause tiles:"),
+				*SourceSubstringAt(FUtf8StringView(*Candidate, Candidate.Len()), OpeningByte),
+				OpeningByte);
+			AppendBodyClauseSearchTiles(
+				Message,
+				Tiles,
+				FUtf8StringView(*Candidate, Candidate.Len()));
+			Message += TEXT("\nFunctions searched for a matching control region:");
+			if (Functions.IsEmpty())
+			{
+				Message += TEXT("\n<none>");
+			}
+			for (int32 FunctionIndex = 0; FunctionIndex < Functions.Num(); ++FunctionIndex)
+			{
+				const FVerseFunctionNavigationItem& Function = Functions[FunctionIndex];
+				Message += FString::Printf(
+					TEXT("\nfunction[%d]: scope=%s name=%s range=[%d,%d) graphTiles=%d"),
+					FunctionIndex,
+					*FString::Join(Function.ScopePath, TEXT(".")),
+					*Function.Name,
+					Function.FunctionRange.BeginByte,
+					Function.FunctionRange.EndByte(),
+					Function.GraphTiles.Num());
+				AppendRegionSearchTiles(Message, Function.GraphTiles, 1);
+			}
+			OutError = FText::FromString(MoveTemp(Message));
+			return false;
+		}
+
+		const int32 ActualItemCount = MatchedBodyClause != nullptr
+			? MatchedBodyClause->Items.Num()
+			: MatchedRegion->Items.Num();
+		OutError = FText::Format(
+			LOCTEXT(
+				"ClauseItemCountMismatch",
+				"The edit was rejected because the edited Verse clause had {0} ordered items before the edit, {1} afterward, and was expected to have {2}."),
+			FText::AsNumber(Clause.Items.Num()),
+			FText::AsNumber(ActualItemCount),
+			FText::AsNumber(ExpectedItemCount));
 		return false;
 	}
 

@@ -84,6 +84,31 @@ namespace VerseParseSnapshotBuilder
 		return Node;
 	}
 
+	const Verse::Vst::Clause* FindPunctuatedClauseThroughSingleChildWrappers(
+		const Verse::Vst::Node* Node)
+	{
+		while (Node != nullptr)
+		{
+			if (const Verse::Vst::Clause* Clause =
+				Node->AsNullable<Verse::Vst::Clause>())
+			{
+				if (Clause->GetPunctuation()
+					!= Verse::Vst::Clause::EPunctuation::Unknown)
+				{
+					return Clause;
+				}
+			}
+			if ((!Node->IsA<Verse::Vst::Clause>()
+					&& !Node->IsA<Verse::Vst::Parens>())
+				|| Node->GetChildCount() != 1)
+			{
+				return nullptr;
+			}
+			Node = Node->GetChildren()[0].Get();
+		}
+		return nullptr;
+	}
+
 	EVerseCommentKind ToCommentKind(Verse::Vst::Comment::EType Type)
 	{
 		switch (Type)
@@ -1327,8 +1352,20 @@ namespace VerseParseSnapshotBuilder
 		{
 			return Left.BeginByte < Right.BeginByte;
 		});
+		const Verse::Vst::Clause* FunctionBodyClause =
+			SyntaxKind == VerseSyntaxKind::Function
+				? FindPunctuatedClauseThroughSingleChildWrappers(&RightOperand)
+				: nullptr;
 		const Verse::Vst::Node* UnwrappedRight = UnwrapSingleClause(&RightOperand);
-		if (const Verse::Vst::Macro* Macro = UnwrappedRight != nullptr
+		if (FunctionBodyClause != nullptr)
+		{
+			OutRegion.BodyClause = MakeClauseDescriptor(
+				*FunctionBodyClause,
+				DefinitionRange,
+				SourceIndex);
+			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+		}
+		else if (const Verse::Vst::Macro* Macro = UnwrappedRight != nullptr
 			? UnwrappedRight->AsNullable<Verse::Vst::Macro>()
 			: nullptr;
 			Macro != nullptr
@@ -1340,6 +1377,16 @@ namespace VerseParseSnapshotBuilder
 			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
 			OutRegion.Children = BuildClauseChildren(BodyClause, OutRegion.BodyClause, SourceIndex);
 		}
+		else if (const Verse::Vst::Clause* BodyClause = UnwrappedRight != nullptr
+			? UnwrappedRight->AsNullable<Verse::Vst::Clause>()
+			: nullptr)
+		{
+			OutRegion.BodyClause = MakeClauseDescriptor(
+				*BodyClause,
+				DefinitionRange,
+				SourceIndex);
+			OutRegion.BodyRange = OutRegion.BodyClause.InteriorRange;
+		}
 		else if (UnwrappedRight != nullptr)
 		{
 			OutRegion.BodyClause = MakeExpressionDescriptor(*UnwrappedRight, SourceIndex);
@@ -1348,9 +1395,12 @@ namespace VerseParseSnapshotBuilder
 		if (SyntaxKind == VerseSyntaxKind::Function && OutRegion.BodyRange.IsSet())
 		{
 			PopulateFunctionMetadata(*NameOperand, RightOperand, SourceIndex, OutRegion);
-			if (UnwrappedRight != nullptr)
+			const Verse::Vst::Node* FunctionItemsRoot = FunctionBodyClause != nullptr
+				? static_cast<const Verse::Vst::Node*>(FunctionBodyClause)
+				: UnwrappedRight;
+			if (FunctionItemsRoot != nullptr)
 			{
-				BuildFunctionClauseItems(*UnwrappedRight, SourceIndex, OutRegion);
+				BuildFunctionClauseItems(*FunctionItemsRoot, SourceIndex, OutRegion);
 			}
 			FVerseSourceRegion& RawBody = OutRegion.Children.AddDefaulted_GetRef();
 			RawBody.Range = OutRegion.BodyRange;

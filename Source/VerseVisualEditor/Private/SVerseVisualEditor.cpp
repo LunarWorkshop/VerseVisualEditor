@@ -60,6 +60,7 @@
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
@@ -1624,8 +1625,9 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 								SNew(SScrollBox)
 								+ SScrollBox::Slot()
 								[
-									SNew(STextBlock)
+									SNew(SMultiLineEditableText)
 									.Text(this, &SVerseVisualEditor::GetLocalCompileDiagnosticsText)
+									.IsReadOnly(true)
 									.AutoWrapText(true)
 								]
 							]

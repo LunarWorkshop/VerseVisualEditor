@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "VerseDocumentRevision.h"
 #include "VerseParseSnapshot.h"
+#include "VerseVisualTile.generated.h"
 
 class FVerseSemanticSnapshot;
 namespace uLang
@@ -12,6 +13,7 @@ namespace uLang
 	class CScope;
 }
 
+UENUM()
 enum class EVerseVisualTileKind : uint8
 {
 	Definition,
