@@ -6,11 +6,13 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "Interfaces/IMainFrameModule.h"
+#include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
 #include "SVerseVisualEditor.h"
 #include "Styling/AppStyle.h"
 #include "Textures/SlateIcon.h"
 #include "ToolMenus.h"
+#include "VerseVisualEditorLifetimeDiagnostics.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
@@ -50,6 +52,12 @@ public:
 
 void FVerseVisualEditorModule::StartupModule()
 {
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("PluginModule"));
+	EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
+		this,
+		&FVerseVisualEditorModule::HandleEnginePreExit);
 	FVerseVisualEditorCommands::Register();
 	UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FVerseVisualEditorModule::RegisterMenus));
@@ -65,6 +73,10 @@ void FVerseVisualEditorModule::StartupModule()
 
 void FVerseVisualEditorModule::ShutdownModule()
 {
+	VerseVisualEditorLifetimeDiagnostics::Dump(
+		TEXT("VerseVisualEditor module shutdown begin"));
+	FCoreDelegates::OnEnginePreExit.Remove(EnginePreExitHandle);
+	EnginePreExitHandle.Reset();
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
 	FVerseVisualEditorCommands::Unregister();
@@ -74,6 +86,17 @@ void FVerseVisualEditorModule::ShutdownModule()
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(VerseVisualEditorModule::MainTabId);
 	}
+	VerseVisualEditorLifetimeDiagnostics::Dump(
+		TEXT("VerseVisualEditor module shutdown end"));
+	VerseVisualEditorLifetimeDiagnostics::Untrack(
+		this,
+		TEXT("PluginModule"));
+}
+
+void FVerseVisualEditorModule::HandleEnginePreExit()
+{
+	VerseVisualEditorLifetimeDiagnostics::Dump(
+		TEXT("FCoreDelegates::OnEnginePreExit"));
 }
 
 void FVerseVisualEditorModule::RegisterMenus()

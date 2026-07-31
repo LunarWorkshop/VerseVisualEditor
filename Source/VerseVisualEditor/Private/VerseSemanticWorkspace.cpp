@@ -1,5 +1,7 @@
 #include "VerseSemanticWorkspace.h"
 
+#include "VerseVisualEditorLifetimeDiagnostics.h"
+#include "Misc/ScopeExit.h"
 #include "Algo/AllOf.h"
 #include "Internationalization/Text.h"
 #include "ISolarisIde.h"
@@ -240,6 +242,20 @@ bool FVerseSemanticDiagnostic::AppliesToFile(const FString& CandidateFilePath) c
 		|| MakeNormalizedPathKey(FilePath) == MakeNormalizedPathKey(CandidateFilePath);
 }
 
+FVerseSemanticSnapshot::FVerseSemanticSnapshot()
+{
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("SemanticSnapshot"));
+}
+
+FVerseSemanticSnapshot::~FVerseSemanticSnapshot()
+{
+	VerseVisualEditorLifetimeDiagnostics::Untrack(
+		this,
+		TEXT("SemanticSnapshot"));
+}
+
 FString FVerseSemanticSnapshot::MakeDocumentKey(const FString& FilePath)
 {
 	return MakeNormalizedPathKey(FilePath);
@@ -252,6 +268,15 @@ void FVerseSemanticSnapshot::AddDocuments(
 	{
 		DocumentRevisions.Add(MakeDocumentKey(Document.FilePath), Document.Revision);
 	}
+	const FString Label = FString::Printf(
+		TEXT("documents=%d program=%p vst=%p"),
+		DocumentRevisions.Num(),
+		Program.Get(),
+		ProjectVst.Get());
+	VerseVisualEditorLifetimeDiagnostics::Update(
+		this,
+		TEXT("SemanticSnapshot"),
+		*Label);
 }
 
 bool FVerseSemanticSnapshot::Describes(
@@ -286,6 +311,10 @@ TSharedRef<FVerseSemanticSnapshot> FVerseSemanticSnapshot::CreateForTesting(
 FVerseSemanticWorkspace::FVerseSemanticWorkspace(double InDebounceSeconds)
 	: DebounceSeconds(InDebounceSeconds)
 {
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("SemanticWorkspace"),
+		TEXT("default analyzer"));
 }
 
 FVerseSemanticWorkspace::FVerseSemanticWorkspace(
@@ -294,6 +323,49 @@ FVerseSemanticWorkspace::FVerseSemanticWorkspace(
 	: AnalysisFunction(MoveTemp(InAnalysisFunction))
 	, DebounceSeconds(InDebounceSeconds)
 {
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("SemanticWorkspace"),
+		TEXT("injected analyzer"));
+}
+
+FVerseSemanticWorkspace::~FVerseSemanticWorkspace()
+{
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("SemanticWorkspace.Destroy.Begin"),
+		this,
+		PrivateIde.Get());
+	const auto ReportSnapshot =
+		[this](
+			const TCHAR* Slot,
+			const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot)
+		{
+			if (!Snapshot.IsValid())
+			{
+				return;
+			}
+			const FString Label = FString::Printf(
+				TEXT("workspace-slot=%s shared-refs=%d"),
+				Slot,
+				Snapshot.GetSharedReferenceCount());
+			VerseVisualEditorLifetimeDiagnostics::Update(
+				Snapshot.Get(),
+				TEXT("SemanticSnapshot"),
+				*Label);
+		};
+	ReportSnapshot(TEXT("CompiledBaseline"), CompiledBaseline);
+	ReportSnapshot(TEXT("DiscoverySnapshot"), DiscoverySnapshot);
+	ReportSnapshot(TEXT("LastSuccessfulSnapshot"), LastSuccessfulSnapshot);
+	ReportSnapshot(TEXT("MutationSnapshot"), MutationSnapshot);
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("SemanticWorkspace.PrivateProject"),
+		this,
+		PrivateProject.Get());
+	VerseVisualEditorLifetimeDiagnostics::Dump(
+		TEXT("SemanticWorkspace destructor body"));
+	VerseVisualEditorLifetimeDiagnostics::Untrack(
+		this,
+		TEXT("SemanticWorkspace"));
 }
 
 void FVerseSemanticWorkspace::RequestAnalysis(
@@ -510,8 +582,15 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 	TSet<FString>& OutInMemoryDocumentKeys,
 	TArray<FVerseSemanticDiagnostic>& OutDiagnostics)
 {
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateEnvironment.Reset.Begin"),
+		this,
+		PrivateIde.Get());
 	PrivateIde.Reset();
 	PrivateProject.Reset();
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateEnvironment.Reset.End"),
+		this);
 	OutInMemoryDocumentKeys.Reset();
 	if (!ISolarisLoadCompilerModule::IsLoaded())
 	{
@@ -563,6 +642,10 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 	Config.Flags = ESolIdeFlags::WithNoBackend;
 	PrivateIde = ISolarisModule::Get().MakeDevEnvironment(Config);
 	PrivateProject = IndependentProject.GetValue();
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateEnvironment.Created"),
+		this,
+		PrivateIde.Get());
 	if (!PrivateIde->SetSourceProject(PrivateProject.ToSharedRef()))
 	{
 		OutDiagnostics.Add(MakeDiagnostic(
@@ -578,6 +661,17 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironment(
 	TConstArrayView<FVerseSemanticDocumentInput> Documents)
 {
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateAnalysis.Begin"),
+		this,
+		PrivateIde.Get());
+	ON_SCOPE_EXIT
+	{
+		VerseVisualEditorLifetimeDiagnostics::Event(
+			TEXT("PrivateAnalysis.End"),
+			this,
+			PrivateIde.Get());
+	};
 	FVerseSemanticAnalysisResult Result;
 	TSet<FString> InMemoryDocumentKeys;
 	if (!RebuildPrivateEnvironment(Documents, InMemoryDocumentKeys, Result.Diagnostics))
@@ -627,6 +721,10 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 	BuildParams._bGenerateCode = false;
 	const uLang::SBuildResults BuildResults =
 		BuildManager->Build(BuildParams, CompilerDiagnostics);
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateAnalysis.BuildComplete"),
+		this,
+		BuildManager.Get());
 	for (const uLang::TSRef<uLang::SGlitch>& Glitch : CompilerDiagnostics->GetGlitches())
 	{
 		Result.Diagnostics.Add(MakeDiagnostic(
@@ -668,6 +766,10 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 		return Result;
 	}
 	Result.bSucceeded = true;
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("PrivateAnalysis.Success"),
+		this,
+		Result.Snapshot.Get());
 	return Result;
 }
 

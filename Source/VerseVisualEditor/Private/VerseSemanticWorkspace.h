@@ -44,6 +44,9 @@ struct FVerseSemanticDiagnostic
 class FVerseSemanticSnapshot
 {
 public:
+	FVerseSemanticSnapshot();
+	~FVerseSemanticSnapshot();
+
 	bool Describes(const FString& FilePath, FVerseDocumentRevision Revision) const;
 	const uLang::TSPtr<uLang::CSemanticProgram>& GetProgram() const { return Program; }
 	const Verse::Vst::TNodePtr<Verse::Vst::Project>& GetProjectVst() const { return ProjectVst; }
@@ -91,6 +94,7 @@ public:
 
 	explicit FVerseSemanticWorkspace(double InDebounceSeconds = 0.25);
 	FVerseSemanticWorkspace(FAnalysisFunction InAnalysisFunction, double InDebounceSeconds);
+	~FVerseSemanticWorkspace();
 
 	void RequestAnalysis(
 		TArray<FVerseSemanticDocumentInput> Documents,

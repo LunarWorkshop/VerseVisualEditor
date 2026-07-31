@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Delegates/Delegate.h"
 #include "Modules/ModuleInterface.h"
 
 class FSpawnTabArgs;
@@ -14,7 +15,9 @@ public:
 
 private:
 	void RegisterMenus();
+	void HandleEnginePreExit();
 	TSharedRef<SDockTab> SpawnVerseVisualEditorTab(const FSpawnTabArgs& Args);
 
 	TSharedPtr<FTabManager> VerseEditorTabManager;
+	FDelegateHandle EnginePreExitHandle;
 };

@@ -14,6 +14,7 @@ class FVerseDocumentSession
 {
 public:
 	explicit FVerseDocumentSession(TSharedRef<const FVerseDocument> InOriginalDocument);
+	~FVerseDocumentSession();
 
 	bool Replace(FVerseTextRange Range, FUtf8StringView Replacement, FText& OutError);
 	void Reload(TSharedRef<const FVerseDocument> InDocument);

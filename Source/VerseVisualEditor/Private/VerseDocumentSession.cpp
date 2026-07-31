@@ -5,6 +5,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseVisualEditorLifetimeDiagnostics.h"
 
 #define LOCTEXT_NAMESPACE "VerseDocumentSession"
 
@@ -13,8 +14,22 @@ FVerseDocumentSession::FVerseDocumentSession(TSharedRef<const FVerseDocument> In
 	, EditBuffer(OriginalDocument)
 	, CurrentSourceDocument(OriginalDocument)
 {
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("DocumentSession"));
 	ParseSnapshot.Emplace(FVerseParseSnapshotBuilder::Build(CurrentSourceDocument.ToSharedRef()));
 	Tiles = FVerseVisualTileBuilder::Build(ParseSnapshot.GetValue(), Revision);
+}
+
+FVerseDocumentSession::~FVerseDocumentSession()
+{
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("DocumentSession.Destroy"),
+		this,
+		CurrentSourceDocument.Get());
+	VerseVisualEditorLifetimeDiagnostics::Untrack(
+		this,
+		TEXT("DocumentSession"));
 }
 
 bool FVerseDocumentSession::Replace(

@@ -45,6 +45,7 @@
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
 #include "VerseVisualEditorSettings.h"
+#include "VerseVisualEditorLifetimeDiagnostics.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
@@ -81,6 +82,20 @@ struct FOpenVerseFunctionTab
 
 struct FOpenVerseDocument
 {
+	FOpenVerseDocument()
+	{
+		VerseVisualEditorLifetimeDiagnostics::Track(
+			this,
+			TEXT("OpenDocument"));
+	}
+
+	~FOpenVerseDocument()
+	{
+		VerseVisualEditorLifetimeDiagnostics::Untrack(
+			this,
+			TEXT("OpenDocument"));
+	}
+
 	FString FilePath;
 	TSharedPtr<FVerseDocumentSession> Session;
 	TArray<uint8> LastKnownDiskBytes;
@@ -106,9 +121,79 @@ struct FOpenVerseDocument
 	bool bHasSemanticCompilationResult = false;
 };
 
+struct FVerseCompilationLifetimeToken
+{
+	explicit FVerseCompilationLifetimeToken(const FString& SourcePath)
+	{
+		VerseVisualEditorLifetimeDiagnostics::Track(
+			this,
+			TEXT("CompileTask"),
+			*SourcePath);
+	}
+
+	~FVerseCompilationLifetimeToken()
+	{
+		VerseVisualEditorLifetimeDiagnostics::Untrack(
+			this,
+			TEXT("CompileTask"));
+	}
+};
+
 namespace
 {
 	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
+
+	void ReportRetainedSnapshot(
+		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
+		const FOpenVerseDocument& Document,
+		TSet<const FVerseSemanticSnapshot*>& ReportedSnapshots)
+	{
+		if (!Snapshot.IsValid() || ReportedSnapshots.Contains(Snapshot.Get()))
+		{
+			return;
+		}
+		ReportedSnapshots.Add(Snapshot.Get());
+		const FString Label = FString::Printf(
+			TEXT("retained-by-document=%s shared-refs=%d"),
+			*Document.FilePath,
+			Snapshot.GetSharedReferenceCount());
+		VerseVisualEditorLifetimeDiagnostics::Update(
+			Snapshot.Get(),
+			TEXT("SemanticSnapshot"),
+			*Label);
+		VerseVisualEditorLifetimeDiagnostics::Event(
+			TEXT("SemanticSnapshot.RetainedByDocument"),
+			Snapshot.Get(),
+			&Document);
+	}
+
+	void ReportExpressionSnapshots(
+		const FVerseVisualExpressionDescriptor& Expression,
+		const FOpenVerseDocument& Document,
+		TSet<const FVerseSemanticSnapshot*>& ReportedSnapshots)
+	{
+		ReportRetainedSnapshot(Expression.SemanticSnapshot, Document, ReportedSnapshots);
+		for (const FVerseVisualExpressionDescriptor& Operand : Expression.Operands)
+		{
+			ReportExpressionSnapshots(Operand, Document, ReportedSnapshots);
+		}
+	}
+
+	void ReportTileSnapshots(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		const FOpenVerseDocument& Document,
+		TSet<const FVerseSemanticSnapshot*>& ReportedSnapshots)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			ReportRetainedSnapshot(Tile.SemanticSnapshot, Document, ReportedSnapshots);
+			for (const FVerseVisualClauseItemDescriptor& Item : Tile.BodyClause.Items)
+			{
+				ReportExpressionSnapshots(Item.Expression, Document, ReportedSnapshots);
+			}
+			ReportTileSnapshots(Tile.Children, Document, ReportedSnapshots);
+		}
+	}
 
 	DECLARE_DELEGATE_OneParam(FOnVerseExpressionChosen, TSharedPtr<FVerseExpressionAction>);
 	FLinearColor GetBlueprintPinColor(const FString& VerseType);
@@ -1105,6 +1190,9 @@ namespace
 
 void SVerseVisualEditor::Construct(const FArguments& InArgs)
 {
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("EditorWidget"));
 	SemanticWorkspace = MakeUnique<FVerseSemanticWorkspace>();
 	// Capture whatever semantic program Solaris already owns. Even if a later
 	// private overlay fails, its compiled dependencies remain useful for search.
@@ -1341,6 +1429,34 @@ void SVerseVisualEditor::Construct(const FArguments& InArgs)
 
 SVerseVisualEditor::~SVerseVisualEditor()
 {
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("EditorWidget.Destroy.Begin"),
+		this,
+		SemanticWorkspace.Get());
+	TSet<const FVerseSemanticSnapshot*> ReportedSnapshots;
+	for (const TSharedPtr<FOpenVerseDocument>& Document : OpenDocuments)
+	{
+		if (!Document.IsValid())
+		{
+			continue;
+		}
+		if (Document->Session.IsValid())
+		{
+			ReportTileSnapshots(
+				Document->Session->GetTiles(),
+				*Document,
+				ReportedSnapshots);
+		}
+		for (const FOpenVerseFunctionTab& FunctionTab : Document->FunctionTabs)
+		{
+			ReportTileSnapshots(
+				FunctionTab.GraphTiles,
+				*Document,
+				ReportedSnapshots);
+		}
+	}
+	VerseVisualEditorLifetimeDiagnostics::Dump(
+		TEXT("SVerseVisualEditor destructor begin"));
 	if (ISolarisLoadCompilerModule::IsLoaded())
 	{
 		ISolarisLoadCompilerModule& CompilerModule = ISolarisLoadCompilerModule::Get();
@@ -1351,6 +1467,13 @@ SVerseVisualEditor::~SVerseVisualEditor()
 	}
 	SaveSession();
 	UnregisterDirectoryWatcher();
+	VerseVisualEditorLifetimeDiagnostics::Event(
+		TEXT("EditorWidget.Destroy.BodyEnd"),
+		this,
+		SemanticWorkspace.Get());
+	VerseVisualEditorLifetimeDiagnostics::Untrack(
+		this,
+		TEXT("EditorWidget"));
 }
 
 void SVerseVisualEditor::RefreshFileTree()
@@ -2395,10 +2518,13 @@ void SVerseVisualEditor::StartCompilation(const TSharedPtr<FOpenVerseDocument>& 
 	FString SourcePath = OpenDocument->FilePath;
 	const TWeakPtr<SVerseVisualEditor> WeakEditor = SharedThis(this);
 	const TWeakPtr<FOpenVerseDocument> WeakDocument = OpenDocument;
+	const TSharedRef<FVerseCompilationLifetimeToken> LifetimeToken =
+		MakeShared<FVerseCompilationLifetimeToken>(SourcePath);
 
 	(void)Async(EAsyncExecution::ThreadPool,
 		[WeakEditor,
 		 WeakDocument,
+		 LifetimeToken,
 		 RequestId,
 		 Revision,
 		 Source = MoveTemp(Source),
@@ -2409,8 +2535,13 @@ void SVerseVisualEditor::StartCompilation(const TSharedPtr<FOpenVerseDocument>& 
 				Revision,
 				MoveTemp(SourcePath));
 			AsyncTask(ENamedThreads::GameThread,
-				[WeakEditor, WeakDocument, RequestId, Result = MoveTemp(Result)]() mutable
+				[WeakEditor,
+				 WeakDocument,
+				 LifetimeToken,
+				 RequestId,
+				 Result = MoveTemp(Result)]() mutable
 				{
+					(void)LifetimeToken;
 					const TSharedPtr<SVerseVisualEditor> Editor = WeakEditor.Pin();
 					const TSharedPtr<FOpenVerseDocument> Document = WeakDocument.Pin();
 					if (Editor.IsValid() && Document.IsValid())
@@ -2837,6 +2968,10 @@ void SVerseVisualEditor::OpenDocument(const FString& FilePath, bool bTemporary)
 
 	TSharedPtr<FOpenVerseDocument> NewDocument = MakeShared<FOpenVerseDocument>();
 	NewDocument->FilePath = MoveTemp(NormalizedPath);
+	VerseVisualEditorLifetimeDiagnostics::Update(
+		NewDocument.Get(),
+		TEXT("OpenDocument"),
+		*NewDocument->FilePath);
 	NewDocument->bIsTemporary = bTemporary;
 	if (!ReloadDocument(NewDocument))
 	{
@@ -3088,6 +3223,10 @@ void SVerseVisualEditor::SaveActiveDocumentAs()
 	}
 
 	ActiveDocument->FilePath = MoveTemp(NewFilePath);
+	VerseVisualEditorLifetimeDiagnostics::Update(
+		ActiveDocument.Get(),
+		TEXT("OpenDocument"),
+		*ActiveDocument->FilePath);
 	ActiveDocument->LastKnownDiskBytes = ActiveDocument->Session->BuildCurrentFileBytes();
 	ActiveDocument->LoadError = FText::GetEmpty();
 	ActiveDocument->bIsTemporary = false;
@@ -4011,6 +4150,10 @@ void SVerseVisualEditor::LoadSession()
 
 		TSharedPtr<FOpenVerseDocument> RestoredDocument = MakeShared<FOpenVerseDocument>();
 		RestoredDocument->FilePath = MoveTemp(FilePath);
+		VerseVisualEditorLifetimeDiagnostics::Update(
+			RestoredDocument.Get(),
+			TEXT("OpenDocument"),
+			*RestoredDocument->FilePath);
 		GConfig->GetBool(
 			SessionSection,
 			*(KeyPrefix + TEXT("Temporary")),
