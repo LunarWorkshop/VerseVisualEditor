@@ -1,5 +1,6 @@
 #include "SVerseTile.h"
 
+#include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "GraphEditorSettings.h"
 #include "Rendering/DrawElements.h"
@@ -105,6 +106,82 @@ namespace
 
 	private:
 		bool bInput = false;
+		bool bConnected = false;
+	};
+
+	class SVerseFailableValuePin final : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseFailableValuePin) {}
+			SLATE_ARGUMENT(FLinearColor, Color)
+			SLATE_ARGUMENT(bool, Connected)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			Color = InArgs._Color;
+			bConnected = InArgs._Connected;
+			SetCanTick(false);
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override
+		{
+			return FVector2D(11.0f, 11.0f);
+		}
+
+		virtual int32 OnPaint(
+			const FPaintArgs& Args,
+			const FGeometry& AllottedGeometry,
+			const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements,
+			int32 LayerId,
+			const FWidgetStyle& InWidgetStyle,
+			bool bParentEnabled) const override
+		{
+			const FVector2D Size(8.0f, 8.0f);
+			const FLinearColor Tint =
+				Color * InWidgetStyle.GetColorAndOpacityTint();
+			const FVector2D Center = AllottedGeometry.GetLocalSize() * 0.5f;
+			if (bConnected)
+			{
+				static const FSlateColorBrush WhiteBrush(FLinearColor::White);
+				FSlateDrawElement::MakeRotatedBox(
+					OutDrawElements,
+					LayerId,
+					AllottedGeometry.ToPaintGeometry(
+						Size,
+						FSlateLayoutTransform(Center - Size * 0.5f)),
+					&WhiteBrush,
+					ESlateDrawEffect::None,
+					PI * 0.25f,
+					Size * 0.5f,
+					FSlateDrawElement::RelativeToElement,
+					Tint);
+			}
+			else
+			{
+				const float Radius = Size.X * 0.5f;
+				TArray<FVector2f> Points({
+					FVector2f(Center + FVector2D(0.0f, -Radius)),
+					FVector2f(Center + FVector2D(Radius, 0.0f)),
+					FVector2f(Center + FVector2D(0.0f, Radius)),
+					FVector2f(Center + FVector2D(-Radius, 0.0f)),
+					FVector2f(Center + FVector2D(0.0f, -Radius))});
+				FSlateDrawElement::MakeLines(
+					OutDrawElements,
+					LayerId,
+					AllottedGeometry.ToPaintGeometry(),
+					MoveTemp(Points),
+					ESlateDrawEffect::None,
+					Tint,
+					true,
+					1.5f);
+			}
+			return LayerId;
+		}
+
+	private:
+		FLinearColor Color = FLinearColor::White;
 		bool bConnected = false;
 	};
 }
@@ -485,29 +562,46 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 		Rows.Add(Row);
 		auto AddPin = [&]()
 		{
-			TSharedPtr<SImage> PinImage;
-			SAssignNew(PinImage, SImage)
-				.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
-				.ColorAndOpacity(GetVerseTilePinColor(Type))
-				.Visibility(EVisibility::HitTestInvisible)
-				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
-			if (bOutput)
+			const bool bFailable =
+				Socket.Outcome == EVerseExpressionOutcome::FailableValue
+				|| Socket.Outcome == EVerseExpressionOutcome::FailureOnly;
+			const FLinearColor PinColor =
+				Socket.Outcome == EVerseExpressionOutcome::FailureOnly
+					? GetVerseFailureDecorationColor()
+					: GetVerseTilePinColor(Type);
+			TSharedPtr<SWidget> PinWidget;
+			if (bFailable)
 			{
-				ValueOutputAnchors.Add(PinImage);
+				PinWidget = SNew(SVerseFailableValuePin)
+					.Color(PinColor)
+					.Connected(Socket.bConnected)
+					.Visibility(EVisibility::HitTestInvisible);
 			}
 			else
 			{
-				ValueInputAnchors.Add(PinImage);
+				PinWidget = SNew(SImage)
+					.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
+					.ColorAndOpacity(PinColor)
+					.Visibility(EVisibility::HitTestInvisible)
+					.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
+			}
+			if (bOutput)
+			{
+				ValueOutputAnchors.Add(PinWidget);
+			}
+			else
+			{
+				ValueInputAnchors.Add(PinWidget);
 			}
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
 				SNew(SBorder)
-				.BorderImage(nullptr)
-				.Padding(0.0f)
-				.OnMouseButtonDown(this, &SVerseTile::HandleSocketMouseButtonDown,
-					TSharedPtr<SWidget>(PinImage), Socket, bOutput, SocketIndex)
+					.BorderImage(nullptr)
+					.Padding(0.0f)
+					.OnMouseButtonDown(this, &SVerseTile::HandleSocketMouseButtonDown,
+						PinWidget, Socket, bOutput, SocketIndex)
 				[
-					PinImage.ToSharedRef()
+					PinWidget.ToSharedRef()
 				]
 			];
 		};
@@ -652,6 +746,11 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 		: Socket.TypeRange.IsSet()
 		? Decode(Socket.TypeRange).ToString()
 		: Socket.IntrinsicTypeName.ToString());
+	DragStart.Outcome = Socket.Outcome;
+	if (Socket.Outcome == EVerseExpressionOutcome::FailureOnly)
+	{
+		DragStart.WireColor = GetVerseFailureDecorationColor();
+	}
 	DragStart.bOutput = bOutput;
 	DragStart.SocketIndex = SocketIndex;
 	return OnSocketDragStarted.Execute(DragStart);

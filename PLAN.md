@@ -626,7 +626,7 @@ This step delivers the first complete edit-and-save workflow.
 Implement the reusable failure-context foundation through `if` first. Each
 substep must leave a visible, usable result and must be completed in order.
 
-#### 16.1. Failure-aware sockets and wires
+#### 16.1. Failure-aware sockets and wires (complete)
 
 - Derive failure from the active UE6 compiler's exact semantic
   `CanFail()` result and derive the carried value type from the compiler result

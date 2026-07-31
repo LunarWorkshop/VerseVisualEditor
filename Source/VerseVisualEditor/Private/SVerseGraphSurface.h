@@ -28,7 +28,16 @@ struct FVerseGraphConnection
 	int32 ExtraBlankLineMarkers = 0;
 	FVector2D SourceAnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVector2D TargetAnchorCoordinate = FVector2D(0.5f, 0.5f);
+	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 };
+
+/** Samples decoration centers from the same Hermite spline used for graph wires. */
+TArray<FVector2D> BuildVerseSplineMarkerCenters(
+	FVector2D Start,
+	FVector2D StartTangent,
+	FVector2D End,
+	FVector2D EndTangent,
+	float Spacing = 72.0f);
 
 DECLARE_DELEGATE_TwoParams(
 	FOnVerseGraphConnectionDropped,

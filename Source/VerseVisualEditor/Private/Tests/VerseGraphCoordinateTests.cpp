@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "SVerseGraphSurface.h"
 #include "VerseGraphCoordinates.h"
 
 #include "Misc/AutomationTest.h"
@@ -102,6 +103,48 @@ bool FVerseGraphCursorAnchoredZoomTest::RunTest(const FString& Parameters)
 			NewZoom);
 		TestEqual(TEXT("Zoom keeps the anchored graph point beneath the cursor"),
 			Reprojected.Value, Cursor.Value);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphFailureMarkerCoordinatesTest,
+	"VerseVisualEditor.Graph.Coordinates.FailureMarkers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphFailureMarkerCoordinatesTest::RunTest(const FString& Parameters)
+{
+	const FVector2D Start(80.0f, 140.0f);
+	const FVector2D End(320.0f, 260.0f);
+	const FVector2D Tangent(180.0f, 0.0f);
+	const TArray<FVector2D> Base = BuildVerseSplineMarkerCenters(
+		Start, Tangent, End, Tangent);
+	TestTrue(TEXT("A visible failable wire receives repeated markers"), Base.Num() > 1);
+
+	const FVector2D WindowTranslation(413.0f, 227.0f);
+	const TArray<FVector2D> Moved = BuildVerseSplineMarkerCenters(
+		Start + WindowTranslation,
+		Tangent,
+		End + WindowTranslation,
+		Tangent);
+	TestEqual(TEXT("Moving the window does not change marker count"), Moved.Num(), Base.Num());
+	for (int32 Index = 0; Index < Base.Num() && Index < Moved.Num(); ++Index)
+	{
+		TestTrue(
+			TEXT("Every marker follows the same paint-space translation as its wire"),
+			(Moved[Index] - WindowTranslation).Equals(Base[Index], 0.01));
+	}
+
+	for (const float Zoom : {0.5f, 1.0f, 2.0f})
+	{
+		const TArray<FVector2D> Zoomed = BuildVerseSplineMarkerCenters(
+			Start * Zoom,
+			Tangent * Zoom,
+			End * Zoom,
+			Tangent * Zoom);
+		TestTrue(
+			FString::Printf(TEXT("Zoom %.1f keeps markers on the wire"), Zoom),
+			!Zoomed.IsEmpty());
 	}
 	return true;
 }

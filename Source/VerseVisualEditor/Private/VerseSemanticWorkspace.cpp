@@ -176,7 +176,8 @@ namespace
 	FVerseProjectContainer BuildInMemoryOverlayPackages(
 		const TSharedRef<ISolIdeSourceProject>& MainProject,
 		TConstArrayView<FVerseSemanticDocumentInput> Documents,
-		TSet<FString>& OutInMemoryDocumentKeys)
+		TSet<FString>& OutInMemoryDocumentKeys,
+		EVerseSemanticDependencyPolicy DependencyPolicy)
 	{
 		TMap<FString, TArray<const FVerseSemanticDocumentInput*>> DocumentsByRoot;
 		for (const FVerseSemanticDocumentInput& Document : Documents)
@@ -214,9 +215,13 @@ namespace
 			for (const FVersePackageContainer& Existing : ExistingPackages.Packages)
 			{
 				const bool bVisibleToOverlay =
-					Overlay.Settings.VerseScope == EVersePackageScope::InternalUser
-					|| Existing.Settings.VerseScope == EVersePackageScope::PublicAPI
-					|| Existing.Settings.VerseScope == EVersePackageScope::PublicUser;
+					Existing.Settings.VerseScope == EVersePackageScope::PublicAPI
+					|| (DependencyPolicy
+							== EVerseSemanticDependencyPolicy::ProjectVisible
+						&& (Overlay.Settings.VerseScope
+								== EVersePackageScope::InternalUser
+							|| Existing.Settings.VerseScope
+								== EVersePackageScope::PublicUser));
 				if (bVisibleToOverlay && Existing.Name != Overlay.Name)
 				{
 					Overlay.Settings.DependencyPackages.AddUnique(Existing.Name);
@@ -310,6 +315,18 @@ TSharedRef<FVerseSemanticSnapshot> FVerseSemanticSnapshot::CreateForTesting(
 
 FVerseSemanticWorkspace::FVerseSemanticWorkspace(double InDebounceSeconds)
 	: DebounceSeconds(InDebounceSeconds)
+{
+	VerseVisualEditorLifetimeDiagnostics::Track(
+		this,
+		TEXT("SemanticWorkspace"),
+		TEXT("default analyzer"));
+}
+
+FVerseSemanticWorkspace::FVerseSemanticWorkspace(
+	EVerseSemanticDependencyPolicy InDependencyPolicy,
+	double InDebounceSeconds)
+	: DependencyPolicy(InDependencyPolicy)
+	, DebounceSeconds(InDebounceSeconds)
 {
 	VerseVisualEditorLifetimeDiagnostics::Track(
 		this,
@@ -609,7 +626,10 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 		return false;
 	}
 	FVerseProjectContainer InMemoryPackages = BuildInMemoryOverlayPackages(
-		MainProject.ToSharedRef(), Documents, OutInMemoryDocumentKeys);
+		MainProject.ToSharedRef(),
+		Documents,
+		OutInMemoryDocumentKeys,
+		DependencyPolicy);
 
 	TSharedRef<ISolarisIdeDiagnostics> IdeDiagnostics = MakeIdeDiagnostics(
 		[&OutDiagnostics](const FSolDiagnostic& Diagnostic)
@@ -636,6 +656,36 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 				ELogVerbosity::Error));
 		}
 		return false;
+	}
+	if (DependencyPolicy == EVerseSemanticDependencyPolicy::PublicApiOnly)
+	{
+		TSet<FString> OverlayPackageNames;
+		for (const FVersePackageContainer& Package : InMemoryPackages.Packages)
+		{
+			OverlayPackageNames.Add(Package.Name);
+		}
+
+		uLang::TArray<uLang::CSourceProject::SPackage>& SourcePackages =
+			IndependentProject.GetValue()->GetProject()->_Packages;
+		for (int32 PackageIndex = SourcePackages.Num() - 1;
+			PackageIndex >= 0;
+			--PackageIndex)
+		{
+			const uLang::TSPtr<uLang::CSourcePackage>& Package =
+				SourcePackages[PackageIndex]._Package;
+			const FString PackageName = Package.IsValid()
+				? UTF8_TO_TCHAR(Package->GetName().AsCString())
+				: FString();
+			const bool bKeepPackage =
+				Package.IsValid()
+				&& (Package->GetSettings()._VerseScope
+						== uLang::EVerseScope::PublicAPI
+					|| OverlayPackageNames.Contains(PackageName));
+			if (!bKeepPackage)
+			{
+				SourcePackages.RemoveAt(PackageIndex);
+			}
+		}
 	}
 
 	FSolIdeConfig Config;

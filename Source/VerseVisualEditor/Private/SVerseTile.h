@@ -14,6 +14,7 @@ struct FVerseSocketDragStart
 	FVerseVisualSocket Socket;
 	FVerseDesktopPoint DesktopPosition;
 	FLinearColor WireColor = FLinearColor::White;
+	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	bool bOutput = false;
 	int32 SocketIndex = INDEX_NONE;
 };

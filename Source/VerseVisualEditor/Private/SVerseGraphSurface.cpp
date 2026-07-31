@@ -1,5 +1,6 @@
 #include "SVerseGraphSurface.h"
 
+#include "Brushes/SlateColorBrush.h"
 #include "GraphEditorSettings.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
@@ -11,6 +12,33 @@
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSpacer.h"
+
+TArray<FVector2D> BuildVerseSplineMarkerCenters(
+	FVector2D Start,
+	FVector2D StartTangent,
+	FVector2D End,
+	FVector2D EndTangent,
+	float Spacing)
+{
+	const float Distance = FVector2D::Distance(Start, End);
+	if (Distance < 24.0f)
+	{
+		return {};
+	}
+	const int32 MarkerCount = FMath::Max(
+		1,
+		FMath::FloorToInt(Distance / FMath::Max(1.0f, Spacing)));
+	TArray<FVector2D> Result;
+	Result.Reserve(MarkerCount);
+	for (int32 Index = 0; Index < MarkerCount; ++Index)
+	{
+		const float Alpha = static_cast<float>(Index + 1)
+			/ static_cast<float>(MarkerCount + 1);
+		Result.Add(FMath::CubicInterp(
+			Start, StartTangent, End, EndTangent, Alpha));
+	}
+	return Result;
+}
 
 namespace
 {
@@ -32,6 +60,16 @@ namespace
 			Anchor->GetPaintSpaceGeometry().GetAbsolutePositionAtCoordinates(NormalizedCoordinate));
 	}
 
+	FVector2D GetSplineTangent(
+		FVector2D Start,
+		FVector2D End,
+		EVerseGraphConnectionAxis Axis)
+	{
+		return Axis == EVerseGraphConnectionAxis::Vertical
+			? FVector2D(0.0f, FMath::Max(24.0f, FMath::Abs(End.Y - Start.Y) * 0.5f))
+			: FVector2D(GetDefault<UGraphEditorSettings>()->ComputeSplineTangent(Start, End));
+	}
+
 	void DrawSpline(
 		FSlateWindowElementList& Elements,
 		int32 Layer,
@@ -43,9 +81,7 @@ namespace
 	{
 		const FVector2D Start = StartPoint.Value;
 		const FVector2D End = EndPoint.Value;
-		const FVector2D Tangent = Axis == EVerseGraphConnectionAxis::Vertical
-			? FVector2D(0.0f, FMath::Max(24.0f, FMath::Abs(End.Y - Start.Y) * 0.5f))
-			: FVector2D(GetDefault<UGraphEditorSettings>()->ComputeSplineTangent(Start, End));
+		const FVector2D Tangent = GetSplineTangent(Start, End, Axis);
 		FSlateDrawElement::MakeDrawSpaceSpline(
 			Elements,
 			Layer,
@@ -56,6 +92,34 @@ namespace
 			Thickness,
 			ESlateDrawEffect::None,
 			Color);
+	}
+
+	void DrawFailureMarkers(
+		FSlateWindowElementList& Elements,
+		int32 Layer,
+		FVersePaintPoint StartPoint,
+		FVersePaintPoint EndPoint,
+		EVerseGraphConnectionAxis Axis)
+	{
+		const FVector2D Start = StartPoint.Value;
+		const FVector2D End = EndPoint.Value;
+		const FVector2D Tangent = GetSplineTangent(Start, End, Axis);
+		static const FSlateColorBrush WhiteBrush(FLinearColor::White);
+		const FVector2D MarkerSize(7.0f, 7.0f);
+		for (const FVector2D Center : BuildVerseSplineMarkerCenters(
+			Start, Tangent, End, Tangent))
+		{
+			FSlateDrawElement::MakeRotatedBox(
+				Elements,
+				Layer,
+				FPaintGeometry(Center - MarkerSize * 0.5f, MarkerSize, 1.0f),
+				&WhiteBrush,
+				ESlateDrawEffect::None,
+				PI * 0.25f,
+				MarkerSize * 0.5f,
+				FSlateDrawElement::RelativeToElement,
+				GetVerseFailureDecorationColor());
+		}
 	}
 }
 
@@ -322,6 +386,12 @@ void SVerseGraphSurface::PaintConnection(
 	DrawSpline(
 		OutDrawElements, LayerId, Start, End,
 		Connection.Axis, Connection.Thickness, Connection.Color);
+	if (Connection.Outcome == EVerseExpressionOutcome::FailableValue
+		|| Connection.Outcome == EVerseExpressionOutcome::FailureOnly)
+	{
+		DrawFailureMarkers(
+			OutDrawElements, LayerId, Start, End, Connection.Axis);
+	}
 	for (int32 Index = 0; Index < Connection.ExtraBlankLineMarkers; ++Index)
 	{
 		const float Alpha = static_cast<float>(Index + 1)
@@ -331,7 +401,7 @@ void SVerseGraphSurface::PaintConnection(
 			FVector2f(Center - FVector2D(6.0f, 0.0f)),
 			FVector2f(Center + FVector2D(6.0f, 0.0f))});
 		FSlateDrawElement::MakeLines(
-			OutDrawElements, LayerId + 1, FPaintGeometry(), MoveTemp(Points),
+			OutDrawElements, LayerId, FPaintGeometry(), MoveTemp(Points),
 			ESlateDrawEffect::None, Connection.Color, true, Connection.Thickness);
 	}
 }
@@ -352,6 +422,16 @@ void SVerseGraphSurface::PaintPreviewConnection(
 		OutDrawElements, LayerId, Start, End,
 		EVerseGraphConnectionAxis::Horizontal, 2.0f,
 		ConnectionDrag->WireColor);
+	if (ConnectionDrag->Outcome == EVerseExpressionOutcome::FailableValue
+		|| ConnectionDrag->Outcome == EVerseExpressionOutcome::FailureOnly)
+	{
+		DrawFailureMarkers(
+			OutDrawElements,
+			LayerId,
+			Start,
+			End,
+			EVerseGraphConnectionAxis::Horizontal);
+	}
 }
 
 FReply SVerseGraphSurface::OnPreviewMouseButtonDown(

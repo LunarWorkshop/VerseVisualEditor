@@ -9,6 +9,7 @@
 #include "VerseSemanticCandidates.h"
 #include "VerseVisualTile.h"
 
+#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
@@ -615,6 +616,187 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			TEXT("The generic call preserves the dragged expression as its bound input"),
 			FString(UTF8_TO_TCHAR(*InvalidSession.GetCurrentUtf8())).Contains(
 				TEXT("AcceptInt(Input)")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseSemanticFailureOutcomeBindingTest,
+	"VerseVisualEditor.Semantics.Workspace.BindsFailureOutcomes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin =
+		IPluginManager::Get().FindPlugin(TEXT("VerseVisualEditor"));
+	if (!TestTrue(TEXT("VerseVisualEditor plugin is discoverable"), Plugin.IsValid()))
+	{
+		return false;
+	}
+	FString FilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		Plugin->GetBaseDir(), TEXT("Tests/Fixtures/failure_contexts.verse")));
+	FPaths::NormalizeFilename(FilePath);
+	FString Source;
+	if (!TestTrue(
+		TEXT("Fixed failure-context fixture loads"),
+		FFileHelper::LoadFileToString(Source, *FilePath)))
+	{
+		return false;
+	}
+
+	const FTCHARToUTF8 Utf8Source(*Source);
+	FVerseSemanticDocumentInput Input;
+	Input.FilePath = FilePath;
+	Input.Source = FUtf8String(FUtf8StringView(
+		reinterpret_cast<const UTF8CHAR*>(Utf8Source.Get()),
+		Utf8Source.Length()));
+	Input.Revision.Value = 1161;
+
+	FVerseSemanticWorkspace Workspace(
+		EVerseSemanticDependencyPolicy::PublicApiOnly,
+		0.0);
+	Workspace.RequestAnalysis({Input}, 0.0, false);
+	Workspace.Tick(0.0);
+	for (const FVerseSemanticDiagnostic& Diagnostic : Workspace.GetDiagnostics())
+	{
+		if (Diagnostic.Severity == ELogVerbosity::Error
+			&& Diagnostic.AppliesToFile(FilePath))
+		{
+			AddError(FString::Printf(
+				TEXT("%s L%d:%d %s"),
+				*Diagnostic.FilePath,
+				Diagnostic.RowSpan.X,
+				Diagnostic.ColumnSpan.X,
+				*Diagnostic.Message.ToString()));
+		}
+	}
+	const TArray<TSharedPtr<const FVerseSemanticSnapshot>> CandidateSnapshots =
+		Workspace.GetCandidateSnapshots();
+	const TSharedPtr<const FVerseSemanticSnapshot>* ExactSnapshot =
+		CandidateSnapshots.FindByPredicate(
+			[&FilePath, &Input](const TSharedPtr<const FVerseSemanticSnapshot>& Candidate)
+			{
+				return Candidate.IsValid()
+					&& Candidate->Describes(FilePath, Input.Revision);
+			});
+	if (!TestNotNull(
+		TEXT("Compiler publishes an exact isolated fixture snapshot"),
+		ExactSnapshot))
+	{
+		return false;
+	}
+
+	FText Error;
+	const TConstArrayView<uint8> Bytes(
+		reinterpret_cast<const uint8*>(*Input.Source), Input.Source.Len());
+	const TSharedPtr<const FVerseDocument> Document =
+		FVerseDocument::CreateFromBytes(Bytes, Error);
+	if (!TestTrue(TEXT("Failure-context fixture parses"), Document.IsValid()))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	const FVerseParseSnapshot ParseSnapshot =
+		FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const TArray<FVerseVisualTile> SyntaxTiles =
+		FVerseVisualTileBuilder::Build(ParseSnapshot, Input.Revision);
+	TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(SyntaxTiles, ParseSnapshot);
+
+	auto BindStatement = [&](
+		const TCHAR* FunctionName) -> const FVerseVisualTile*
+	{
+		FVerseFunctionNavigationItem* Function = Functions.FindByPredicate(
+			[FunctionName](const FVerseFunctionNavigationItem& Candidate)
+			{
+				return Candidate.Name == FunctionName;
+			});
+		if (!TestNotNull(FunctionName, Function)
+			|| !TestTrue(
+				*FString::Printf(TEXT("%s has a statement tile"), FunctionName),
+				Function->GraphTiles.Num() >= 3))
+		{
+			return nullptr;
+		}
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			Function->GraphTiles,
+			*ExactSnapshot,
+			FilePath,
+			*Document);
+		return &Function->GraphTiles[1];
+	};
+
+	const FVerseVisualTile* NonFailableCall = BindStatement(TEXT("NonFailableCall"));
+	if (NonFailableCall != nullptr)
+	{
+		TestEqual(
+			TEXT("Ordinary call is compiler-classified as non-failable"),
+			NonFailableCall->Outcome,
+			EVerseExpressionOutcome::Ordinary);
+		TestTrue(
+			TEXT("Ordinary call retains its typed round output"),
+			NonFailableCall->ValueOutputs.Num() == 1
+			&& NonFailableCall->ValueOutputs[0].Outcome
+				== EVerseExpressionOutcome::Ordinary
+			&& NonFailableCall->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+	}
+
+	const FVerseVisualTile* FailableCall = BindStatement(TEXT("FailableCall"));
+	if (FailableCall != nullptr)
+	{
+		TestTrue(
+			TEXT("Decides call carries an int through a failable socket"),
+			FailableCall->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableCall->ValueOutputs.Num() == 1
+			&& FailableCall->ValueOutputs[0].Outcome
+				== EVerseExpressionOutcome::FailableValue
+			&& FailableCall->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+	}
+
+	const FVerseVisualTile* FailableVoidCall =
+		BindStatement(TEXT("FailableVoidCall"));
+	if (FailableVoidCall != nullptr)
+	{
+		TestTrue(
+			TEXT("Decides void call is represented as failure-only"),
+			FailableVoidCall->Outcome == EVerseExpressionOutcome::FailureOnly
+			&& FailableVoidCall->ValueOutputs.Num() == 1
+			&& FailableVoidCall->ValueOutputs[0].Outcome
+				== EVerseExpressionOutcome::FailureOnly
+			&& FailableVoidCall->ValueOutputs[0].SemanticTypeName.IsEmpty());
+	}
+
+	const FVerseVisualTile* NonFailableOperator =
+		BindStatement(TEXT("NonFailableOperator"));
+	if (NonFailableOperator != nullptr)
+	{
+		TestEqual(
+			TEXT("Arithmetic operator is not guessed to be failable"),
+			NonFailableOperator->Outcome,
+			EVerseExpressionOutcome::Ordinary);
+	}
+
+	const FVerseVisualTile* FailableOperator =
+		BindStatement(TEXT("FailableOperator"));
+	if (FailableOperator != nullptr)
+	{
+		TestTrue(
+			TEXT("Comparison carries its compiler-resolved value through failure"),
+			FailableOperator->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableOperator->ValueOutputs.Num() == 1
+			&& FailableOperator->ValueOutputs[0].Outcome
+				== EVerseExpressionOutcome::FailableValue
+			&& FailableOperator->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+	}
+
+	const FVerseVisualTile* FailableCast = BindStatement(TEXT("FailableCast"));
+	if (FailableCast != nullptr)
+	{
+		TestTrue(
+			TEXT("Failable cast carries the compiler-resolved int type"),
+			FailableCast->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableCast->ValueOutputs.Num() == 1
+			&& FailableCast->ValueOutputs[0].SemanticTypeName == TEXT("int"));
 	}
 	return true;
 }

@@ -43,6 +43,9 @@ CorpusFunctionEmpty() : void = {
 CorpusFunctionIdentity(Input : int)<computes> : int =
     Input
 
+CorpusFunctionCast(Input : float)<computes><decides><reads> : int =
+    Int[Input]
+
 CorpusFunctionAdd1(Input : int)<computes> : int =
     Input + 1
 

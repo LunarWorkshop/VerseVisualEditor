@@ -237,15 +237,36 @@ namespace
 
 		const Verse::Vst::Node* Node = FindExactSemanticNode(
 			*Snapshot, FilePath, Tile.Range, Document);
-		const uLang::CExpressionBase* Expression = Node
-			? FindMappedExpression(*Node)
+		const uLang::CExprInvocation* Invocation = Node
+			? FindMappedInvocation(*Node)
 			: nullptr;
+		const bool bInvocationIsTileExpression =
+			Tile.ExpressionKind == EVerseExpressionKind::Call
+			|| IsVerseOperatorExpression(Tile.ExpressionKind);
+		const uLang::CExpressionBase* Expression = bInvocationIsTileExpression
+			? static_cast<const uLang::CExpressionBase*>(Invocation)
+			: Node != nullptr
+				? FindMappedExpression(*Node)
+				: nullptr;
 		if (Expression == nullptr)
 		{
 			return;
 		}
 
 		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+		const uLang::CScope* ActiveScope = FindActiveScope(*Node, Program);
+		const uLang::CAstPackage* Package = ActiveScope != nullptr
+			? ActiveScope->GetPackage()
+			: nullptr;
+		const TOptional<bool> bCanFail = Package != nullptr
+			? TOptional<bool>(Expression->CanFail(Package))
+			: TOptional<bool>();
+		if (bCanFail.IsSet())
+		{
+			Tile.Outcome = bCanFail.GetValue()
+				? EVerseExpressionOutcome::FailableValue
+				: EVerseExpressionOutcome::Ordinary;
+		}
 		if (const uLang::CTypeBase* ResultType = Expression->GetResultType(Program))
 		{
 			Tile.SemanticTypeName = ToFString(ResultType->AsCode());
@@ -253,10 +274,23 @@ namespace
 			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
 			{
 				Output.SemanticTypeName = Tile.SemanticTypeName;
+				Output.Outcome = Tile.Outcome;
 			}
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 			{
 				Tile.ValueOutputs.Reset();
+				if (bCanFail.Get(false))
+				{
+					FVerseVisualSocket& FailureSocket = Tile.ValueOutputs.AddDefaulted_GetRef();
+					FailureSocket.Outcome = EVerseExpressionOutcome::FailureOnly;
+					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;
+				}
+			}
+			else if (Tile.ValueOutputs.IsEmpty())
+			{
+				FVerseVisualSocket& Output = Tile.ValueOutputs.AddDefaulted_GetRef();
+				Output.SemanticTypeName = Tile.SemanticTypeName;
+				Output.Outcome = Tile.Outcome;
 			}
 		}
 		if (Tile.ExpressionKind != EVerseExpressionKind::Call
@@ -265,7 +299,6 @@ namespace
 			return;
 		}
 
-		const uLang::CExprInvocation* Invocation = FindMappedInvocation(*Node);
 		if (Invocation == nullptr)
 		{
 			return;
@@ -304,10 +337,20 @@ namespace
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 			{
 				Tile.ValueOutputs.Reset();
+				if (bCanFail.Get(false))
+				{
+					FVerseVisualSocket& FailureSocket = Tile.ValueOutputs.AddDefaulted_GetRef();
+					FailureSocket.Outcome = EVerseExpressionOutcome::FailureOnly;
+					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;
+				}
 			}
 			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
 			{
-				Output.SemanticTypeName = Tile.SemanticTypeName;
+				Output.SemanticTypeName =
+					Output.Outcome == EVerseExpressionOutcome::FailureOnly
+					? FString()
+					: Tile.SemanticTypeName;
+				Output.Outcome = Tile.Outcome;
 			}
 		}
 	}

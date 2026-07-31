@@ -74,6 +74,13 @@ enum class EVerseSemanticWorkspaceState : uint8
 	Failed,
 };
 
+/** Controls which existing packages an in-memory overlay may depend on. */
+enum class EVerseSemanticDependencyPolicy : uint8
+{
+	ProjectVisible,
+	PublicApiOnly,
+};
+
 struct FVerseSemanticAnalysisResult
 {
 	bool bSucceeded = false;
@@ -93,6 +100,9 @@ public:
 		TFunction<FVerseSemanticAnalysisResult(TConstArrayView<FVerseSemanticDocumentInput>)>;
 
 	explicit FVerseSemanticWorkspace(double InDebounceSeconds = 0.25);
+	FVerseSemanticWorkspace(
+		EVerseSemanticDependencyPolicy InDependencyPolicy,
+		double InDebounceSeconds = 0.25);
 	FVerseSemanticWorkspace(FAnalysisFunction InAnalysisFunction, double InDebounceSeconds);
 	~FVerseSemanticWorkspace();
 
@@ -155,6 +165,8 @@ private:
 		TConstArrayView<FVerseSemanticDocumentInput> Documents) const;
 
 	FAnalysisFunction AnalysisFunction;
+	EVerseSemanticDependencyPolicy DependencyPolicy =
+		EVerseSemanticDependencyPolicy::ProjectVisible;
 	double DebounceSeconds = 0.25;
 	double AnalyzeAfterSeconds = 0.0;
 	uint64 LatestRequestId = 0;

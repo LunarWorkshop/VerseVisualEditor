@@ -17,6 +17,24 @@ enum class EVerseVisualTileKind : uint8
 	Unknown
 };
 
+/** Compiler-derived failure behavior, independent of the carried Verse value type. */
+enum class EVerseExpressionOutcome : uint8
+{
+	/** No exact semantic expression is available for this revision. */
+	Unresolved,
+	/** The expression does not propagate failure. */
+	Ordinary,
+	/** The expression may fail and carries its declared result when it succeeds. */
+	FailableValue,
+	/** The expression may fail but has no carried value. */
+	FailureOnly,
+};
+
+inline FLinearColor GetVerseFailureDecorationColor()
+{
+	return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("FFDC4A")));
+}
+
 struct FVerseVisualSocket
 {
 	FVerseTextRange NameRange;
@@ -29,6 +47,7 @@ struct FVerseVisualSocket
 	FString SemanticTypeName;
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
+	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 };
 
 struct FVerseVisualExpressionDescriptor
@@ -110,6 +129,7 @@ struct FVerseVisualTile
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
+	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseTextRange> SpecifierRanges;

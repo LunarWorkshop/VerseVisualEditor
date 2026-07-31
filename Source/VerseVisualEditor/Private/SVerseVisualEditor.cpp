@@ -617,6 +617,24 @@ namespace
 		return Lower.IsEmpty() ? TEXT("unknown") : Lower;
 	}
 
+	EVerseExpressionOutcome GetFirstOutputOutcome(const FVerseVisualTile& Tile)
+	{
+		return !Tile.ValueOutputs.IsEmpty()
+			? Tile.ValueOutputs[0].Outcome
+			: Tile.Outcome;
+	}
+
+	void SetConnectionOutcome(
+		FVerseGraphConnection& Connection,
+		EVerseExpressionOutcome Outcome)
+	{
+		Connection.Outcome = Outcome;
+		if (Outcome == EVerseExpressionOutcome::FailureOnly)
+		{
+			Connection.Color = GetVerseFailureDecorationColor();
+		}
+	}
+
 	struct FBuiltFunctionGraphRow
 	{
 		TSharedRef<SWidget> Widget;
@@ -672,6 +690,10 @@ namespace
 						GetBlueprintPinColor(TEXT("logic")),
 						2.0f,
 						0});
+					SetConnectionOutcome(
+						Connections.Last(),
+						GetFirstOutputOutcome(
+							Tile.Children[ConditionRegion->FirstOperandIndex]));
 				}
 			}
 
@@ -983,6 +1005,9 @@ namespace
 				Connections.Add({OperandTiles[Index]->GetValueOutputAnchor(0),
 					RootTile->GetValueInputAnchor(Index), EVerseGraphConnectionAxis::Horizontal,
 					GetBlueprintPinColor(TypeName), 2.0f, 0});
+				SetConnectionOutcome(
+					Connections.Last(),
+					GetFirstOutputOutcome(Tile.Children[Index]));
 			}
 		}
 		return {Subtree, RootTile, MoveTemp(Connections)};
@@ -3450,6 +3475,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		TArray<TSharedPtr<SVerseTile>> RootTiles;
 		TSharedPtr<SVerseTile> ImplicitReturnSourceTile;
 		TSharedPtr<SVerseTile> ReturnTile;
+		EVerseExpressionOutcome ImplicitReturnOutcome =
+			EVerseExpressionOutcome::Unresolved;
 		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
 		{
 			const FVerseVisualTile& Tile = FunctionTab.GraphTiles[Index];
@@ -3476,8 +3503,24 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					== EVerseVisualTileKind::FunctionReturn;
 			if (bPairWithImplicitReturn)
 			{
+				FVerseVisualTile ReturnDisplayTile =
+					FunctionTab.GraphTiles[Index + 1];
+				const EVerseExpressionOutcome ReturnOutcome =
+					GetFirstOutputOutcome(Tile);
+				ReturnDisplayTile.Outcome = ReturnOutcome;
+				if (!ReturnDisplayTile.ValueInputs.IsEmpty())
+				{
+					FVerseVisualSocket& ReturnInput =
+						ReturnDisplayTile.ValueInputs[0];
+					ReturnInput.Outcome = ReturnOutcome;
+					if (!Tile.ValueOutputs.IsEmpty())
+					{
+						ReturnInput.SemanticTypeName =
+							Tile.ValueOutputs[0].SemanticTypeName;
+					}
+				}
 				const TSharedRef<SVerseTile> ReturnRoot = BuildFunctionGraphTile(
-					FunctionTab.GraphTiles[Index + 1],
+					ReturnDisplayTile,
 					SourceDocument,
 					FOnVerseSocketDragStarted::CreateSP(
 						this, &SVerseVisualEditor::BeginSocketDrag),
@@ -3517,6 +3560,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				RootTiles.Add(ReturnRoot);
 				ImplicitReturnSourceTile = GraphRow.RootTile;
 				ReturnTile = ReturnRoot;
+				ImplicitReturnOutcome = ReturnOutcome;
 				++Index;
 				continue;
 			}
@@ -3535,6 +3579,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			if (Tile.bImplicitReturnValue)
 			{
 				ImplicitReturnSourceTile = GraphRow.RootTile;
+				ImplicitReturnOutcome = GetFirstOutputOutcome(Tile);
 			}
 			else if (Tile.Kind == EVerseVisualTileKind::FunctionReturn)
 			{
@@ -3564,6 +3609,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			GraphConnections.Add({ImplicitReturnSourceTile->GetFirstValueOutputAnchor(),
 				ReturnTile->GetFirstValueInputAnchor(), EVerseGraphConnectionAxis::Horizontal,
 				GetBlueprintPinColor(ReturnType), 2.0f, 0});
+			SetConnectionOutcome(GraphConnections.Last(), ImplicitReturnOutcome);
 		}
 
 		if (FunctionTab.FunctionCanvas.IsValid())
