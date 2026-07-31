@@ -518,7 +518,7 @@ namespace
 		}
 		else if (bFailableBlock)
 		{
-			TileColor = FLinearColor(0.13f, 0.12f, 0.08f, 1.0f);
+			TileColor = FLinearColor(0.10f, 0.09f, 0.055f, 1.0f);
 		}
 		else if (bCall)
 		{
@@ -526,7 +526,7 @@ namespace
 		}
 		else if (bControl)
 		{
-			TileColor = FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
+			TileColor = FLinearColor(0.12f, 0.14f, 0.17f, 1.0f);
 		}
 		else if (bIdentifier)
 		{
@@ -534,7 +534,7 @@ namespace
 		}
 		else
 		{
-			TileColor = FLinearColor(0.16f, 0.18f, 0.21f, 1.0f);
+			TileColor = FLinearColor(0.12f, 0.14f, 0.17f, 1.0f);
 		}
 		TSharedRef<SWidget> Body = BodyOverride.IsValid()
 			? BodyOverride.ToSharedRef()

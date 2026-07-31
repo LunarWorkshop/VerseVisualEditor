@@ -435,7 +435,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 							: EVisibility::Collapsed)
 						.Text(OperatorLines)
 						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-						.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
+						.ColorAndOpacity(FLinearColor(0.68f, 0.72f, 0.78f, 1.0f))
 						.Margin(FMargin(5.0f, 2.0f, 0.0f, 0.0f))
 					]
 					+ SVerticalBox::Slot()
@@ -500,7 +500,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				SNew(SBorder)
 				.Visibility(this, &SVerseTile::GetBodyVisibility)
 				.BorderImage(BodyBrush.Get())
-				.BorderBackgroundColor(FLinearColor(0.025f, 0.025f, 0.035f, 1.0f))
+				.BorderBackgroundColor(FLinearColor(0.04f, 0.04f, 0.05f, 1.0f))
 				.Padding(0.0f)
 				[
 					BodyContent
@@ -593,6 +593,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 							? OutputLabels[OutputIndex]
 							: FText::GetEmpty())
 						.TextStyle(FAppStyle::Get(), "Graph.Node.PinName")
+						.ColorAndOpacity(FLinearColor(0.92f, 0.92f, 0.94f, 1.0f))
 					]
 					+ SVerticalBox::Slot()
 					.AutoHeight()
@@ -708,7 +709,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			SNew(STextBlock)
 			.Text(Kind)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-			.ColorAndOpacity(FLinearColor(0.65f, 0.80f, 1.0f, 1.0f))
+			.ColorAndOpacity(FLinearColor(0.84f, 0.91f, 1.0f, 1.0f))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 10.0f : 0.0f, 0.0f)
 		[
@@ -716,20 +717,24 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			.Visibility(bCompact && !Name.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(Name)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 8.0f : 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
 			.Visibility(bCompact && !Type.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(Type.IsEmpty() ? FText::GetEmpty() : FText::Format(LOCTEXT("CompactType", ": {0}"), Type))
-			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.ColorAndOpacity(FLinearColor(0.82f, 0.84f, 0.88f, 1.0f))
 		]
 	];
 	if (!bCompact && !Name.IsEmpty())
 	{
 		Header->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
 		[
-			SNew(STextBlock).Text(Name).Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+			SNew(STextBlock)
+			.Text(Name)
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
 		];
 	}
 	if (!Lines.IsEmpty())
@@ -743,7 +748,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			SNew(STextBlock)
 			.Text(Lines)
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-			.ColorAndOpacity(FLinearColor(0.52f, 0.58f, 0.64f, 1.0f))
+			.ColorAndOpacity(FLinearColor(0.68f, 0.72f, 0.78f, 1.0f))
 		];
 	}
 	if (!bCompact && !Type.IsEmpty() && Tile.Kind == EVerseVisualTileKind::Definition)
@@ -752,7 +757,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 		[
 			SNew(STextBlock)
 			.Text(FText::Format(LOCTEXT("DefinitionType", "Type: {0}"), Type))
-			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.ColorAndOpacity(FLinearColor(0.82f, 0.84f, 0.88f, 1.0f))
 		];
 	}
 	if (!DiagnosticText.IsEmpty())
@@ -845,6 +850,7 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 				.Visibility(Name.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 				.Text(Name)
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+				.ColorAndOpacity(FLinearColor(0.92f, 0.92f, 0.94f, 1.0f))
 			];
 		};
 		auto AddInlineLiteral = [&]()
