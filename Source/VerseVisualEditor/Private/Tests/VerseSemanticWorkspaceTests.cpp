@@ -798,6 +798,96 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 			&& FailableCast->ValueOutputs.Num() == 1
 			&& FailableCast->ValueOutputs[0].SemanticTypeName == TEXT("int"));
 	}
+
+	const FVerseVisualTile* PredicateBinding =
+		BindStatement(TEXT("PredicateBinding"));
+	if (PredicateBinding != nullptr)
+	{
+		const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
+			PredicateBinding->ControlRegions.FindByPredicate(
+				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		const FVerseVisualTile* Predicate = ConditionRegion != nullptr
+			&& PredicateBinding->Children.IsValidIndex(
+				ConditionRegion->FirstOperandIndex)
+			? &PredicateBinding->Children[ConditionRegion->FirstOperandIndex]
+			: nullptr;
+		if (TestNotNull(TEXT("If exposes its external failure context"), Predicate)
+			&& TestTrue(TEXT("Predicate bindings are compiler-backed"),
+				Predicate->ValueOutputs.Num() == 2
+				&& Predicate->ValueOutputs[0].SemanticDataDefinition != nullptr))
+		{
+			const FVerseVisualSocket& Boundary = Predicate->ValueOutputs[0];
+			const FVerseVisualSocket& MutableBoundary = Predicate->ValueOutputs[1];
+			TestTrue(TEXT("Predicate boundary carries the exact typed binding"),
+				Boundary.SemanticName == TEXT("Value")
+				&& Boundary.SemanticTypeName == TEXT("int")
+				&& Boundary.SemanticSnapshot == *ExactSnapshot);
+			TestTrue(TEXT("Variable predicate boundary uses its user-facing value type"),
+				MutableBoundary.SemanticName == TEXT("MutableValue")
+				&& MutableBoundary.SemanticTypeName == TEXT("int")
+				&& MutableBoundary.SemanticDataDefinition != nullptr);
+			TestTrue(TEXT("Predicate boundary pins remain disconnected drag sources"),
+				!Boundary.bConnected && !MutableBoundary.bConnected);
+			TestTrue(TEXT("Predicate binding is limited to the successful body scope"),
+				Boundary.LegalConsumerScopes.Num() == 1
+				&& MutableBoundary.LegalConsumerScopes.Num() == 1);
+			TestTrue(TEXT("Defining tile shares the boundary's compiler identity"),
+				Predicate->Children.Num() == 2
+				&& Predicate->Children[0].ValueOutputs.Num() == 1
+				&& !Predicate->Children[0].ValueOutputs[0].bConnected
+				&& Predicate->Children[0].ValueOutputs[0].SemanticDataDefinition
+					== Boundary.SemanticDataDefinition
+				&& Predicate->Children[1].DefinitionKind == VerseSyntaxKind::Variable
+				&& Predicate->Children[1].ValueOutputs.Num() == 1
+				&& !Predicate->Children[1].ValueOutputs[0].bConnected
+				&& Predicate->Children[1].ValueOutputs[0].SemanticDataDefinition
+					== MutableBoundary.SemanticDataDefinition);
+
+			const FUtf8StringView SourceView = Document->GetOriginalUtf8View();
+			const int32 ThenValueByte = SourceView.Find(UTF8TEXTVIEW("        Value"));
+			const int32 ElseValueByte = SourceView.Find(UTF8TEXTVIEW("        0"));
+			const auto HasBoundaryBinding = [](
+				const FVerseVisualSocket& Expected,
+				TConstArrayView<FVerseSemanticCandidate> Candidates)
+			{
+				return Candidates.ContainsByPredicate(
+					[&Expected](const FVerseSemanticCandidate& Candidate)
+					{
+						return Candidate.DataDefinition
+							== Expected.SemanticDataDefinition;
+					});
+			};
+			if (TestTrue(TEXT("Fixture locates both if branches"),
+				ThenValueByte != INDEX_NONE && ElseValueByte != INDEX_NONE))
+			{
+				const TArray<FVerseSemanticCandidate> ThenCandidates =
+					FVerseSemanticCandidateProvider::Build(
+						CandidateSnapshots,
+						FilePath,
+						ThenValueByte,
+						false,
+						*Document);
+				const TArray<FVerseSemanticCandidate> ElseCandidates =
+					FVerseSemanticCandidateProvider::Build(
+						CandidateSnapshots,
+						FilePath,
+						ElseValueByte,
+						false,
+						*Document);
+				TestTrue(TEXT("Constant binding is available in the successful body"),
+					HasBoundaryBinding(Boundary, ThenCandidates));
+				TestTrue(TEXT("Variable binding is available in the successful body"),
+					HasBoundaryBinding(MutableBoundary, ThenCandidates));
+				TestFalse(TEXT("Constant binding is unavailable in the else body"),
+					HasBoundaryBinding(Boundary, ElseCandidates));
+				TestFalse(TEXT("Variable binding is unavailable in the else body"),
+					HasBoundaryBinding(MutableBoundary, ElseCandidates));
+			}
+		}
+	}
 	return true;
 }
 

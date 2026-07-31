@@ -242,6 +242,35 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Populated block expands to contain its ordered child area"),
 		PopulatedWidget->GetDesiredSize().X > EmptyWidget->GetDesiredSize().X
 			&& PopulatedWidget->GetDesiredSize().Y > EmptyWidget->GetDesiredSize().Y);
+
+	FVerseVisualTile OneBindingBlock = EmptyBlock;
+	FVerseVisualSocket& OneBinding = OneBindingBlock.ValueOutputs.AddDefaulted_GetRef();
+	OneBinding.SemanticName = TEXT("Value");
+	OneBinding.SemanticTypeName = TEXT("int");
+	FVerseVisualTile TwoBindingBlock = OneBindingBlock;
+	FVerseVisualSocket& TwoBinding = TwoBindingBlock.ValueOutputs.AddDefaulted_GetRef();
+	TwoBinding.SemanticName = TEXT("MutableValue");
+	TwoBinding.SemanticTypeName = TEXT("float");
+	const TSharedRef<SVerseTile> OneBindingWidget =
+		SNew(SVerseTile)
+		.Tile(OneBindingBlock)
+		.TileColor(FLinearColor::Black)
+		.ShowBody(true)
+		.BodyContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
+	const TSharedRef<SVerseTile> TwoBindingWidget =
+		SNew(SVerseTile)
+		.Tile(TwoBindingBlock)
+		.TileColor(FLinearColor::Black)
+		.ShowBody(true)
+		.BodyContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
+	OneBindingWidget->SlatePrepass();
+	TwoBindingWidget->SlatePrepass();
+	TestTrue(TEXT("Failure and binding pins share one right-edge group"),
+		OneBindingWidget->GetFailureContextOutputAnchor().IsValid()
+		&& OneBindingWidget->GetValueOutputAnchor(0).IsValid()
+		&& TwoBindingWidget->GetValueOutputAnchor(1).IsValid());
+	TestTrue(TEXT("The Condition header grows to contain additional bindings"),
+		TwoBindingWidget->GetDesiredSize().Y > OneBindingWidget->GetDesiredSize().Y);
 	return true;
 }
 

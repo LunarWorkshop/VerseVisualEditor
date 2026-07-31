@@ -217,6 +217,47 @@ namespace
 		return nullptr;
 	}
 
+	const uLang::CExprDataDefinition* FindMappedDataDefinition(
+		const Verse::Vst::Node& Node)
+	{
+		if (const uLang::CAstNode* Ast = Node.GetMappedAstNode();
+			Ast != nullptr && Ast->GetNodeType() == uLang::EAstNodeType::Definition_Data)
+		{
+			return static_cast<const uLang::CExprDataDefinition*>(Ast);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			if (const uLang::CExprDataDefinition* Definition =
+				FindMappedDataDefinition(*Child))
+			{
+				return Definition;
+			}
+		}
+		return nullptr;
+	}
+
+	const uLang::CTypeBase* GetDataValueType(
+		const uLang::CDataDefinition& Definition)
+	{
+		if (Definition.GetType() == nullptr)
+		{
+			return nullptr;
+		}
+		const uLang::CNormalType& NormalType = Definition.GetType()->GetNormalType();
+		if (const uLang::CPointerType* PointerType =
+			NormalType.AsNullable<uLang::CPointerType>())
+		{
+			return PointerType->PositiveValueType();
+		}
+		return Definition.GetType();
+	}
+
+	FString GetUserFacingDataType(const uLang::CDataDefinition& Definition)
+	{
+		const uLang::CTypeBase* ValueType = GetDataValueType(Definition);
+		return ValueType != nullptr ? ToFString(ValueType->AsCode()) : FString();
+	}
+
 	void BindExpressionTile(
 		FVerseVisualTile& Tile,
 		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
@@ -227,16 +268,67 @@ namespace
 		{
 			BindExpressionTile(Child, Snapshot, FilePath, Document);
 		}
-		if (Tile.Kind != EVerseVisualTileKind::Expression
-			|| !Snapshot.IsValid()
+		if (!Snapshot.IsValid()
 			|| !Snapshot->GetProgram().IsValid()
 			|| !Snapshot->Describes(FilePath, Tile.Range.Revision))
 		{
 			return;
 		}
 
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			Tile.ValueOutputs.Reset();
+			for (FVerseVisualTile& Child : Tile.Children)
+			{
+				if (Child.Kind != EVerseVisualTileKind::Definition
+					|| Child.SemanticDataDefinition == nullptr)
+				{
+					continue;
+				}
+				FVerseVisualSocket Binding;
+				Binding.NameRange = Child.NameRange;
+				Binding.TypeRange = Child.TypeRange;
+				Binding.SemanticName = ToFString(
+					Child.SemanticDataDefinition->AsNameStringView());
+				Binding.SemanticTypeName = GetUserFacingDataType(
+					*Child.SemanticDataDefinition);
+				// Boundary binding pins are future drag sources, not an internal
+				// visualization of the declaration that introduced them.
+				Binding.bConnected = false;
+				Binding.Outcome = EVerseExpressionOutcome::Ordinary;
+				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
+				Binding.SemanticSnapshot = Snapshot;
+				Tile.ValueOutputs.Add(Binding);
+
+				Child.ValueOutputs.Reset();
+				Child.ValueOutputs.Add(MoveTemp(Binding));
+			}
+			Tile.SemanticSnapshot = Snapshot;
+			return;
+		}
+
+		if (Tile.Kind != EVerseVisualTileKind::Expression
+			&& Tile.Kind != EVerseVisualTileKind::Definition)
+		{
+			return;
+		}
+
 		const Verse::Vst::Node* Node = FindExactSemanticNode(
 			*Snapshot, FilePath, Tile.Range, Document);
+		if (Tile.Kind == EVerseVisualTileKind::Definition)
+		{
+			const uLang::CExprDataDefinition* Definition = Node != nullptr
+				? FindMappedDataDefinition(*Node)
+				: nullptr;
+			if (Definition != nullptr)
+			{
+				Tile.SemanticDataDefinition = Definition->_DataMember.Get();
+				Tile.SemanticSnapshot = Snapshot;
+				Tile.SemanticTypeName = GetUserFacingDataType(*Tile.SemanticDataDefinition);
+				Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
+			}
+			return;
+		}
 		const uLang::CExprInvocation* Invocation = Node
 			? FindMappedInvocation(*Node)
 			: nullptr;
@@ -291,6 +383,49 @@ namespace
 				FVerseVisualSocket& Output = Tile.ValueOutputs.AddDefaulted_GetRef();
 				Output.SemanticTypeName = Tile.SemanticTypeName;
 				Output.Outcome = Tile.Outcome;
+			}
+		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::If)
+		{
+			const FVerseVisualExpressionDescriptor::FControlRegion* ThenRegion =
+				Tile.ControlRegions.FindByPredicate(
+					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Body;
+					});
+			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
+				Tile.ControlRegions.FindByPredicate(
+					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Condition;
+					});
+			if (ThenRegion != nullptr && ConditionRegion != nullptr
+				&& Tile.Children.IsValidIndex(ConditionRegion->FirstOperandIndex))
+			{
+				const int32 ThenProbeByte = ThenRegion->OperandCount > 0
+					&& Tile.Children.IsValidIndex(ThenRegion->FirstOperandIndex)
+					? Tile.Children[ThenRegion->FirstOperandIndex].Range.BeginByte
+					: (ThenRegion->InteriorRange.IsSet()
+						? ThenRegion->InteriorRange.BeginByte
+						: ThenRegion->Range.BeginByte);
+				const Verse::Vst::Node* ThenNode = FindSemanticNode(
+					*Snapshot, FilePath, ThenProbeByte, Document);
+				const uLang::CScope* ThenScope = ThenNode != nullptr
+					? FindActiveScope(*ThenNode, Program)
+					: nullptr;
+				FVerseVisualTile& Predicate =
+					Tile.Children[ConditionRegion->FirstOperandIndex];
+				if (Predicate.Kind == EVerseVisualTileKind::FailableBlock)
+				{
+					for (FVerseVisualSocket& Binding : Predicate.ValueOutputs)
+					{
+						if (ThenScope != nullptr)
+						{
+							Binding.LegalConsumerScopes.AddUnique(ThenScope);
+						}
+					}
+				}
 			}
 		}
 		if (Tile.ExpressionKind != EVerseExpressionKind::Call
@@ -600,11 +735,13 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 			if (const uLang::CDataDefinition* Data =
 				Definition->AsNullable<uLang::CDataDefinition>())
 			{
+				const uLang::CTypeBase* DataValueType = GetDataValueType(*Data);
 				if (!bDraggingFromOutput
 					&& !Data->IsInstanceMember()
 					&& Data->IsAccessibleFrom(*ActiveScope)
+					&& DataValueType != nullptr
 					&& uLang::SemanticTypeUtils::IsSubtype(
-						Data->GetType(), SocketType, UploadedVersion))
+						DataValueType, SocketType, UploadedVersion))
 				{
 					FVerseSemanticCandidate& Candidate = Result.AddDefaulted_GetRef();
 					Candidate.Kind = EVerseSemanticCandidateKind::Identifier;

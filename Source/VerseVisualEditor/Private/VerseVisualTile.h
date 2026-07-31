@@ -5,7 +5,12 @@
 #include "VerseParseSnapshot.h"
 
 class FVerseSemanticSnapshot;
-namespace uLang { class CFunction; }
+namespace uLang
+{
+	class CDataDefinition;
+	class CFunction;
+	class CScope;
+}
 
 enum class EVerseVisualTileKind : uint8
 {
@@ -49,6 +54,12 @@ struct FVerseVisualSocket
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	/** Exact compiler identity for a predicate binding exposed at a context boundary. */
+	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
+	/** Compiler scopes in which this boundary binding may legally be consumed. */
+	TArray<const uLang::CScope*> LegalConsumerScopes;
+	/** Keeps SemanticDataDefinition and LegalConsumerScopes alive. */
+	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 };
 
 struct FVerseVisualExpressionDescriptor
@@ -146,6 +157,7 @@ struct FVerseVisualTile
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseTextRange> SpecifierRanges;

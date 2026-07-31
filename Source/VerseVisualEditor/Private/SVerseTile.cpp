@@ -408,6 +408,26 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		FailureContextOutputAnchor = Pin;
 		FailureContextOutputWidget = Pin;
 	}
+	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.ValueOutputs, true);
+	TSharedRef<SWidget> HeaderOutputGroup = ValueOutputWidget;
+	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	{
+		HeaderOutputGroup =
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			.Padding(0.0f, 2.0f, 0.0f, 2.0f)
+			[
+				FailureContextOutputWidget
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			[
+				ValueOutputWidget
+			];
+	}
 
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
@@ -483,13 +503,15 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.AutoWidth()
 					.VAlign(VAlign_Center)
 					[
-						BuildSocketColumn(Tile.ValueOutputs, true)
+						HeaderOutputGroup
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
 					.VAlign(VAlign_Center)
 					[
-						FailureContextOutputWidget
+						Tile.Kind == EVerseVisualTileKind::FailableBlock
+							? SNullWidget::NullWidget
+							: FailureContextOutputWidget
 					]
 					]
 				]

@@ -680,13 +680,13 @@ without changing any control tile yet.
 This slice produces the common visual container that `if`, `for`, and later
 failure-context owners will reuse.
 
-#### 16.3. Place the failable predicate inside `if` (complete)
+#### 16.3. Place the failable predicate beside `if` (complete)
 
 - Derive an `if` failure-context descriptor from the VST. It must retain the
   owner's identity, exact source range, ordered predicate expression ranges,
   punctuation and separator ranges, insertion points, and current revision.
-- Replace the hardcoded Boolean condition input with the reusable failable
-  block placed inside the `if` tile.
+- Replace the hardcoded Boolean condition input with a reusable external
+  failable block automatically placed to the left of the `if` tile.
 - Feed the failable predicate's structural success into the existing `if`
   branches. The `if` owner discards the predicate's value, so do not display a
   right-side value socket for this block even when its final expression has a
@@ -701,13 +701,15 @@ failure-context owners will reuse.
 
 This slice makes the new representation visible in every parsed `if`.
 
-#### 16.4. Scoped predicate bindings
+#### 16.4. Scoped predicate bindings (complete)
 
 - Record each binding introduced by an `if` predicate using compiler identity,
   displayed name, compiler type, declaration range, and legal consumer scopes.
-- Expose each binding as a typed socket on the right edge of the `if` tile.
-  Connect its defining expression inside the failable block to that boundary
-  port.
+- Expose each binding as a typed socket on the right edge of the external
+  failable-context header. Put these sockets below the gold failure socket,
+  vertically center the complete socket group, and grow the header to contain
+  it. Connect each defining expression inside the failable block to its
+  boundary port.
 - Make an `if` binding available only in the corresponding `then` body. It must
   never appear in `else` or after the `if`.
 - Use the same scope-aware expression search and semantic compatibility checks

@@ -18,3 +18,9 @@ NonFailableOperator(Input : int)<computes> : int =
 
 FailableOperator(Input : int)<decides><computes> : void =
     Input < 0
+
+PredicateBinding(MaybeValue : ?int)<allocates><reads> : int =
+    if (Value := MaybeValue?; var MutableValue : int = Value):
+        Value + MutableValue
+    else:
+        0
