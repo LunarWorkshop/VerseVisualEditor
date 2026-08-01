@@ -590,6 +590,70 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				IfTile.Children.IsValidIndex(ConditionIndex)))
 			{
 				const FVerseVisualTile& Predicate = IfTile.Children[ConditionIndex];
+				const FVerseGraphRenderScopeId PredicateScope =
+					FVerseGraphRenderScopeId::ForTile(Predicate.Id);
+				const TArray<FVerseVisualConnection> Connections =
+					FVerseVisualTileBuilder::BuildConnections(IfGraph);
+				const TArray<FVerseGraphRenderScope> RenderScopes =
+					FVerseVisualTileBuilder::BuildRenderScopes(IfGraph);
+				FString ScopeDiagnostic;
+				TestTrue(TEXT("If graph has a valid hierarchical render-scope tree"),
+					FVerseVisualTileBuilder::ValidateRenderScopes(
+						IfGraph, RenderScopes, Connections, &ScopeDiagnostic));
+				if (RenderScopes.Num() > 1)
+				{
+					TArray<FVerseGraphRenderScope> MissingParent = RenderScopes;
+					MissingParent.Last().Parent = {999999};
+					TestFalse(TEXT("A render scope with a missing parent is rejected"),
+						FVerseVisualTileBuilder::ValidateRenderScopes(
+							IfGraph, MissingParent, Connections, &ScopeDiagnostic));
+					TArray<FVerseGraphRenderScope> CyclicScopes = RenderScopes;
+					CyclicScopes.Last().Parent = CyclicScopes.Last().Id;
+					TestFalse(TEXT("A cyclic render-scope tree is rejected"),
+						FVerseVisualTileBuilder::ValidateRenderScopes(
+							IfGraph, CyclicScopes, Connections, &ScopeDiagnostic));
+				}
+				TestTrue(TEXT("Predicate operand wires belong above the failable background"),
+					Connections.ContainsByPredicate(
+						[PredicateScope](const FVerseVisualConnection& Connection)
+						{
+							return Connection.RenderScope == PredicateScope
+								&& Connection.Source.Socket.Role
+									== EVerseVisualSocketRole::Value;
+						}));
+				if (const FVerseVisualConnection* InternalConnection =
+					Connections.FindByPredicate(
+						[PredicateScope](const FVerseVisualConnection& Connection)
+						{
+							return Connection.RenderScope == PredicateScope;
+						}))
+				{
+					TArray<FVerseVisualConnection> IncorrectlyRooted = Connections;
+					FVerseVisualConnection* Copy = IncorrectlyRooted.FindByPredicate(
+						[InternalConnection](const FVerseVisualConnection& Connection)
+						{
+							return Connection.Source == InternalConnection->Source
+								&& Connection.Target == InternalConnection->Target;
+						});
+					if (Copy != nullptr)
+					{
+						Copy->RenderScope = FVerseGraphRenderScopeId::Root();
+						TestFalse(TEXT("An internal predicate wire cannot fall back to the root painter"),
+							FVerseVisualTileBuilder::ValidateRenderScopes(
+								IfGraph, RenderScopes, IncorrectlyRooted, &ScopeDiagnostic));
+					}
+				}
+				TestTrue(TEXT("The failable-context boundary wire belongs to the parent scope"),
+					Connections.ContainsByPredicate(
+						[&](const FVerseVisualConnection& Connection)
+						{
+							return Connection.Source.Tile == Predicate.Id
+								&& Connection.Source.Socket.Role
+									== EVerseVisualSocketRole::FailureContext
+								&& Connection.Target.Tile == IfTile.Id
+								&& Connection.RenderScope
+									== FVerseGraphRenderScopeId::Root();
+						}));
 				TestTrue(TEXT("If predicate is contained and discards its final value"),
 					Predicate.Kind == EVerseVisualTileKind::FailableBlock
 					&& VerseVisualTileTests::HasSocket(Predicate,
@@ -625,6 +689,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			Graph.Num() == 3 && Graph[1].Children.Num() >= 1))
 		{
 			const FVerseVisualTile& Predicate = Graph[1].Children[0];
+			const TArray<FVerseVisualConnection> Connections =
+				FVerseVisualTileBuilder::BuildConnections(Graph);
 			TestTrue(TEXT("Every ordered predicate expression remains in the block"),
 				Predicate.Kind == EVerseVisualTileKind::FailableBlock
 					&& Predicate.Children.Num() == 2
@@ -632,6 +698,15 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 					&& Predicate.ControlRegions[0].Items.Num() == 2
 					&& Predicate.ControlRegions[0].Items[0].Separator
 						== EVerseClauseItemSeparator::Semicolon);
+			TestTrue(TEXT("Predicate execution wires inherit the predicate render scope"),
+				Connections.ContainsByPredicate(
+					[&](const FVerseVisualConnection& Connection)
+					{
+						return Connection.RenderScope
+							== FVerseGraphRenderScopeId::ForTile(Predicate.Id)
+							&& Connection.Source.Socket.Role
+								== EVerseVisualSocketRole::ClauseInsertion;
+					}));
 		}
 	}
 
@@ -1043,6 +1118,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
 {
+	FVerseVisualTile NestedScopeOuter;
+	NestedScopeOuter.Id = {900001};
+	NestedScopeOuter.Kind = EVerseVisualTileKind::FailableBlock;
+	FVerseVisualTile& NestedScopeInner = NestedScopeOuter.Children.AddDefaulted_GetRef();
+	NestedScopeInner.Id = {900002};
+	NestedScopeInner.Kind = EVerseVisualTileKind::FailableBlock;
+	const TArray<FVerseGraphRenderScope> NestedScopes =
+		FVerseVisualTileBuilder::BuildRenderScopes(MakeArrayView(&NestedScopeOuter, 1));
+	const FVerseGraphRenderScope* InnerScope = NestedScopes.FindByPredicate(
+		[&](const FVerseGraphRenderScope& Scope)
+		{
+			return Scope.OwnerTile == NestedScopeInner.Id;
+		});
+	TestTrue(TEXT("Nested graphical containers form a recursive render-scope tree"),
+		InnerScope != nullptr
+			&& InnerScope->Parent
+				== FVerseGraphRenderScopeId::ForTile(NestedScopeOuter.Id));
+
 	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
 		*this, TEXT("functions.verse"));
 	if (!Document.IsValid())
@@ -1062,9 +1155,14 @@ bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
 		FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Snapshot);
 	const TArray<FVerseVisualConnection> Connections =
 		FVerseVisualTileBuilder::BuildConnections(Graph);
+	const TArray<FVerseGraphRenderScope> RenderScopes =
+		FVerseVisualTileBuilder::BuildRenderScopes(Graph);
 	FString Diagnostic;
 	TestTrue(TEXT("Builder produces a valid endpoint graph"),
 		FVerseVisualTileBuilder::ValidateConnections(Graph, Connections, &Diagnostic));
+	TestTrue(TEXT("Builder produces a valid hierarchical render graph"),
+		FVerseVisualTileBuilder::ValidateRenderScopes(
+			Graph, RenderScopes, Connections, &Diagnostic));
 	for (const FVerseVisualConnection& Connection : Connections)
 	{
 		const FVerseVisualTile* Source = nullptr;
@@ -1087,6 +1185,12 @@ bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
 	}
 	if (!Connections.IsEmpty())
 	{
+		TArray<FVerseVisualConnection> MissingScope = Connections;
+		MissingScope[0].RenderScope = {999999};
+		TestFalse(TEXT("A missing connection render scope is rejected"),
+			FVerseVisualTileBuilder::ValidateRenderScopes(
+				Graph, RenderScopes, MissingScope, &Diagnostic));
+
 		TArray<FVerseVisualConnection> MissingEndpoint = Connections;
 		MissingEndpoint[0].Target.Socket.Index = 9999;
 		TestFalse(TEXT("A missing endpoint is rejected"),

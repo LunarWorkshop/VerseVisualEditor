@@ -1,6 +1,7 @@
 #include "SVerseGraphSurface.h"
 
 #include "Brushes/SlateColorBrush.h"
+#include "CoreGlobals.h"
 #include "GraphEditorSettings.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
@@ -127,16 +128,50 @@ namespace
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId)
 	{
-		const TSharedPtr<SWidget> Source = Connection.SourceAnchor.Pin();
-		const TSharedPtr<SWidget> Target = Connection.TargetAnchor.Pin();
+		if (!Connection.EndpointRegistry.IsValid())
+		{
+			return;
+		}
+		const FVerseGraphEndpointBinding* SourceBinding =
+			Connection.EndpointRegistry->Find(Connection.Source);
+		const FVerseGraphEndpointBinding* TargetBinding =
+			Connection.EndpointRegistry->Find(Connection.Target);
+		if (SourceBinding == nullptr || TargetBinding == nullptr)
+		{
+			return;
+		}
+		auto IsBindingVisible = [](const FVerseGraphEndpointBinding& Binding)
+		{
+			if (!Binding.bScopedToNestedRenderScope)
+			{
+				return true;
+			}
+			const TSharedPtr<SVerseGraphRenderScope> Scope = Binding.RenderScope.Pin();
+			return Scope.IsValid() && Scope->WasPaintedThisFrame();
+		};
+		if (!IsBindingVisible(*SourceBinding) || !IsBindingVisible(*TargetBinding))
+		{
+			return;
+		}
+		const TSharedPtr<SWidget> Source = SourceBinding->Anchor.Pin();
+		const TSharedPtr<SWidget> Target = TargetBinding->Anchor.Pin();
 		if (!Source.IsValid() || !Target.IsValid())
 		{
 			return;
 		}
+		const FGeometry& SourceGeometry = Source->GetPaintSpaceGeometry();
+		const FGeometry& TargetGeometry = Target->GetPaintSpaceGeometry();
+		if (!Source->GetVisibility().IsVisible()
+			|| !Target->GetVisibility().IsVisible()
+			|| SourceGeometry.GetLocalSize().GetMin() <= 0.0f
+			|| TargetGeometry.GetLocalSize().GetMin() <= 0.0f)
+		{
+			return;
+		}
 		const FVersePaintPoint Start = AnchorPoint(
-			Source, Connection.SourceAnchorCoordinate);
+			Source, SourceBinding->AnchorCoordinate);
 		const FVersePaintPoint End = AnchorPoint(
-			Target, Connection.TargetAnchorCoordinate);
+			Target, TargetBinding->AnchorCoordinate);
 		DrawSpline(
 			OutDrawElements, LayerId, Start, End,
 			Connection.Axis, Connection.Thickness, Connection.Color);
@@ -170,21 +205,57 @@ namespace
 	}
 }
 
-void SVerseGraphConnectionLayer::Construct(const FArguments& InArgs)
+void FVerseGraphEndpointRegistry::Register(
+	FVerseVisualSocketEndpoint Endpoint,
+	FVerseGraphEndpointBinding Binding)
 {
-	Connections = InArgs._Connections;
-	SetCanTick(false);
-	SetVisibility(EVisibility::HitTestInvisible);
+	Bindings.Add(Endpoint, MoveTemp(Binding));
 }
 
-void SVerseGraphConnectionLayer::SetConnections(
+const FVerseGraphEndpointBinding* FVerseGraphEndpointRegistry::Find(
+	FVerseVisualSocketEndpoint Endpoint) const
+{
+	return Bindings.Find(Endpoint);
+}
+
+void SVerseGraphRenderScope::Construct(const FArguments& InArgs)
+{
+	Connections = InArgs._Connections;
+	Background = InArgs._Background;
+	SetCanTick(false);
+	SetClipping(InArgs._ClipToBounds
+		? EWidgetClipping::ClipToBounds
+		: EWidgetClipping::Inherit);
+	ChildSlot
+	[
+		InArgs._Content.Widget
+	];
+}
+
+void SVerseGraphRenderScope::SetConnections(
 	TArray<FVerseGraphConnection> InConnections)
 {
 	Connections = MoveTemp(InConnections);
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
-int32 SVerseGraphConnectionLayer::OnPaint(
+void SVerseGraphRenderScope::SetContent(TSharedRef<SWidget> InContent)
+{
+	ChildSlot[InContent];
+	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+bool SVerseGraphRenderScope::WasPaintedThisFrame() const
+{
+	return LastPaintFrame == GFrameCounter;
+}
+
+bool SVerseGraphRenderScope::WasPaintedRecently() const
+{
+	return LastPaintFrame != MAX_uint64 && GFrameCounter <= LastPaintFrame + 1;
+}
+
+int32 SVerseGraphRenderScope::OnPaint(
 	const FPaintArgs& Args,
 	const FGeometry& AllottedGeometry,
 	const FSlateRect& MyCullingRect,
@@ -193,11 +264,52 @@ int32 SVerseGraphConnectionLayer::OnPaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
+	LastPaintFrame = GFrameCounter;
+	int32 BackgroundLayer = LayerId;
+	if (Background == EVerseGraphRenderScopeBackground::Failable)
+	{
+		static const FSlateColorBrush WhiteBrush(FLinearColor::White);
+		const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
+		FSlateDrawElement::MakeBox(
+			OutDrawElements,
+			BackgroundLayer,
+			AllottedGeometry.ToPaintGeometry(),
+			&WhiteBrush,
+			ESlateDrawEffect::None,
+			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14"))) * WidgetTint);
+		const FLinearColor PatternColor =
+			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b"))) * WidgetTint;
+		for (const FVerseFailablePatternSegment& Segment :
+			BuildVerseFailablePatternSegments(AllottedGeometry.GetLocalSize()))
+		{
+			TArray<FVector2f> Points({FVector2f(Segment.Start), FVector2f(Segment.End)});
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				BackgroundLayer + 1,
+				AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(Points),
+				ESlateDrawEffect::None,
+				PatternColor,
+				true,
+				1.0f);
+		}
+		++BackgroundLayer;
+	}
+
+	const int32 ConnectionLayer = BackgroundLayer + 1;
 	for (const FVerseGraphConnection& Connection : Connections)
 	{
-		PaintConnectionRecord(Connection, OutDrawElements, LayerId);
+		PaintConnectionRecord(Connection, OutDrawElements, ConnectionLayer);
 	}
-	return LayerId;
+	const int32 ContentLayer = SCompoundWidget::OnPaint(
+		Args,
+		AllottedGeometry,
+		MyCullingRect,
+		OutDrawElements,
+		ConnectionLayer + 1,
+		InWidgetStyle,
+		bParentEnabled);
+	return FMath::Max(ContentLayer, ConnectionLayer);
 }
 
 void SVerseGraphSurface::Construct(
@@ -345,6 +457,16 @@ void SVerseGraphSurface::Tick(
 	float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (ConnectionDrag.IsSet() && ConnectionDrag->bScopedToNestedRenderScope)
+	{
+		const TSharedPtr<SVerseGraphRenderScope> Scope = ConnectionDrag->RenderScope.Pin();
+		if (!Scope.IsValid() || !Scope->WasPaintedRecently())
+		{
+			ConnectionDrag.Reset();
+			bPreviewFrozen = false;
+			OnConnectionCancelled.ExecuteIfBound();
+		}
+	}
 	if (!bPendingInitialCenter || !HorizontalScrollBox.IsValid() || !VerticalScrollBox.IsValid())
 	{
 		return;
@@ -470,6 +592,14 @@ void SVerseGraphSurface::PaintPreviewConnection(
 	if (!ConnectionDrag.IsSet() || !ConnectionDrag->Anchor.IsValid())
 	{
 		return;
+	}
+	if (ConnectionDrag->bScopedToNestedRenderScope)
+	{
+		const TSharedPtr<SVerseGraphRenderScope> Scope = ConnectionDrag->RenderScope.Pin();
+		if (!Scope.IsValid() || !Scope->WasPaintedThisFrame())
+		{
+			return;
+		}
 	}
 	const FVersePaintPoint Free = VerseCanvasToPaint(GetPaintSpaceGeometry(), PreviewEndpoint);
 	const FVersePaintPoint Fixed = AnchorPoint(

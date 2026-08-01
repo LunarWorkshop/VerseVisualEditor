@@ -574,13 +574,26 @@ namespace
 				: "Graph.Pin.Disconnected");
 	}
 
-	using FVerseTileWidgetRegistry =
-		TMap<FVerseVisualTileId, TSharedPtr<SVerseTile>>;
+	struct FVerseTileWidgetRegistry
+	{
+		TMap<FVerseVisualTileId, TSharedPtr<SVerseTile>> Tiles;
+		TSharedRef<FVerseGraphEndpointRegistry> Endpoints =
+			MakeShared<FVerseGraphEndpointRegistry>();
+
+		void Add(FVerseVisualTileId Id, TSharedPtr<SVerseTile> Widget)
+		{
+			Tiles.Add(Id, MoveTemp(Widget));
+		}
+		const TSharedPtr<SVerseTile>* Find(FVerseVisualTileId Id) const
+		{
+			return Tiles.Find(Id);
+		}
+	};
 	TArray<FVerseGraphConnection> ResolveModelConnections(
 		TConstArrayView<FVerseVisualConnection> ModelConnections,
 		const FVerseTileWidgetRegistry& Widgets,
 		TSharedRef<const FVerseDocument> Document,
-		FVerseVisualTileId PaintScope = {});
+		FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root());
 
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
@@ -589,12 +602,13 @@ namespace
 		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
 		TSharedPtr<SWidget> BodyOverride = nullptr,
 		bool bCompactExecutionSpacing = false,
-		TSharedPtr<SWidget> BodyUnderlay = nullptr,
+		TSharedPtr<SVerseGraphRenderScope> BodyRenderScope = nullptr,
 		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
 		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
 		FOnVerseClauseReordered OnClauseReordered = {},
 		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
-		FVerseTileWidgetRegistry* WidgetRegistry = nullptr)
+		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
+		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr)
 	{
 		TSet<FVerseVisualSocketId> ConnectedSockets;
 		for (const FVerseVisualConnection& Connection : ModelConnections)
@@ -696,12 +710,8 @@ namespace
 			.OnSocketDragStarted(OnSocketDragStarted)
 			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
 			.OnClauseReordered(OnClauseReordered)
-			.BodyUnderlay()
-			[
-				BodyUnderlay.IsValid()
-					? BodyUnderlay.ToSharedRef()
-					: SNullWidget::NullWidget
-			]
+			.BodyRenderScope(BodyRenderScope)
+			.OwningRenderScope(OwningRenderScope)
 			.BodyContent()
 			[
 				Body
@@ -778,12 +788,12 @@ namespace
 		TConstArrayView<FVerseVisualConnection> ModelConnections,
 		const FVerseTileWidgetRegistry& Widgets,
 		TSharedRef<const FVerseDocument> Document,
-		FVerseVisualTileId PaintScope)
+		FVerseGraphRenderScopeId RenderScope)
 	{
 		TArray<FVerseGraphConnection> Result;
 		for (const FVerseVisualConnection& Model : ModelConnections)
 		{
-			if (!(Model.PaintScope == PaintScope))
+			if (!(Model.RenderScope == RenderScope))
 			{
 				continue;
 			}
@@ -828,8 +838,9 @@ namespace
 					TypedSocket->SemanticTypeName));
 			}
 			FVerseGraphConnection& Connection = Result.AddDefaulted_GetRef();
-			Connection.SourceAnchor = SourceAnchor;
-			Connection.TargetAnchor = TargetAnchor;
+			Connection.Source = Model.Source;
+			Connection.Target = Model.Target;
+			Connection.EndpointRegistry = Widgets.Endpoints;
 			Connection.Axis = Model.Axis == EVerseVisualConnectionAxis::Horizontal
 				? EVerseGraphConnectionAxis::Horizontal
 				: EVerseGraphConnectionAxis::Vertical;
@@ -839,10 +850,20 @@ namespace
 				|| Model.Source.Socket.Role == EVerseVisualSocketRole::ClauseInsertion
 				? 2.5f : 2.0f;
 			Connection.ExtraBlankLineMarkers = Model.ExtraBlankLineMarkers;
-			Connection.SourceAnchorCoordinate =
-				(*SourceWidget)->GetSocketAnchorCoordinate(Model.Source.Socket);
-			Connection.TargetAnchorCoordinate =
-				(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket);
+			const TWeakPtr<SVerseGraphRenderScope> SourceScope =
+				(*SourceWidget)->GetSocketRenderScope(Model.Source.Socket);
+			const TWeakPtr<SVerseGraphRenderScope> TargetScope =
+				(*TargetWidget)->GetSocketRenderScope(Model.Target.Socket);
+			Widgets.Endpoints->Register(Model.Source, {
+				SourceAnchor,
+				(*SourceWidget)->GetSocketAnchorCoordinate(Model.Source.Socket),
+				SourceScope,
+				SourceScope.IsValid()});
+			Widgets.Endpoints->Register(Model.Target, {
+				TargetAnchor,
+				(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket),
+				TargetScope,
+				TargetScope.IsValid()});
 			Connection.Outcome = Model.Outcome;
 		}
 		return Result;
@@ -864,7 +885,8 @@ namespace
 		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
 		FOnVerseClauseReordered OnClauseReordered = {},
 		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
-		FVerseTileWidgetRegistry* WidgetRegistry = nullptr)
+		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
+		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr)
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -876,8 +898,10 @@ namespace
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
 			TSharedRef<SVerticalBox> Chain = SNew(SVerticalBox);
-			TSharedRef<SVerseGraphConnectionLayer> ConnectionLayer =
-				SNew(SVerseGraphConnectionLayer);
+			TSharedRef<SVerseGraphRenderScope> RenderScope =
+				SNew(SVerseGraphRenderScope)
+				.Background(EVerseGraphRenderScopeBackground::Failable)
+				.ClipToBounds(true);
 			for (int32 ChildIndex = 0; ChildIndex < Tile.Children.Num(); ++ChildIndex)
 			{
 				FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
@@ -890,7 +914,8 @@ namespace
 					IsTileSelected,
 					OnClauseReordered,
 					ModelConnections,
-					WidgetRegistry);
+					WidgetRegistry,
+					RenderScope);
 				Chain->AddSlot()
 				.AutoHeight()
 				.HAlign(HAlign_Center)
@@ -907,16 +932,20 @@ namespace
 				OnInlineLiteralCommitted,
 				Chain,
 				bCompactOperands,
-				ConnectionLayer,
+				RenderScope,
 				OnTileSelected,
 				IsTileSelected,
 				OnClauseReordered,
 				ModelConnections,
-				WidgetRegistry);
-			ConnectionLayer->SetConnections(
+				WidgetRegistry,
+				OwningRenderScope);
+			RenderScope->SetConnections(
 				WidgetRegistry != nullptr
 					? ResolveModelConnections(
-						ModelConnections, *WidgetRegistry, Document, Tile.Id)
+						ModelConnections,
+						*WidgetRegistry,
+						Document,
+						FVerseGraphRenderScopeId::ForTile(Tile.Id))
 					: TArray<FVerseGraphConnection>());
 			if (bCompactOperands)
 			{
@@ -958,7 +987,8 @@ namespace
 					IsTileSelected,
 					OnClauseReordered,
 					ModelConnections,
-					WidgetRegistry);
+					WidgetRegistry,
+					OwningRenderScope);
 				PredicatePresentation = PredicateRow.Widget;
 			}
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
@@ -973,7 +1003,8 @@ namespace
 				IsTileSelected,
 				OnClauseReordered,
 				ModelConnections,
-				WidgetRegistry);
+				WidgetRegistry,
+				OwningRenderScope);
 			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind)
 			{
 				TSharedRef<SVerticalBox> Branch = SNew(SVerticalBox);
@@ -1002,7 +1033,8 @@ namespace
 							IsTileSelected,
 							OnClauseReordered,
 							ModelConnections,
-							WidgetRegistry);
+							WidgetRegistry,
+							OwningRenderScope);
 						Branch->AddSlot()
 						.AutoHeight()
 						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
@@ -1085,7 +1117,8 @@ namespace
 			IsTileSelected,
 			OnClauseReordered,
 			ModelConnections,
-			WidgetRegistry);
+			WidgetRegistry,
+			OwningRenderScope);
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
 			TSharedRef<SHorizontalBox> RegionRow = SNew(SHorizontalBox);
@@ -1131,7 +1164,8 @@ namespace
 						IsTileSelected,
 						OnClauseReordered,
 						ModelConnections,
-						WidgetRegistry);
+						WidgetRegistry,
+						OwningRenderScope);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
@@ -1226,7 +1260,8 @@ namespace
 					IsTileSelected,
 					OnClauseReordered,
 					ModelConnections,
-					WidgetRegistry);
+					WidgetRegistry,
+					OwningRenderScope);
 				Presentation = OperandRow.Widget;
 			}
 			OperandColumn->AddSlot()

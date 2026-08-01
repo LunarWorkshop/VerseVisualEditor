@@ -5,6 +5,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FVerseDocument;
+class SVerseGraphRenderScope;
 struct FSlateRoundedBoxBrush;
 
 struct FVerseFailablePatternSegment
@@ -52,6 +53,8 @@ struct FVerseSocketDragStart
 	bool bAdoptsProvisionalTile = false;
 	int32 ClauseInsertionIndex = INDEX_NONE;
 	EPurpose Purpose = EPurpose::ValueConnection;
+	TWeakPtr<SVerseGraphRenderScope> RenderScope;
+	bool bScopedToNestedRenderScope = false;
 };
 
 DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnVerseSocketDragStarted, const FVerseSocketDragStart&);
@@ -95,7 +98,8 @@ public:
 		SLATE_EVENT(FOnVerseSocketDragStarted, OnSocketDragStarted)
 		SLATE_EVENT(FOnVerseInlineLiteralCommitted, OnInlineLiteralCommitted)
 		SLATE_EVENT(FOnVerseClauseReordered, OnClauseReordered)
-		SLATE_NAMED_SLOT(FArguments, BodyUnderlay)
+		SLATE_ARGUMENT(TSharedPtr<SVerseGraphRenderScope>, BodyRenderScope)
+		SLATE_ARGUMENT(TSharedPtr<SVerseGraphRenderScope>, OwningRenderScope)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
 
@@ -106,6 +110,14 @@ public:
 		return Anchor != nullptr ? *Anchor : nullptr;
 	}
 	FVector2D GetSocketAnchorCoordinate(const FVerseVisualSocketId& SocketId) const;
+	TWeakPtr<SVerseGraphRenderScope> GetSocketRenderScope(
+		const FVerseVisualSocketId& SocketId) const
+	{
+		return Tile.Kind == EVerseVisualTileKind::FailableBlock
+			&& SocketId.Role == EVerseVisualSocketRole::ClauseInsertion
+			? BodyRenderScope
+			: OwningRenderScope;
+	}
 	const FVerseVisualTile& GetTile() const { return Tile; }
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
@@ -176,6 +188,8 @@ private:
 	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;
 	TUniquePtr<FSlateRoundedBoxBrush> BodyBrush;
+	TWeakPtr<SVerseGraphRenderScope> OwningRenderScope;
+	TWeakPtr<SVerseGraphRenderScope> BodyRenderScope;
 	bool bExpanded = true;
 	bool bShowBody = true;
 	bool bCollapsible = true;

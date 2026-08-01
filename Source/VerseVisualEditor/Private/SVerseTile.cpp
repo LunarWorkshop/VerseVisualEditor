@@ -1,4 +1,5 @@
 #include "SVerseTile.h"
+#include "SVerseGraphSurface.h"
 
 #include "SVerseLiteralEditor.h"
 
@@ -271,72 +272,6 @@ namespace
 		bool bConnected = false;
 	};
 
-	class SVerseFailableBlockInterior final : public SCompoundWidget
-	{
-	public:
-		SLATE_BEGIN_ARGS(SVerseFailableBlockInterior) {}
-			SLATE_DEFAULT_SLOT(FArguments, Content)
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			SetCanTick(false);
-			SetClipping(EWidgetClipping::ClipToBounds);
-			ChildSlot
-			.Padding(0.0f)
-			[
-				InArgs._Content.Widget
-			];
-		}
-
-		virtual int32 OnPaint(
-			const FPaintArgs& Args,
-			const FGeometry& AllottedGeometry,
-			const FSlateRect& MyCullingRect,
-			FSlateWindowElementList& OutDrawElements,
-			int32 LayerId,
-			const FWidgetStyle& InWidgetStyle,
-			bool bParentEnabled) const override
-		{
-			static const FSlateColorBrush WhiteBrush(FLinearColor::White);
-			const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
-			FSlateDrawElement::MakeBox(
-				OutDrawElements,
-				LayerId,
-				AllottedGeometry.ToPaintGeometry(),
-				&WhiteBrush,
-				ESlateDrawEffect::None,
-				FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14"))) * WidgetTint);
-
-			const FLinearColor PatternColor =
-				FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b"))) * WidgetTint;
-			for (const FVerseFailablePatternSegment& Segment :
-				BuildVerseFailablePatternSegments(AllottedGeometry.GetLocalSize()))
-			{
-				TArray<FVector2f> Points({
-					FVector2f(Segment.Start),
-					FVector2f(Segment.End)});
-				FSlateDrawElement::MakeLines(
-					OutDrawElements,
-					LayerId + 1,
-					AllottedGeometry.ToPaintGeometry(),
-					MoveTemp(Points),
-					ESlateDrawEffect::None,
-					PatternColor,
-					true,
-					1.0f);
-			}
-
-			return SCompoundWidget::OnPaint(
-				Args,
-				AllottedGeometry,
-				MyCullingRect,
-				OutDrawElements,
-				LayerId + 2,
-				InWidgetStyle,
-				bParentEnabled);
-		}
-	};
 }
 
 void SVerseTile::Construct(const FArguments& InArgs)
@@ -361,6 +296,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	OnSocketDragStarted = InArgs._OnSocketDragStarted;
 	OnInlineLiteralCommitted = InArgs._OnInlineLiteralCommitted;
 	OnClauseReordered = InArgs._OnClauseReordered;
+	OwningRenderScope = InArgs._OwningRenderScope;
+	BodyRenderScope = InArgs._BodyRenderScope;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
 	bShowBody = InArgs._ShowBody;
 	bCollapsible = bShowBody && !(
@@ -474,18 +411,15 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		[
 			BodyContent
 		];
-		BodyContent = SNew(SVerseFailableBlockInterior)
-		[
-			SNew(SOverlay)
-			+ SOverlay::Slot()
-			[
-				InArgs._BodyUnderlay.Widget
-			]
-			+ SOverlay::Slot()
-			[
-				FailureChain
-			]
-		];
+		TSharedPtr<SVerseGraphRenderScope> LocalBodyRenderScope = InArgs._BodyRenderScope;
+		if (!LocalBodyRenderScope.IsValid())
+		{
+			LocalBodyRenderScope = SNew(SVerseGraphRenderScope)
+				.Background(EVerseGraphRenderScopeBackground::Failable)
+				.ClipToBounds(true);
+		}
+		LocalBodyRenderScope->SetContent(FailureChain);
+		BodyContent = LocalBodyRenderScope.ToSharedRef();
 	}
 	TSharedRef<SWidget> FailureContextInputWidget = SNullWidget::NullWidget;
 	if (bIfTile)
@@ -1120,6 +1054,8 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	}
 	FVerseSocketDragStart DragStart;
 	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.RenderScope = OwningRenderScope;
+	DragStart.bScopedToNestedRenderScope = OwningRenderScope.IsValid();
 	DragStart.Endpoint = {Tile.Id, Socket.Id};
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.TileRange = Tile.Range;
@@ -1203,6 +1139,12 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	FVerseSocketDragStart DragStart;
 	DragStart.Purpose = FVerseSocketDragStart::EPurpose::ClauseInsertion;
 	DragStart.Anchor = MoveTemp(Anchor);
+	const TWeakPtr<SVerseGraphRenderScope> SocketRenderScope =
+		Tile.Kind == EVerseVisualTileKind::FailableBlock
+			? BodyRenderScope
+			: OwningRenderScope;
+	DragStart.RenderScope = SocketRenderScope;
+	DragStart.bScopedToNestedRenderScope = SocketRenderScope.IsValid();
 	DragStart.Endpoint = {Tile.Id, SocketId};
 	DragStart.AnchorCoordinate = AnchorCoordinate;
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;

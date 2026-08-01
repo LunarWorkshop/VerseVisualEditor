@@ -54,6 +54,43 @@ FORCEINLINE uint32 GetTypeHash(const FVerseVisualTileId& Id)
 	return GetTypeHash(Id.Value);
 }
 
+/** Revision-local owner for one independently layered graph region. */
+struct FVerseGraphRenderScopeId
+{
+	int32 Value = INDEX_NONE;
+	bool IsValid() const { return Value != INDEX_NONE; }
+	friend bool operator==(FVerseGraphRenderScopeId Left, FVerseGraphRenderScopeId Right)
+	{
+		return Left.Value == Right.Value;
+	}
+
+	static FVerseGraphRenderScopeId Root() { return {0}; }
+	static FVerseGraphRenderScopeId ForTile(FVerseVisualTileId Tile)
+	{
+		return {Tile.IsValid() ? Tile.Value + 1 : INDEX_NONE};
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVerseGraphRenderScopeId& Id)
+{
+	return GetTypeHash(Id.Value);
+}
+
+enum class EVerseGraphRenderScopeBackground : uint8
+{
+	Root,
+	Failable,
+};
+
+struct FVerseGraphRenderScope
+{
+	FVerseGraphRenderScopeId Id;
+	FVerseGraphRenderScopeId Parent;
+	FVerseVisualTileId OwnerTile;
+	EVerseGraphRenderScopeBackground Background = EVerseGraphRenderScopeBackground::Root;
+	bool bClipToBounds = false;
+};
+
 enum class EVerseVisualSocketDirection : uint8 { Input, Output };
 enum class EVerseVisualSocketRole : uint8
 {
@@ -103,7 +140,7 @@ struct FVerseVisualConnection
 	EVerseVisualConnectionAxis Axis = EVerseVisualConnectionAxis::Horizontal;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	int32 ExtraBlankLineMarkers = 0;
-	FVerseVisualTileId PaintScope;
+	FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root();
 };
 
 inline FLinearColor GetVerseFailureDecorationColor()
@@ -342,11 +379,18 @@ public:
 	static void FinalizeSocketTopology(TArray<FVerseVisualTile>& GraphTiles);
 	static TArray<FVerseVisualConnection> BuildConnections(
 		TConstArrayView<FVerseVisualTile> GraphTiles);
+	static TArray<FVerseGraphRenderScope> BuildRenderScopes(
+		TConstArrayView<FVerseVisualTile> GraphTiles);
 	static bool IsSocketConnected(
 		TConstArrayView<FVerseVisualConnection> Connections,
 		FVerseVisualSocketEndpoint Endpoint);
 	static bool ValidateConnections(
 		TConstArrayView<FVerseVisualTile> GraphTiles,
+		TConstArrayView<FVerseVisualConnection> Connections,
+		FString* OutDiagnostic = nullptr);
+	static bool ValidateRenderScopes(
+		TConstArrayView<FVerseVisualTile> GraphTiles,
+		TConstArrayView<FVerseGraphRenderScope> Scopes,
 		TConstArrayView<FVerseVisualConnection> Connections,
 		FString* OutDiagnostic = nullptr);
 };

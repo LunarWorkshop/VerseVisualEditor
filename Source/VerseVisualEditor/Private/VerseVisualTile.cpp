@@ -954,7 +954,7 @@ namespace
 		EVerseVisualConnectionAxis Axis,
 		EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved,
 		int32 ExtraBlankLines = 0,
-		FVerseVisualTileId PaintScope = {})
+		FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root())
 	{
 		if (!ensureMsgf(SourceSocket.Direction == EVerseVisualSocketDirection::Output
 				&& TargetSocket.Direction == EVerseVisualSocketDirection::Input,
@@ -972,7 +972,7 @@ namespace
 			Axis,
 			Outcome,
 			ExtraBlankLines,
-			PaintScope});
+			RenderScope});
 	}
 
 	const FVerseVisualSocket* FirstValueOutput(const FVerseVisualTile& Tile)
@@ -985,7 +985,7 @@ namespace
 		TConstArrayView<const FVerseVisualTile*> Sequence,
 		const FVerseVisualTile* InitialSource,
 		FVerseVisualSocketId InitialSocket,
-		FVerseVisualTileId PaintScope = {})
+		FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root())
 	{
 		const FVerseVisualTile* Previous = InitialSource;
 		FVerseVisualSocketId PreviousSocket = InitialSocket;
@@ -1003,7 +1003,7 @@ namespace
 					EVerseVisualConnectionAxis::Vertical,
 					EVerseExpressionOutcome::Unresolved,
 					Previous == InitialSource ? 0 : Previous->ExtraBlankLineCount,
-					PaintScope);
+					RenderScope);
 			}
 			Previous = Current;
 			PreviousSocket = {EVerseVisualSocketDirection::Output,
@@ -1013,11 +1013,16 @@ namespace
 
 	void BuildNestedConnections(
 		const FVerseVisualTile& Tile,
-		TArray<FVerseVisualConnection>& Connections)
+		TArray<FVerseVisualConnection>& Connections,
+		FVerseGraphRenderScopeId ParentScope)
 	{
+		const FVerseGraphRenderScopeId ContentScope =
+			Tile.Kind == EVerseVisualTileKind::FailableBlock
+				? FVerseGraphRenderScopeId::ForTile(Tile.Id)
+				: ParentScope;
 		for (const FVerseVisualTile& Child : Tile.Children)
 		{
-			BuildNestedConnections(Child, Connections);
+			BuildNestedConnections(Child, Connections, ContentScope);
 		}
 
 		if (IsVerseOperatorExpression(Tile.ExpressionKind)
@@ -1037,7 +1042,8 @@ namespace
 				{
 					AddVisualConnection(
 						Connections, Child, Output->Id, Tile, InputId,
-						EVerseVisualConnectionAxis::Horizontal, Output->Outcome);
+						EVerseVisualConnectionAxis::Horizontal, Output->Outcome,
+						0, ContentScope);
 				}
 			}
 		}
@@ -1059,7 +1065,7 @@ namespace
 				&Tile,
 				{EVerseVisualSocketDirection::Output,
 					EVerseVisualSocketRole::ClauseInsertion, 0},
-				Tile.Id);
+				ContentScope);
 			return;
 		}
 
@@ -1085,7 +1091,9 @@ namespace
 					{EVerseVisualSocketDirection::Input,
 						EVerseVisualSocketRole::FailureContext, 0},
 					EVerseVisualConnectionAxis::Horizontal,
-					EVerseExpressionOutcome::FailureOnly);
+					EVerseExpressionOutcome::FailureOnly,
+					0,
+					ParentScope);
 			}
 			for (const auto& Region : Tile.ControlRegions)
 			{
@@ -1109,10 +1117,50 @@ namespace
 					Sequence,
 					&Tile,
 					{EVerseVisualSocketDirection::Output,
-						EVerseVisualSocketRole::Execution, OutputIndex});
+						EVerseVisualSocketRole::Execution, OutputIndex},
+					ParentScope);
 			}
 		}
 	}
+
+	void GatherRenderScopes(
+		const FVerseVisualTile& Tile,
+		FVerseGraphRenderScopeId ParentScope,
+		TArray<FVerseGraphRenderScope>& Scopes)
+	{
+		FVerseGraphRenderScopeId ContentScope = ParentScope;
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			ContentScope = FVerseGraphRenderScopeId::ForTile(Tile.Id);
+			Scopes.Add({
+				ContentScope,
+				ParentScope,
+				Tile.Id,
+				EVerseGraphRenderScopeBackground::Failable,
+				true});
+		}
+		for (const FVerseVisualTile& Child : Tile.Children)
+		{
+			GatherRenderScopes(Child, ContentScope, Scopes);
+		}
+	}
+}
+
+TArray<FVerseGraphRenderScope> FVerseVisualTileBuilder::BuildRenderScopes(
+	TConstArrayView<FVerseVisualTile> GraphTiles)
+{
+	TArray<FVerseGraphRenderScope> Scopes;
+	Scopes.Add({
+		FVerseGraphRenderScopeId::Root(),
+		{},
+		{},
+		EVerseGraphRenderScopeBackground::Root,
+		false});
+	for (const FVerseVisualTile& Tile : GraphTiles)
+	{
+		GatherRenderScopes(Tile, FVerseGraphRenderScopeId::Root(), Scopes);
+	}
+	return Scopes;
 }
 
 TArray<FVerseVisualConnection> FVerseVisualTileBuilder::BuildConnections(
@@ -1121,7 +1169,7 @@ TArray<FVerseVisualConnection> FVerseVisualTileBuilder::BuildConnections(
 	TArray<FVerseVisualConnection> Connections;
 	for (const FVerseVisualTile& Tile : GraphTiles)
 	{
-		BuildNestedConnections(Tile, Connections);
+		BuildNestedConnections(Tile, Connections, FVerseGraphRenderScopeId::Root());
 	}
 
 	TArray<const FVerseVisualTile*> RootStatements;
@@ -1168,7 +1216,137 @@ TArray<FVerseVisualConnection> FVerseVisualTileBuilder::BuildConnections(
 	FString Diagnostic;
 	ensureMsgf(ValidateConnections(GraphTiles, Connections, &Diagnostic),
 		TEXT("Invalid immutable Verse graph topology: %s"), *Diagnostic);
+	const TArray<FVerseGraphRenderScope> RenderScopes = BuildRenderScopes(GraphTiles);
+	ensureMsgf(ValidateRenderScopes(GraphTiles, RenderScopes, Connections, &Diagnostic),
+		TEXT("Invalid Verse graph render scopes: %s"), *Diagnostic);
 	return Connections;
+}
+
+bool FVerseVisualTileBuilder::ValidateRenderScopes(
+	TConstArrayView<FVerseVisualTile> GraphTiles,
+	TConstArrayView<FVerseGraphRenderScope> Scopes,
+	TConstArrayView<FVerseVisualConnection> Connections,
+	FString* OutDiagnostic)
+{
+	auto Fail = [OutDiagnostic](FString Diagnostic)
+	{
+		if (OutDiagnostic != nullptr)
+		{
+			*OutDiagnostic = MoveTemp(Diagnostic);
+		}
+		return false;
+	};
+
+	TMap<FVerseGraphRenderScopeId, const FVerseGraphRenderScope*> ScopesById;
+	for (const FVerseGraphRenderScope& Scope : Scopes)
+	{
+		if (!Scope.Id.IsValid() || ScopesById.Contains(Scope.Id))
+		{
+			return Fail(TEXT("A render scope has a duplicate or invalid id."));
+		}
+		ScopesById.Add(Scope.Id, &Scope);
+	}
+	const FVerseGraphRenderScope* const* Root =
+		ScopesById.Find(FVerseGraphRenderScopeId::Root());
+	if (Root == nullptr || (*Root)->Parent.IsValid() || (*Root)->OwnerTile.IsValid())
+	{
+		return Fail(TEXT("The render-scope tree has no valid root."));
+	}
+	for (const FVerseGraphRenderScope& Scope : Scopes)
+	{
+		if (!(Scope.Id == FVerseGraphRenderScopeId::Root())
+			&& !ScopesById.Contains(Scope.Parent))
+		{
+			return Fail(TEXT("A render scope references a missing parent."));
+		}
+		TSet<FVerseGraphRenderScopeId> Ancestors;
+		const FVerseGraphRenderScope* Cursor = &Scope;
+		while (Cursor != nullptr && Cursor->Parent.IsValid())
+		{
+			if (Ancestors.Contains(Cursor->Id))
+			{
+				return Fail(TEXT("The render-scope tree contains a cycle."));
+			}
+			Ancestors.Add(Cursor->Id);
+			const FVerseGraphRenderScope* const* Parent = ScopesById.Find(Cursor->Parent);
+			Cursor = Parent != nullptr ? *Parent : nullptr;
+		}
+	}
+
+	TMap<FVerseVisualTileId, FVerseGraphRenderScopeId> TileScopes;
+	TMap<FVerseVisualTileId, const FVerseVisualTile*> TilesById;
+	TFunction<void(const FVerseVisualTile&, FVerseGraphRenderScopeId)> RegisterTiles =
+		[&](const FVerseVisualTile& Tile, FVerseGraphRenderScopeId ContainingScope)
+		{
+			TileScopes.Add(Tile.Id, ContainingScope);
+			TilesById.Add(Tile.Id, &Tile);
+			const FVerseGraphRenderScopeId ContentScope =
+				Tile.Kind == EVerseVisualTileKind::FailableBlock
+					? FVerseGraphRenderScopeId::ForTile(Tile.Id)
+					: ContainingScope;
+			for (const FVerseVisualTile& Child : Tile.Children)
+			{
+				RegisterTiles(Child, ContentScope);
+			}
+		};
+	for (const FVerseVisualTile& Tile : GraphTiles)
+	{
+		RegisterTiles(Tile, FVerseGraphRenderScopeId::Root());
+	}
+
+	auto EndpointScope = [&](const FVerseVisualSocketEndpoint& Endpoint)
+	{
+		const FVerseVisualTile* const* Tile = TilesById.Find(Endpoint.Tile);
+		const FVerseGraphRenderScopeId* ContainingScope = TileScopes.Find(Endpoint.Tile);
+		if (Tile != nullptr && ContainingScope != nullptr
+			&& (*Tile)->Kind == EVerseVisualTileKind::FailableBlock
+			&& Endpoint.Socket.Role == EVerseVisualSocketRole::ClauseInsertion)
+		{
+			return FVerseGraphRenderScopeId::ForTile(Endpoint.Tile);
+		}
+		return ContainingScope != nullptr ? *ContainingScope : FVerseGraphRenderScopeId{};
+	};
+	auto NearestCommonScope = [&](FVerseGraphRenderScopeId Left, FVerseGraphRenderScopeId Right)
+	{
+		TSet<FVerseGraphRenderScopeId> LeftAncestors;
+		for (FVerseGraphRenderScopeId Cursor = Left; Cursor.IsValid();)
+		{
+			LeftAncestors.Add(Cursor);
+			const FVerseGraphRenderScope* const* Scope = ScopesById.Find(Cursor);
+			Cursor = Scope != nullptr ? (*Scope)->Parent : FVerseGraphRenderScopeId{};
+		}
+		for (FVerseGraphRenderScopeId Cursor = Right; Cursor.IsValid();)
+		{
+			if (LeftAncestors.Contains(Cursor))
+			{
+				return Cursor;
+			}
+			const FVerseGraphRenderScope* const* Scope = ScopesById.Find(Cursor);
+			Cursor = Scope != nullptr ? (*Scope)->Parent : FVerseGraphRenderScopeId{};
+		}
+		return FVerseGraphRenderScopeId{};
+	};
+
+	for (const FVerseVisualConnection& Connection : Connections)
+	{
+		if (!ScopesById.Contains(Connection.RenderScope))
+		{
+			return Fail(TEXT("A connection references a missing render scope."));
+		}
+		const FVerseGraphRenderScopeId Expected = NearestCommonScope(
+			EndpointScope(Connection.Source), EndpointScope(Connection.Target));
+		if (!(Expected == Connection.RenderScope))
+		{
+			return Fail(FString::Printf(
+				TEXT("Connection scope %d is not the endpoints' nearest common scope %d."),
+				Connection.RenderScope.Value, Expected.Value));
+		}
+	}
+	if (OutDiagnostic != nullptr)
+	{
+		OutDiagnostic->Reset();
+	}
+	return true;
 }
 
 bool FVerseVisualTileBuilder::ValidateConnections(

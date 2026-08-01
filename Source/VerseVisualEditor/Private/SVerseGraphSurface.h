@@ -21,31 +21,54 @@ enum class EVerseGraphConnectionAxis : uint8
 
 struct FVerseGraphConnection
 {
-	TWeakPtr<SWidget> SourceAnchor;
-	TWeakPtr<SWidget> TargetAnchor;
+	FVerseVisualSocketEndpoint Source;
+	FVerseVisualSocketEndpoint Target;
+	TSharedPtr<const class FVerseGraphEndpointRegistry> EndpointRegistry;
 	EVerseGraphConnectionAxis Axis = EVerseGraphConnectionAxis::Horizontal;
 	FLinearColor Color = FLinearColor::White;
 	float Thickness = 2.0f;
 	int32 ExtraBlankLineMarkers = 0;
-	FVector2D SourceAnchorCoordinate = FVector2D(0.5f, 0.5f);
-	FVector2D TargetAnchorCoordinate = FVector2D(0.5f, 0.5f);
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 };
 
-/** A painter-ordered wire pass placed beneath the child widgets of one container. */
-class SVerseGraphConnectionLayer final : public SLeafWidget
+struct FVerseGraphEndpointBinding
+{
+	TWeakPtr<SWidget> Anchor;
+	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
+	TWeakPtr<class SVerseGraphRenderScope> RenderScope;
+	bool bScopedToNestedRenderScope = false;
+};
+
+/** Resolves immutable model endpoints to the widgets arranged for the current graph revision. */
+class FVerseGraphEndpointRegistry
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseGraphConnectionLayer) {}
+	void Register(FVerseVisualSocketEndpoint Endpoint, FVerseGraphEndpointBinding Binding);
+	const FVerseGraphEndpointBinding* Find(FVerseVisualSocketEndpoint Endpoint) const;
+
+private:
+	TMap<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding> Bindings;
+};
+
+/** Recursive graph region that owns its background, wires, clipping, and content. */
+class SVerseGraphRenderScope final : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SVerseGraphRenderScope)
+		: _Background(EVerseGraphRenderScopeBackground::Root)
+		, _ClipToBounds(false)
+	{}
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
+		SLATE_ARGUMENT(EVerseGraphRenderScopeBackground, Background)
+		SLATE_ARGUMENT(bool, ClipToBounds)
+		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 	void SetConnections(TArray<FVerseGraphConnection> InConnections);
-	virtual FVector2D ComputeDesiredSize(float) const override
-	{
-		return FVector2D::ZeroVector;
-	}
+	void SetContent(TSharedRef<SWidget> InContent);
+	bool WasPaintedThisFrame() const;
+	bool WasPaintedRecently() const;
 	virtual int32 OnPaint(
 		const FPaintArgs& Args,
 		const FGeometry& AllottedGeometry,
@@ -57,6 +80,8 @@ public:
 
 private:
 	TArray<FVerseGraphConnection> Connections;
+	EVerseGraphRenderScopeBackground Background = EVerseGraphRenderScopeBackground::Root;
+	mutable uint64 LastPaintFrame = MAX_uint64;
 };
 
 /** Samples decoration centers from the same Hermite spline used for graph wires. */
