@@ -6,10 +6,12 @@
 #include "VerseVisualTile.h"
 #include "uLang/Semantics/DataDefinition.h"
 #include "uLang/Semantics/Expression.h"
+#include "uLang/Semantics/SemanticClass.h"
 #include "uLang/Semantics/SemanticFunction.h"
 #include "uLang/Semantics/SemanticProgram.h"
 #include "uLang/Semantics/SemanticScope.h"
 #include "uLang/Semantics/SemanticTypes.h"
+#include "uLang/Semantics/TypeAlias.h"
 #include "uLang/Semantics/TypeVariable.h"
 #include "uLang/Semantics/VisitSet.h"
 #include "uLang/SourceProject/UploadedAtFNVersion.h"
@@ -567,6 +569,36 @@ namespace
 		return false;
 	}
 
+	bool IsUsableBareDataType(const uLang::CDefinition& Definition)
+	{
+		switch (Definition.GetKind())
+		{
+		case uLang::CDefinition::EKind::Class:
+		{
+			const uLang::CClass& Class = Definition.AsChecked<uLang::CClass>();
+			// Verse represents specifiers and effects such as public, override,
+			// castable, decides, and computes as classes derived from attribute.
+			// They are valid semantic definitions but not data-type annotations.
+			// Parametric classes are also not usable by their bare name: their
+			// required type arguments need a future structured type-expression UI.
+			return !uLang::SemanticTypeUtils::IsAttributeType(&Class)
+				&& !Class.IsParametric();
+		}
+		case uLang::CDefinition::EKind::Enumeration:
+		case uLang::CDefinition::EKind::TypeVariable:
+			return true;
+		case uLang::CDefinition::EKind::TypeAlias:
+		{
+			const uLang::CTypeAlias& Alias =
+				Definition.AsChecked<uLang::CTypeAlias>();
+			return Alias.IsInitialized()
+				&& !uLang::SemanticTypeUtils::IsAttributeType(Alias.GetType());
+		}
+		default:
+			return false;
+		}
+	}
+
 	void AddFunctionCandidates(
 		const uLang::CFunction& Function,
 		const uLang::CScope& ActiveScope,
@@ -935,11 +967,7 @@ TArray<FString> FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
 			{
 				continue;
 			}
-			const uLang::CDefinition::EKind Kind = Definition->GetKind();
-			if (Kind == uLang::CDefinition::EKind::Class
-				|| Kind == uLang::CDefinition::EKind::Enumeration
-				|| Kind == uLang::CDefinition::EKind::TypeAlias
-				|| Kind == uLang::CDefinition::EKind::TypeVariable)
+			if (IsUsableBareDataType(*Definition))
 			{
 				const FString TypeName = ToFString(Definition->AsNameStringView());
 				if (ValidateVerseIdentifier(TypeName).IsEmpty())

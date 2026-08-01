@@ -309,6 +309,35 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			&& VisibleTypeNames.Contains(TEXT("logic")));
 	TestTrue(TEXT("Type discovery includes a class visible in the current module"),
 		VisibleTypeNames.Contains(TEXT("PrivateValueType")));
+	TestTrue(TEXT("Type discovery retains usable abstract data types"),
+		VisibleTypeNames.Contains(TEXT("comparable"))
+			&& VisibleTypeNames.Contains(TEXT("cancelable")));
+	TestFalse(TEXT("Type discovery excludes attribute and specifier classes"),
+		VisibleTypeNames.Contains(TEXT("public"))
+			|| VisibleTypeNames.Contains(TEXT("private"))
+			|| VisibleTypeNames.Contains(TEXT("protected"))
+			|| VisibleTypeNames.Contains(TEXT("override"))
+			|| VisibleTypeNames.Contains(TEXT("castable")));
+	const FUtf8StringView GenericFunctionPrefix = UTF8TEXTVIEW(
+		"Identity(Value : t where t:type)<computes> : t = ");
+	const int32 GenericFunctionBeginByte = SourceView.Find(GenericFunctionPrefix);
+	const int32 GenericExpressionBeginByte = GenericFunctionBeginByte != INDEX_NONE
+		? GenericFunctionBeginByte + GenericFunctionPrefix.Len()
+		: INDEX_NONE;
+	if (TestTrue(TEXT("Candidate test locates the generic function expression"),
+		GenericExpressionBeginByte != INDEX_NONE))
+	{
+		const TArray<FString> GenericScopeTypeNames =
+			FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
+				CandidateSnapshots,
+				Document.FilePath,
+				GenericExpressionBeginByte,
+				*ParsedDocument);
+		TestTrue(TEXT("A function type variable is available inside its scope"),
+			GenericScopeTypeNames.Contains(TEXT("t")));
+		TestFalse(TEXT("A function type variable is unavailable outside its scope"),
+			VisibleTypeNames.Contains(TEXT("t")));
+	}
 	const TArray<FVerseSemanticCandidate> Candidates =
 		FVerseSemanticCandidateProvider::Build(
 			CandidateSnapshots,
