@@ -1354,9 +1354,14 @@ FReply SVerseTile::HandleTileMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
-	return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
-		? FReply::Handled()
-		: FReply::Unhandled();
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+	FReply Reply = OnSelected.IsBound()
+		? OnSelected.Execute()
+		: FReply::Handled();
+	return Reply.SetUserFocus(SharedThis(this), EFocusCause::Mouse);
 }
 
 FReply SVerseTile::HandleHeaderMouseButtonDown(
@@ -1375,7 +1380,7 @@ FReply SVerseTile::HandleHeaderMouseButtonDown(
 	{
 		Reply.DetectDrag(SharedThis(this), EKeys::LeftMouseButton);
 	}
-	return Reply;
+	return Reply.SetUserFocus(SharedThis(this), EFocusCause::Mouse);
 }
 
 FReply SVerseTile::ToggleExpanded()

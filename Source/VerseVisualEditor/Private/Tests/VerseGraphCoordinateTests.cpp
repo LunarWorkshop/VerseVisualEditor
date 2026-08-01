@@ -251,6 +251,8 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 			SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)
 		];
 	EmptyWidget->SlatePrepass();
+	TestTrue(TEXT("Tiles accept keyboard focus for graph commands"),
+		EmptyWidget->SupportsKeyboardFocus());
 	TestTrue(TEXT("List-capable empty block exposes its internal execution entry"),
 		EmptyWidget->GetSocketAnchor({EVerseVisualSocketDirection::Output,
 			EVerseVisualSocketRole::ClauseInsertion, 0}).IsValid());

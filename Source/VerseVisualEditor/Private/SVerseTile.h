@@ -133,6 +133,7 @@ public:
 	virtual FReply OnDrop(
 		const FGeometry& MyGeometry,
 		const FDragDropEvent& DragDropEvent) override;
+	virtual bool SupportsKeyboardFocus() const override { return true; }
 
 private:
 	TSharedRef<SWidget> BuildHeader(bool bCompact, const FText& DiagnosticText) const;
