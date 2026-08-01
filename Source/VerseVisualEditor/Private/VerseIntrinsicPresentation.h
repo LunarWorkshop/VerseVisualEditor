@@ -33,6 +33,19 @@ struct FVerseIntrinsicPresentationKey
 struct FVerseIntrinsicPresentationDescriptor
 {
 	FVerseIntrinsicPresentationKey Key;
+	/**
+	 * Optional parameter-to-parameter type sources used only when the compiler's
+	 * instantiated formal remains abstract and cannot produce a source-safe
+	 * default on its own. INDEX_NONE means to use the parameter's own type.
+	 */
+	TArray<int32> DefaultSourceTypeParameterIndices;
+	/**
+	 * Source-safe placeholder used for abstract parameters when an untyped
+	 * clause-insertion search provides no dragged socket type.
+	 */
+	FString UntypedDefaultSource;
+	/** Equivalent operands produce one canonical drag action rather than two. */
+	bool bSymmetricOperands = false;
 	EVerseIntrinsicBlueprintLibrary BlueprintLibrary =
 		EVerseIntrinsicBlueprintLibrary::None;
 	FName BlueprintFunctionName;

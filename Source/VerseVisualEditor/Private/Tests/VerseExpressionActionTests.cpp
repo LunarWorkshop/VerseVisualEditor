@@ -71,6 +71,30 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 			IntegerLess->FallbackCategory.ToString(),
 			FString(TEXT("Utilities|Operators")));
 	}
+	FVerseIntrinsicPresentationKey IntegerNotEqualKey;
+	IntegerNotEqualKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
+	IntegerNotEqualKey.Spelling = TEXT("<>");
+	IntegerNotEqualKey.ParameterTypes = {TEXT("int"), TEXT("comparable")};
+	IntegerNotEqualKey.ResultType = TEXT("int");
+	const FVerseIntrinsicPresentationDescriptor* IntegerNotEqual =
+		FindVerseIntrinsicPresentation(IntegerNotEqualKey);
+	if (TestNotNull(TEXT("Comparable Not Equal descriptor resolves"), IntegerNotEqual))
+	{
+		TestEqual(TEXT("Not Equal mirrors Blueprint's action-menu name"),
+			IntegerNotEqual->FallbackDisplayName.ToString(),
+			FString(TEXT("Not Equal (!=)")));
+		TestEqual(TEXT("Not Equal remains in the operators category"),
+			IntegerNotEqual->FallbackCategory.ToString(),
+			FString(TEXT("Utilities|Operators")));
+		TestTrue(TEXT("Not Equal derives its abstract RHS default from its LHS"),
+			IntegerNotEqual->DefaultSourceTypeParameterIndices.Num() == 2
+			&& IntegerNotEqual->DefaultSourceTypeParameterIndices[1] == 0);
+		TestTrue(TEXT("Not Equal declares symmetric operands"),
+			IntegerNotEqual->bSymmetricOperands);
+		TestEqual(TEXT("Not Equal has a source-safe untyped placeholder"),
+			IntegerNotEqual->UntypedDefaultSource,
+			FString(TEXT("0")));
+	}
 	FVerseIntrinsicPresentationKey IntegerDivideKey;
 	IntegerDivideKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
 	IntegerDivideKey.Spelling = TEXT("/");

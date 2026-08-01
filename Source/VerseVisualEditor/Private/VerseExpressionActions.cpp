@@ -205,6 +205,12 @@ namespace
 			FunctionType->GetReturnType().AsCode());
 		const FVerseIntrinsicPresentationDescriptor* IntrinsicPresentation =
 			FindVerseIntrinsicPresentation(PresentationKey);
+		if (IntrinsicPresentation != nullptr
+			&& IntrinsicPresentation->bSymmetricOperands
+			&& Candidate.BoundInputIndex > 0)
+		{
+			return nullptr;
+		}
 		const TOptional<FVerseBlueprintCallablePresentation> BlueprintPresentation =
 			bOperator && (IntrinsicPresentation == nullptr
 				|| IntrinsicPresentation->BlueprintLibrary ==
@@ -252,6 +258,23 @@ namespace
 				continue;
 			}
 			FString Default = DefaultSourceForType(*Params[Index]);
+			if (Default.IsEmpty()
+				&& IntrinsicPresentation != nullptr
+				&& IntrinsicPresentation->DefaultSourceTypeParameterIndices.IsValidIndex(Index))
+			{
+				const int32 TypeSourceIndex =
+					IntrinsicPresentation->DefaultSourceTypeParameterIndices[Index];
+				if (TypeSourceIndex >= 0 && TypeSourceIndex < Params.Num())
+				{
+					Default = DefaultSourceForType(*Params[TypeSourceIndex]);
+				}
+			}
+			if (Default.IsEmpty()
+				&& Candidate.BoundInputIndex == INDEX_NONE
+				&& IntrinsicPresentation != nullptr)
+			{
+				Default = IntrinsicPresentation->UntypedDefaultSource;
+			}
 			if (Default.IsEmpty())
 			{
 				return nullptr;

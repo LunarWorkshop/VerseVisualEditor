@@ -394,6 +394,33 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			QueryExpressionBeginByte,
 			true,
 			*ParsedDocument);
+	const TArray<TSharedPtr<FVerseExpressionAction>> UntypedSemanticActions =
+		FVerseExpressionActionQuery::BuildAll(
+			{},
+			*ParsedDocument,
+			FVerseTextRange(Document.Revision, {ExpressionBeginByte, 0}),
+			Document.FilePath,
+			CandidateSnapshots);
+	const TSharedPtr<FVerseExpressionAction>* UntypedNotEqualAction =
+		UntypedSemanticActions.FindByPredicate(
+			[](const TSharedPtr<FVerseExpressionAction>& Action)
+			{
+				return Action.IsValid() && Action->SourceSpelling == TEXT("<>");
+			});
+	if (TestNotNull(TEXT("Untyped semantic search offers Not Equal"),
+		UntypedNotEqualAction))
+	{
+		FString UntypedNotEqualSource;
+		TestTrue(TEXT("Untyped Not Equal has source-safe operands"),
+			BuildVerseExpressionActionSource(
+				**UntypedNotEqualAction,
+				FStringView(),
+				UntypedNotEqualSource,
+				DocumentError));
+		TestEqual(TEXT("Untyped Not Equal defaults to a valid integer expression"),
+			UntypedNotEqualSource,
+			FString(TEXT("0 <> 0")));
+	}
 	FVerseVisualSocket LogicOutputSocket;
 	LogicOutputSocket.IntrinsicTypeName = TEXT("logic");
 	const TArray<TSharedPtr<FVerseExpressionAction>> QueryActions =
@@ -411,6 +438,32 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			{}, OutputSocket, true, *ParsedDocument,
 			FVerseTextRange(Document.Revision, {ExpressionBeginByte, 9}),
 			Document.FilePath, CandidateSnapshots);
+	const TSharedPtr<FVerseExpressionAction>* NotEqualAction =
+		Actions.FindByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+				&& Action->SourceSpelling == TEXT("<>");
+		});
+	TestEqual(TEXT("Symmetric Not Equal contributes one canonical action"),
+		Actions.FilterByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid() && Action->SourceSpelling == TEXT("<>");
+		}).Num(), 1);
+	if (TestNotNull(TEXT("Comparable Not Equal is offered for an integer output"),
+		NotEqualAction))
+	{
+		TestEqual(TEXT("Not Equal uses its Blueprint-style searchable name"),
+			(*NotEqualAction)->DisplayName.ToString(), FString(TEXT("Not Equal (!=)")));
+		TestEqual(TEXT("Not Equal uses the operators category"),
+			(*NotEqualAction)->Category.ToString(), FString(TEXT("Utilities|Operators")));
+		FString NotEqualSource;
+		TestTrue(TEXT("Not Equal materializes source with a concrete RHS default"),
+			BuildVerseExpressionActionSource(
+				**NotEqualAction, TEXT("Input"), NotEqualSource, DocumentError));
+		TestEqual(TEXT("Not Equal writes canonical Verse syntax"),
+			NotEqualSource, FString(TEXT("Input <> 0")));
+	}
 	const FVerseParseSnapshot SyntaxSnapshot =
 		FVerseParseSnapshotBuilder::Build(ParsedDocument.ToSharedRef());
 	const TArray<FVerseVisualTile> SyntaxTiles =
