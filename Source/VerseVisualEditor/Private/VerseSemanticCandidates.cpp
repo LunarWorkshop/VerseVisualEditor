@@ -312,6 +312,21 @@ namespace
 		{
 			return;
 		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Literal)
+		{
+			// The syntax kind fully determines the type of every supported literal.
+			// Recursive VST-to-AST lookup can encounter a surrounding type expression,
+			// so it must not replace `int`, `float`, etc. with `type{...}` here.
+			Tile.SemanticTypeName = Tile.IntrinsicTypeName.ToString();
+			Tile.Outcome = EVerseExpressionOutcome::Ordinary;
+			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
+			{
+				Output.IntrinsicTypeName = Tile.IntrinsicTypeName;
+				Output.SemanticTypeName = Tile.SemanticTypeName;
+				Output.Outcome = Tile.Outcome;
+			}
+			return;
+		}
 
 		const Verse::Vst::Node* Node = FindExactSemanticNode(
 			*Snapshot, FilePath, Tile.Range, Document);

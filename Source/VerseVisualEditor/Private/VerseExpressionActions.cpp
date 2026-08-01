@@ -277,6 +277,50 @@ namespace
 		return NormalizeActionType(FString(Converted.Length(), Converted.Get()));
 	}
 
+	struct FLiteralActionDescriptor
+	{
+		EVerseLiteralKind Kind;
+		const TCHAR* Source;
+		const TCHAR* Type;
+		FText DisplayName;
+	};
+
+	TConstArrayView<FLiteralActionDescriptor> GetLiteralActionDescriptors()
+	{
+		static const FLiteralActionDescriptor Descriptors[] = {
+			{EVerseLiteralKind::Logic, TEXT("true"), TEXT("logic"), LOCTEXT("TrueLiteral", "True")},
+			{EVerseLiteralKind::Logic, TEXT("false"), TEXT("logic"), LOCTEXT("FalseLiteral", "False")},
+			{EVerseLiteralKind::Integer, TEXT("0"), TEXT("int"), LOCTEXT("IntegerLiteral", "Integer")},
+			{EVerseLiteralKind::Float, TEXT("0.0"), TEXT("float"), LOCTEXT("FloatLiteral", "Float")},
+			{EVerseLiteralKind::String, TEXT("\"\""), TEXT("string"), LOCTEXT("StringLiteral", "String")},
+			{EVerseLiteralKind::Character, TEXT("'a'"), TEXT("char"), LOCTEXT("CharacterLiteral", "Character")},
+		};
+		return Descriptors;
+	}
+
+	void AppendLiteralActions(
+		TArray<TSharedPtr<FVerseExpressionAction>>& Actions,
+		FString RequiredType = FString())
+	{
+		RequiredType = NormalizeActionType(MoveTemp(RequiredType));
+		for (const FLiteralActionDescriptor& Descriptor : GetLiteralActionDescriptors())
+		{
+			if (!RequiredType.IsEmpty()
+				&& RequiredType != NormalizeActionType(Descriptor.Type))
+			{
+				continue;
+			}
+			TSharedPtr<FVerseExpressionAction> Action = MakeShared<FVerseExpressionAction>();
+			Action->SourceForm = EVerseExpressionSourceForm::Literal;
+			Action->SourceSpelling = Descriptor.Source;
+			Action->DisplayName = Descriptor.DisplayName;
+			Action->Category = LOCTEXT("LiteralsCategory", "Literals");
+			Action->ModuleCategory = LOCTEXT("VerseLanguageModule", "Verse");
+			Action->ResultTypeName = Descriptor.Type;
+			Actions.Add(MoveTemp(Action));
+		}
+	}
+
 	bool ContainsExpressionAt(
 		TConstArrayView<FVerseVisualTile> Tiles,
 		int32 BeginByte,
@@ -368,6 +412,13 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 			Result.Add(MoveTemp(Candidate.Action));
 		}
 	}
+	if (!bDraggingFromOutput)
+	{
+		AppendLiteralActions(Result,
+			!DraggedSocket.SemanticTypeName.IsEmpty()
+				? DraggedSocket.SemanticTypeName
+				: GetTypeName(SocketType, Source));
+	}
 	return Result;
 }
 
@@ -417,6 +468,7 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 			Result.Add(MoveTemp(Action));
 		}
 	}
+	AppendLiteralActions(Result);
 	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
 	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
 	IfAction->SourceSpelling = TEXT("if (true?) {}");
@@ -472,6 +524,17 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 		// validation in TryApplyVerseExpressionAction.
 		Result.Append(Build(Parameters, DraggedSocket, bDraggingFromOutput, Document));
 	}
+	else if (!bDraggingFromOutput)
+	{
+		const FVerseExpressionType SocketType{
+			DraggedSocket.TypeRange,
+			DraggedSocket.IntrinsicTypeName,
+			EVerseTypeResolutionProvenance::LocallyInferred};
+		AppendLiteralActions(Result,
+			!DraggedSocket.SemanticTypeName.IsEmpty()
+				? DraggedSocket.SemanticTypeName
+				: GetTypeName(SocketType, Document.GetOriginalUtf8View()));
+	}
 	return Result;
 }
 
@@ -486,6 +549,16 @@ bool BuildVerseExpressionActionSource(
 		if (Action.SourceSpelling.IsEmpty())
 		{
 			OutError = LOCTEXT("MissingIdentifierSpelling", "The selected identifier has no source spelling.");
+			return false;
+		}
+		OutSource = Action.SourceSpelling;
+		return true;
+	}
+	if (Action.SourceForm == EVerseExpressionSourceForm::Literal)
+	{
+		if (Action.SourceSpelling.IsEmpty())
+		{
+			OutError = LOCTEXT("MissingLiteralSource", "The selected literal has no source value.");
 			return false;
 		}
 		OutSource = Action.SourceSpelling;
@@ -574,6 +647,8 @@ bool BuildVerseExpressionActionSource(
 		}
 		OutError = LOCTEXT("InvalidPostfixInputs", "A postfix operator requires exactly one operand.");
 		return false;
+	case EVerseExpressionSourceForm::Literal:
+		return true;
 	default:
 		OutError = LOCTEXT("InvalidExpressionSourceForm", "The selected expression source form is unsupported.");
 		return false;
@@ -606,6 +681,7 @@ bool TryApplyVerseExpressionAction(
 	case EVerseExpressionSourceForm::InfixOperator: RequiredKind = EVerseExpressionKind::BinaryOperator; break;
 	case EVerseExpressionSourceForm::PrefixOperator:
 	case EVerseExpressionSourceForm::PostfixOperator: RequiredKind = EVerseExpressionKind::UnaryOperator; break;
+	case EVerseExpressionSourceForm::Literal: RequiredKind = EVerseExpressionKind::Literal; break;
 	case EVerseExpressionSourceForm::StructuralExpression: RequiredKind = EVerseExpressionKind::Control; break;
 	default: break;
 	}

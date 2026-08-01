@@ -825,6 +825,19 @@ namespace VerseParseSnapshotBuilder
 		}
 		if (Node.IsA<Verse::Vst::StringLiteral>())
 		{
+			const FUtf8StringView Source = SourceIndex.GetSource();
+			if (Result.Range.BeginByte > 0
+				&& Result.Range.EndByte() < Source.Len()
+				&& Source[Result.Range.BeginByte - 1] == static_cast<UTF8CHAR>('"')
+				&& Source[Result.Range.EndByte()] == static_cast<UTF8CHAR>('"'))
+			{
+				// The VST locus for a plain string covers its contents, unlike the
+				// other literal nodes. The visual expression owns the complete source
+				// spelling so localized replacement also replaces both delimiters.
+				Result.Range = FVerseByteRange::FromBounds(
+					Result.Range.BeginByte - 1,
+					Result.Range.EndByte() + 1);
+			}
 			Result.Kind = EVerseExpressionKind::Literal;
 			Result.LiteralKind = EVerseLiteralKind::String;
 			Result.Type = {{}, TEXT("string"), EVerseTypeResolutionProvenance::LocallyInferred};

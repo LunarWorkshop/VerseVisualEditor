@@ -54,6 +54,12 @@ Basics := module:
     CorpusFunctionCall(Input : int)<computes> : int =
         Ceil(Input)
 
+    CorpusFunctionLiteralFloat()<computes> : float =
+        1.0
+
+    CorpusFunctionLiteralInt()<computes> : int =
+        42
+
 BinaryOperators := module:
     CorpusFunctionAdd1(Input : int)<computes> : int =
         Input + 1

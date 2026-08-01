@@ -1,5 +1,7 @@
 #include "SVerseTile.h"
 
+#include "SVerseLiteralEditor.h"
+
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Input/DragAndDrop.h"
@@ -390,6 +392,24 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		&& Tile.ControlKind == EVerseControlKind::If;
 	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
 	TSharedRef<SWidget> BodyContent = InArgs._BodyContent.Widget;
+	if (Tile.ExpressionKind == EVerseExpressionKind::Literal
+		&& Tile.LiteralKind != EVerseLiteralKind::None)
+	{
+		BodyContent = SNew(SBorder)
+			.BorderImage(nullptr)
+			.Padding(FMargin(8.0f, 6.0f))
+			[
+				SNew(SVerseLiteralEditor)
+				.LiteralKind(Tile.LiteralKind)
+				.LiteralRange(Tile.Range)
+				.SourceText(Decode(Tile.Range).ToString())
+				.OnSourceCommitted(FOnVerseLiteralSourceCommitted::CreateLambda(
+					[this](FVerseTextRange Range, FText Source)
+					{
+						OnInlineLiteralCommitted.ExecuteIfBound(Range, Source);
+					}))
+			];
+	}
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
 		TSharedRef<SVerticalBox> FailureChain = SNew(SVerticalBox);
@@ -979,86 +999,24 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			{
 				return;
 			}
-			const FString SourceText = Decode(Socket.InlineLiteralRange).ToString();
-			TSharedRef<SWidget> Editor = SNullWidget::NullWidget;
-			float EditorMinWidth = 30.0f;
-			switch (Socket.InlineLiteralKind)
-			{
-			case EVerseLiteralKind::Integer:
-			{
-				int64 Value = 0;
-				LexTryParseString(Value, *SourceText);
-				Editor = SNew(SSpinBox<int64>)
-					.MinDesiredWidth(0.0f)
-					.Value(Value)
-					.OnValueCommitted_Lambda(
-						[this, Range = Socket.InlineLiteralRange](int64 NewValue, ETextCommit::Type)
-						{
-							OnInlineLiteralCommitted.ExecuteIfBound(
-								Range,
-								FText::FromString(LexToString(NewValue)));
-						});
-				break;
-			}
-			case EVerseLiteralKind::Float:
-			{
-				double Value = 0.0;
-				LexTryParseString(Value, *SourceText);
-				EditorMinWidth = 32.0f;
-				Editor = SNew(SSpinBox<double>)
-					.MinDesiredWidth(0.0f)
-					.Value(Value)
-					.OnValueCommitted_Lambda(
-						[this, Range = Socket.InlineLiteralRange](double NewValue, ETextCommit::Type)
-						{
-							OnInlineLiteralCommitted.ExecuteIfBound(
-								Range,
-								FText::FromString(FString::SanitizeFloat(NewValue)));
-						});
-				break;
-			}
-			case EVerseLiteralKind::String:
-			case EVerseLiteralKind::Character:
-				EditorMinWidth = 38.0f;
-				Editor = SNew(SEditableTextBox)
-					.MinDesiredWidth(0.0f)
-					.Text(FText::FromString(SourceText))
-					.OnTextCommitted_Lambda(
-						[this, Range = Socket.InlineLiteralRange](const FText& NewText, ETextCommit::Type)
-						{
-							OnInlineLiteralCommitted.ExecuteIfBound(Range, NewText);
-						});
-				break;
-			case EVerseLiteralKind::Logic:
-				EditorMinWidth = 18.0f;
-				Editor = SNew(SCheckBox)
-					.IsChecked(SourceText.Equals(TEXT("true"), ESearchCase::IgnoreCase)
-						? ECheckBoxState::Checked
-						: ECheckBoxState::Unchecked)
-					.OnCheckStateChanged_Lambda(
-						[this, Range = Socket.InlineLiteralRange](ECheckBoxState NewState)
-						{
-							OnInlineLiteralCommitted.ExecuteIfBound(
-								Range,
-								NewState == ECheckBoxState::Checked
-									? FText::FromString(TEXT("true"))
-									: FText::FromString(TEXT("false")));
-						});
-				break;
-			case EVerseLiteralKind::None:
-			default:
-				return;
-			}
 			Row->AddSlot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
 			.Padding(5.0f, 1.0f, 5.0f, 1.0f)
 			[
 				SNew(SBox)
-				.MinDesiredWidth(EditorMinWidth)
+				.MinDesiredWidth(18.0f)
 				.MaxDesiredWidth(GetVerseGraphMajorGridWidth())
 				[
-					Editor
+					SNew(SVerseLiteralEditor)
+					.LiteralKind(Socket.InlineLiteralKind)
+					.LiteralRange(Socket.InlineLiteralRange)
+					.SourceText(Decode(Socket.InlineLiteralRange).ToString())
+					.OnSourceCommitted(FOnVerseLiteralSourceCommitted::CreateLambda(
+						[this](FVerseTextRange Range, FText Source)
+						{
+							OnInlineLiteralCommitted.ExecuteIfBound(Range, Source);
+						}))
 				]
 			];
 		};
@@ -1164,6 +1122,18 @@ FText SVerseTile::GetKindText() const
 		if (Tile.ExpressionKind == EVerseExpressionKind::Call)
 		{
 			return LOCTEXT("CallKind", "Function");
+		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Literal)
+		{
+			switch (Tile.LiteralKind)
+			{
+			case EVerseLiteralKind::Integer: return LOCTEXT("IntegerLiteralKind", "int");
+			case EVerseLiteralKind::Float: return LOCTEXT("FloatLiteralKind", "float");
+			case EVerseLiteralKind::String: return LOCTEXT("StringLiteralKind", "string");
+			case EVerseLiteralKind::Character: return LOCTEXT("CharacterLiteralKind", "char");
+			case EVerseLiteralKind::Logic: return LOCTEXT("LogicLiteralKind", "logic");
+			default: return FText::GetEmpty();
+			}
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{

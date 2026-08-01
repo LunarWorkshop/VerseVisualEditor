@@ -66,6 +66,19 @@ namespace
 		return Range.IsSet() ? FVerseTextRange(Revision, Range) : FVerseTextRange();
 	}
 
+	FName GetLiteralTypeName(EVerseLiteralKind Kind)
+	{
+		switch (Kind)
+		{
+		case EVerseLiteralKind::Integer: return TEXT("int");
+		case EVerseLiteralKind::Float: return TEXT("float");
+		case EVerseLiteralKind::String: return TEXT("string");
+		case EVerseLiteralKind::Character: return TEXT("char");
+		case EVerseLiteralKind::Logic: return TEXT("logic");
+		default: return NAME_None;
+		}
+	}
+
 	FVerseVisualExpressionDescriptor MakeVisualExpressionDescriptor(
 		const FVerseExpressionDescriptor& Expression,
 		FVerseDocumentRevision Revision)
@@ -286,6 +299,13 @@ namespace
 			? Descriptor.DeclaredTypeRange
 			: Descriptor.TypeRange;
 		Tile.IntrinsicTypeName = Descriptor.IntrinsicTypeName;
+		if (Tile.ExpressionKind == EVerseExpressionKind::Literal
+			&& Tile.IntrinsicTypeName.IsNone())
+		{
+			// Literal syntax determines its primitive type even when the VST did
+			// not attach a separate type locus to the expression.
+			Tile.IntrinsicTypeName = GetLiteralTypeName(Tile.LiteralKind);
+		}
 		Tile.TypeProvenance = Descriptor.TypeProvenance;
 		if (bStatementLevel)
 		{
@@ -472,6 +492,13 @@ namespace
 		else if (Descriptor.Kind == EVerseExpressionKind::Identifier && bStatementLevel)
 		{
 			Tile.ValueInputs.Add(MakeSocket(Tile.TypeRange, Tile.IntrinsicTypeName, false));
+			Tile.ValueOutputs.Add(MakeSocket(
+				Tile.TypeRange,
+				Tile.IntrinsicTypeName,
+				bImplicitReturnValue));
+		}
+		else if (Descriptor.Kind == EVerseExpressionKind::Literal && bStatementLevel)
+		{
 			Tile.ValueOutputs.Add(MakeSocket(
 				Tile.TypeRange,
 				Tile.IntrinsicTypeName,

@@ -17,6 +17,8 @@ enum class EVerseExpressionSourceForm : uint8
 	InfixOperator,
 	PrefixOperator,
 	PostfixOperator,
+	/** A source-safe primitive literal with no inputs or casts. */
+	Literal,
 	/** Parser-known construct with a complete source-safe template. */
 	StructuralExpression,
 };

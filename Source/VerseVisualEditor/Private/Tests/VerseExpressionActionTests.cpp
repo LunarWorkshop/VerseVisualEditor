@@ -261,6 +261,60 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 			(*InputAction)->ResultTypeName,
 			FString(TEXT("int")));
 	}
+	TestTrue(TEXT("An integer socket offers an integer literal"),
+		IntProducers.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Literal
+				&& Action->SourceSpelling == TEXT("0")
+				&& Action->ResultTypeName == TEXT("int");
+		}));
+
+	FVerseVisualSocket FloatSocket;
+	FloatSocket.IntrinsicTypeName = TEXT("float");
+	const TArray<TSharedPtr<FVerseExpressionAction>> FloatActions =
+		FVerseExpressionActionQuery::Build({}, FloatSocket, false, *Document);
+	TestTrue(TEXT("A float socket offers an ordinary float literal"),
+		FloatActions.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Literal
+				&& Action->SourceSpelling == TEXT("0.0");
+		}));
+	TestFalse(TEXT("Special floats are edited through Details, not expression search"),
+		FloatActions.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& (Action->SourceSpelling == TEXT("NaN")
+					|| Action->SourceSpelling == TEXT("Inf")
+					|| Action->SourceSpelling == TEXT("-Inf"));
+		}));
+
+	FVerseVisualSocket LogicSocket;
+	LogicSocket.IntrinsicTypeName = TEXT("logic");
+	const TArray<TSharedPtr<FVerseExpressionAction>> LogicActions =
+		FVerseExpressionActionQuery::Build({}, LogicSocket, false, *Document);
+	TestTrue(TEXT("A logic socket explicitly offers True"),
+		LogicActions.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Literal
+				&& Action->SourceSpelling == TEXT("true");
+		}));
+	TestTrue(TEXT("A logic socket explicitly offers False"),
+		LogicActions.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Literal
+				&& Action->SourceSpelling == TEXT("false");
+		}));
+	TestFalse(TEXT("Literals do not appear when searching for actions that take a value"),
+		FVerseExpressionActionQuery::Build({}, LogicSocket, true, *Document)
+			.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+			{
+				return Action.IsValid()
+					&& Action->SourceForm == EVerseExpressionSourceForm::Literal;
+			}));
 	return true;
 }
 

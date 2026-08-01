@@ -1016,11 +1016,12 @@ introduced immediately beforehand.
   gaps from the interface VST body while retaining the parent interior range
   for empty-body insertion and trivia preservation.
 
-### 12. Literal expressions
+### 12. Literal expressions (completed)
 
 - Add literal entries for each supported primitive type.
 - Provide type-appropriate inline and property-panel editors.
-- Add explicit controls for supported floating-point special values.
+- Do not offer pseudo-literals for floating-point special values; Verse source
+  must remain limited to syntax accepted directly by the compiler.
 - Restrict the first implementation to literals that require no casts.
 
 ### 13. `first` failure contexts

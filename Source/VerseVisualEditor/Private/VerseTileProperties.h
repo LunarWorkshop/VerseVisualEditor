@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "Containers/UnrealString.h"
+#include "VerseVisualTile.h"
 
 class FVerseParseSnapshot;
 struct FVerseVisualTile;
@@ -12,6 +13,7 @@ enum class EVerseTilePropertyEditKind : uint8
 	Name,
 	AccessSpecifiers,
 	EffectSpecifiers,
+	Literal,
 };
 
 struct FVerseTileProperty
@@ -20,6 +22,8 @@ struct FVerseTileProperty
 	FString Value;
 	bool bEditable = false;
 	EVerseTilePropertyEditKind EditKind = EVerseTilePropertyEditKind::None;
+	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
+	FVerseTextRange EditRange;
 };
 
 class FVerseTileProperties

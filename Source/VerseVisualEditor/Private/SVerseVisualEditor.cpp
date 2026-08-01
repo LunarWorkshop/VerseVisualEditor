@@ -1,5 +1,7 @@
 #include "SVerseVisualEditor.h"
 
+#include "SVerseLiteralEditor.h"
+
 #include "SVerseFunctionCanvas.h"
 #include "SVerseFileCanvas.h"
 #include "SVerseTile.h"
@@ -366,13 +368,15 @@ namespace
 			const TSharedPtr<FVerseExpressionAction> ExpressionAction = bIsVerseAction
 				? StaticCastSharedPtr<FVerseExpressionSchemaAction>(SchemaAction)->ExpressionAction
 				: nullptr;
-			const bool bIdentifier = ExpressionAction.IsValid()
-				&& ExpressionAction->SourceForm
-					== EVerseExpressionSourceForm::IdentifierReference;
-			const FSlateBrush* Icon = FAppStyle::GetBrush(bIdentifier
+			const bool bValueAction = ExpressionAction.IsValid()
+				&& (ExpressionAction->SourceForm
+						== EVerseExpressionSourceForm::IdentifierReference
+					|| ExpressionAction->SourceForm
+						== EVerseExpressionSourceForm::Literal);
+			const FSlateBrush* Icon = FAppStyle::GetBrush(bValueAction
 				? TEXT("Kismet.AllClasses.VariableIcon")
 				: TEXT("Kismet.AllClasses.FunctionIcon"));
-			const FLinearColor IconColor = bIdentifier
+			const FLinearColor IconColor = bValueAction
 				? GetBlueprintPinColor(ExpressionAction->ResultTypeName)
 				: GetDefault<UGraphEditorSettings>()->PureFunctionCallNodeTitleColor;
 
@@ -3853,8 +3857,17 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					ReturnInput.Outcome = ReturnOutcome;
 					if (!Tile.ValueOutputs.IsEmpty())
 					{
-						ReturnInput.SemanticTypeName =
-							Tile.ValueOutputs[0].SemanticTypeName;
+						const FVerseVisualSocket& SourceOutput = Tile.ValueOutputs[0];
+						ReturnInput.TypeRange = SourceOutput.TypeRange.IsSet()
+							? SourceOutput.TypeRange
+							: ReturnInput.TypeRange;
+						ReturnInput.IntrinsicTypeName = !SourceOutput.IntrinsicTypeName.IsNone()
+							? SourceOutput.IntrinsicTypeName
+							: ReturnInput.IntrinsicTypeName;
+						if (!SourceOutput.SemanticTypeName.IsEmpty())
+						{
+							ReturnInput.SemanticTypeName = SourceOutput.SemanticTypeName;
+						}
 					}
 				}
 				const TSharedRef<SVerseTile> ReturnRoot = BuildFunctionGraphTile(
@@ -4398,7 +4411,18 @@ void SVerseVisualEditor::RebuildProperties()
 			.AutoWrapText(true);
 		if (Property.bEditable)
 		{
-			if (Property.EditKind == EVerseTilePropertyEditKind::AccessSpecifiers
+			if (Property.EditKind == EVerseTilePropertyEditKind::Literal)
+			{
+				ValueWidget = SNew(SVerseLiteralEditor)
+					.LiteralKind(Property.LiteralKind)
+					.LiteralRange(Property.EditRange)
+					.SourceText(Property.Value)
+					.OnSourceCommitted(FOnVerseLiteralSourceCommitted::CreateSP(
+						this,
+						&SVerseVisualEditor::HandleInlineLiteralCommitted,
+						ActiveDocument));
+			}
+			else if (Property.EditKind == EVerseTilePropertyEditKind::AccessSpecifiers
 				|| Property.EditKind == EVerseTilePropertyEditKind::EffectSpecifiers)
 			{
 				const FString EditableValue = ActiveDocument->PendingSpecifierText.Get(Property.Value);

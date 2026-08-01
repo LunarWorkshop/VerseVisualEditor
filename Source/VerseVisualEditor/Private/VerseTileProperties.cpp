@@ -16,6 +16,12 @@ namespace
 			return TEXT("Comment");
 		case EVerseVisualTileKind::FailableBlock:
 			return TEXT("Failable Block");
+		case EVerseVisualTileKind::Expression:
+			return TEXT("Expression");
+		case EVerseVisualTileKind::FunctionEntry:
+			return TEXT("Function Entry");
+		case EVerseVisualTileKind::FunctionReturn:
+			return TEXT("Function Return");
 		default:
 			return TEXT("Unknown");
 		}
@@ -105,6 +111,26 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 	else if (Tile.Kind == EVerseVisualTileKind::Comment)
 	{
 		Properties.Add({TEXT("Comment Style"), GetCommentKind(Tile.CommentKind)});
+	}
+	else if (Tile.ExpressionKind == EVerseExpressionKind::Literal
+		&& Tile.LiteralKind != EVerseLiteralKind::None)
+	{
+		const FString Type = !Tile.IntrinsicTypeName.IsNone()
+			? Tile.IntrinsicTypeName.ToString()
+			: Tile.TypeRange.IsSet()
+				? Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange)
+				: FString();
+		if (!Type.IsEmpty())
+		{
+			Properties.Add({TEXT("Type"), Type});
+		}
+		Properties.Add({
+			TEXT("Value"),
+			Snapshot.GetDocument()->DecodeOriginalRange(Tile.Range),
+			true,
+			EVerseTilePropertyEditKind::Literal,
+			Tile.LiteralKind,
+			Tile.Range});
 	}
 
 	Properties.Add({TEXT("Lines"), GetSourceLines(Tile)});

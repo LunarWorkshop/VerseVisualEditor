@@ -825,4 +825,80 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseLiteralTilePresentationTest,
+	"VerseVisualEditor.Expressions.Literals.TilePresentation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseLiteralTilePresentationTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
+		*this, TEXT("literal_expressions.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const TArray<FVerseVisualTile> Tiles = FVerseVisualTileBuilder::Build(Snapshot);
+	struct FExpectedLiteral
+	{
+		FUtf8StringView FunctionName;
+		EVerseLiteralKind Kind;
+		FName TypeName;
+		FUtf8StringView Source;
+	};
+	const FExpectedLiteral Expected[] = {
+		{UTF8TEXTVIEW("LiteralLogicTrue"), EVerseLiteralKind::Logic, TEXT("logic"), UTF8TEXTVIEW("true")},
+		{UTF8TEXTVIEW("LiteralLogicFalse"), EVerseLiteralKind::Logic, TEXT("logic"), UTF8TEXTVIEW("false")},
+		{UTF8TEXTVIEW("LiteralInteger"), EVerseLiteralKind::Integer, TEXT("int"), UTF8TEXTVIEW("42")},
+		{UTF8TEXTVIEW("LiteralNegativeInteger"), EVerseLiteralKind::Integer, TEXT("int"), UTF8TEXTVIEW("-12")},
+		{UTF8TEXTVIEW("LiteralFloat"), EVerseLiteralKind::Float, TEXT("float"), UTF8TEXTVIEW("3.5")},
+		{UTF8TEXTVIEW("LiteralNegativeFloat"), EVerseLiteralKind::Float, TEXT("float"), UTF8TEXTVIEW("-2.25")},
+		{UTF8TEXTVIEW("LiteralString"), EVerseLiteralKind::String, TEXT("string"), UTF8TEXTVIEW("\"hello\"")},
+		{UTF8TEXTVIEW("LiteralCharacter"), EVerseLiteralKind::Character, TEXT("char"), UTF8TEXTVIEW("'A'")},
+	};
+	for (const FExpectedLiteral& Literal : Expected)
+	{
+		const FVerseVisualTile* Function = VerseVisualTileTests::FindDefinition(
+			Snapshot, Tiles, Literal.FunctionName);
+		if (!TestNotNull(TEXT("Literal fixture function exists"), Function))
+		{
+			continue;
+		}
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Snapshot);
+		if (TestTrue(TEXT("Literal function has an editable literal expression tile"),
+			Graph.Num() == 3
+				&& Graph[1].ExpressionKind == EVerseExpressionKind::Literal
+				&& Graph[1].LiteralKind == Literal.Kind
+				&& Graph[1].ValueOutputs.Num() == 1))
+		{
+			TestEqual(TEXT("Literal tile carries its primitive type"),
+				Graph[1].IntrinsicTypeName, Literal.TypeName);
+			TestEqual(TEXT("Literal output socket carries the literal type"),
+				Graph[1].ValueOutputs[0].IntrinsicTypeName, Literal.TypeName);
+			TestTrue(TEXT("Implicit return input exists"),
+				Graph[2].Kind == EVerseVisualTileKind::FunctionReturn
+					&& Graph[2].ValueInputs.Num() == 1);
+			const FUTF8ToTCHAR ExpectedSource(
+				reinterpret_cast<const ANSICHAR*>(Literal.Source.GetData()),
+				Literal.Source.Len());
+			TestEqual(TEXT("Literal tile retains its exact source range"),
+				Snapshot.GetDocument()->DecodeOriginalRange(Graph[1].Range),
+				FString(ExpectedSource.Length(), ExpectedSource.Get()));
+			const TArray<FVerseTileProperty> Properties =
+				FVerseTileProperties::Build(Graph[1], Snapshot);
+			TestTrue(TEXT("Literal value is editable in Details"),
+				Properties.ContainsByPredicate([&Graph](const FVerseTileProperty& Property)
+				{
+					return Property.EditKind == EVerseTilePropertyEditKind::Literal
+						&& Property.LiteralKind == Graph[1].LiteralKind
+						&& Property.EditRange == Graph[1].Range;
+				}));
+		}
+	}
+	return true;
+}
+
 #endif
