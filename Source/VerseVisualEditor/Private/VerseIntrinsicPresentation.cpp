@@ -98,6 +98,7 @@ namespace
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterEqualName", "Greater or Equal (>=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateIntName", "Negate Int"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateFloatName", "Negate Float"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::PostfixOperator, TEXT("?"), {TEXT("logic")}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("QueryLogicName", "Query (?)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 		};
 		return Table;
 	}

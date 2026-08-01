@@ -1035,6 +1035,54 @@ namespace VerseParseSnapshotBuilder
 			return Result;
 		}
 
+		// The official Verse parser deliberately represents postfix `?` as a
+		// PrePostCall chain whose trailing synthetic Clause has the Option tag; it
+		// does not use the ordinary prefix/binary operator nodes. This is a VST-to-
+		// editor translation, not the semantic `_OpNameQuery` compatibility shim in
+		// VerseSemanticCandidates. If Epic changes this VST shape, the source-exact
+		// query assertions in FVerseLiteralTilePresentationTest should fail and this
+		// recognizer must be updated to the new official representation.
+		if (const Verse::Vst::PrePostCall* Query = Node.AsNullable<Verse::Vst::PrePostCall>();
+			Query != nullptr
+			&& Query->GetChildCount() == 2
+			&& Query->GetChildren()[0]->GetTag<Verse::Vst::PrePostCall::Op>()
+				== Verse::Vst::PrePostCall::Expression
+			&& Query->GetChildren()[1]->GetTag<Verse::Vst::PrePostCall::Op>()
+				== Verse::Vst::PrePostCall::Option)
+		{
+			const Verse::Vst::Node& Operand = *Query->GetChildren()[0];
+			const Verse::Vst::Node& Operator = *Query->GetChildren()[1];
+			FVerseExpressionDescriptor OperandDescriptor =
+				BuildExpressionDescriptor(Operand, SourceIndex, Parameters);
+			Result.Kind = EVerseExpressionKind::UnaryOperator;
+			Result.OperatorSpelling = TEXT("?");
+			Result.OperatorRange = TrimSourceWhitespace(
+				SourceIndex.GetSource(), SourceIndex.ToRange(Operator.Whence()));
+			// Parameter references currently retain their declared type only as a
+			// source range, while literals carry a canonical intrinsic name. Query needs
+			// the canonical name now so its pins and failable result use the logic color.
+			// FVerseQuerySyntaxTypeBridgeMaintenanceTest contains an intentional
+			// maintenance
+			// tripwire proving this range-only limitation still exists. When that test
+			// fails because parameter references acquire canonical semantic type names,
+			// remove this source-text fallback and consume the canonical type directly.
+			// The option overload remains for the later option-expression work.
+			const FVerseByteRange OperandTypeRange = TrimSourceWhitespace(
+				SourceIndex.GetSource(), OperandDescriptor.Type.SourceRange);
+			const bool bLogicOperand = OperandDescriptor.Type.IntrinsicName == TEXT("logic")
+				|| (OperandTypeRange.IsSet()
+					&& SourceIndex.GetSource().Mid(
+						OperandTypeRange.BeginByte, OperandTypeRange.NumBytes)
+						== UTF8TEXTVIEW("logic"));
+			if (bLogicOperand)
+			{
+				OperandDescriptor.Type.IntrinsicName = TEXT("logic");
+				Result.Type = OperandDescriptor.Type;
+			}
+			Result.Operands.Add(MoveTemp(OperandDescriptor));
+			return Result;
+		}
+
 		if (const Verse::Vst::PrePostCall* Call = Node.AsNullable<Verse::Vst::PrePostCall>();
 			Call != nullptr && Call->IsSimpleCall())
 		{

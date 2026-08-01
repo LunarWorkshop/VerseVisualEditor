@@ -898,6 +898,41 @@ bool FVerseLiteralTilePresentationTest::RunTest(const FString& Parameters)
 				}));
 		}
 	}
+
+	const FVerseVisualTile* QueryFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("LiteralLogicQuery"));
+	if (TestNotNull(TEXT("Logic query fixture function exists"), QueryFunction))
+	{
+		// This is the behavioral guard for the official VST representation. If Epic
+		// stops emitting PrePostCall(Expression, Option), these assertions identify
+		// the user-visible contract that the replacement recognizer must preserve.
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*QueryFunction, Snapshot);
+		if (TestEqual(TEXT("Postfix query function has one statement and return"),
+			Graph.Num(), 3))
+		{
+			const FVerseVisualTile& Query = Graph[1];
+			TestEqual(TEXT("Postfix query uses a unary expression tile"),
+				Query.ExpressionKind, EVerseExpressionKind::UnaryOperator);
+			TestEqual(TEXT("Postfix query uses query spelling"),
+				Query.OperatorSpelling, FString(TEXT("?")));
+			TestEqual(TEXT("Postfix query owns its operand"), Query.Children.Num(), 1);
+			TestEqual(TEXT("Postfix query has one input socket"), Query.ValueInputs.Num(), 1);
+			TestEqual(TEXT("Postfix query has one output socket"), Query.ValueOutputs.Num(), 1);
+			if (Query.ValueInputs.Num() == 1 && Query.ValueOutputs.Num() == 1)
+			{
+				TestEqual(TEXT("Postfix query input carries logic"),
+					Query.ValueInputs[0].IntrinsicTypeName, FName(TEXT("logic")));
+				TestEqual(TEXT("Postfix query output carries logic"),
+					Query.ValueOutputs[0].IntrinsicTypeName, FName(TEXT("logic")));
+				TestEqual(TEXT("Postfix query output is failable"),
+					Query.ValueOutputs[0].Outcome,
+					EVerseExpressionOutcome::FailableValue);
+			}
+			TestTrue(TEXT("Postfix query range is source exact"),
+				Snapshot.GetSourceView(Query.OperatorRange) == UTF8TEXTVIEW("?"));
+		}
+	}
 	return true;
 }
 

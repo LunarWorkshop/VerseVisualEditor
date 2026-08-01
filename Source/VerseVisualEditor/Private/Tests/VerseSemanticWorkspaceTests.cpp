@@ -244,7 +244,8 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"AcceptInt(Value : int)<computes> : int = Value\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
 		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
-		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"));
+		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"
+		"QueryLogic(Input : logic)<computes><decides> : logic = Input?\n"));
 	Document.Revision.Value = 91;
 
 	TestFalse(TEXT("The test document is not registered by existing on-disk source"), FPaths::FileExists(Document.FilePath));
@@ -290,6 +291,25 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			ExpressionBeginByte,
 			true,
 			*ParsedDocument);
+	const int32 QueryExpressionBeginByte = SourceView.Find(UTF8TEXTVIEW("Input?"));
+	const TArray<FVerseSemanticCandidate> QueryCandidates =
+		FVerseSemanticCandidateProvider::Build(
+			CandidateSnapshots,
+			Document.FilePath,
+			QueryExpressionBeginByte,
+			true,
+			*ParsedDocument);
+	FVerseVisualSocket LogicOutputSocket;
+	LogicOutputSocket.IntrinsicTypeName = TEXT("logic");
+	const TArray<TSharedPtr<FVerseExpressionAction>> QueryActions =
+		FVerseExpressionActionQuery::Build(
+			{},
+			LogicOutputSocket,
+			true,
+			*ParsedDocument,
+			FVerseTextRange(Document.Revision, {QueryExpressionBeginByte, 5}),
+			Document.FilePath,
+			CandidateSnapshots);
 	FVerseVisualSocket OutputSocket;
 	const TArray<TSharedPtr<FVerseExpressionAction>> Actions =
 		FVerseExpressionActionQuery::Build(
@@ -358,6 +378,39 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				&& Candidate.InstantiatedFunctionType != nullptr
 				&& Candidate.BoundInputIndex != INDEX_NONE
 				&& Candidate.Snapshot.IsValid();
+		}));
+	const FVerseSemanticCandidate* QueryCandidate = QueryCandidates.FindByPredicate(
+		[](const FVerseSemanticCandidate& Candidate)
+		{
+			return Candidate.Kind == EVerseSemanticCandidateKind::PostfixOperator
+				&& Candidate.Function != nullptr
+				&& Candidate.Function->GetName()
+					== Candidate.Function->GetProgram()._IntrinsicSymbols._OpNameQuery
+				&& Candidate.BoundInputIndex == 0;
+		});
+	TestNotNull(TEXT("Compiler query intrinsic is exposed as a postfix logic action"),
+		QueryCandidate);
+	if (QueryCandidate != nullptr)
+	{
+		const uLang::CIntrinsicSymbols& Symbols =
+			QueryCandidate->Function->GetProgram()._IntrinsicSymbols;
+		// INTENTIONAL ENGINE-UPGRADE TRIPWIRE: UE 6.0 declares `_OpNameQuery` as
+		// `operator'?'`, despite query being postfix syntax. When Epic changes it to
+		// native postfix classification this assertion should fail loudly. Remove
+		// the two exact `_OpNameQuery` branches in VerseSemanticCandidates, retain
+		// the generic IsPostfixOpName path, and update this test for the new contract.
+		TestTrue(
+			TEXT("Maintenance guard: remove the UE 6.0 query classification shim when this fails"),
+			Symbols.IsOperatorOpName(QueryCandidate->Function->GetName())
+				&& !Symbols.IsPostfixOpName(QueryCandidate->Function->GetName()));
+	}
+	TestTrue(TEXT("Logic query action emits postfix question-mark source"),
+		QueryActions.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::PostfixOperator
+				&& Action->SourceSpelling == TEXT("?")
+				&& Action->BoundInputIndex == 0;
 		}));
 	const FVerseSemanticCandidate* AcceptIntCandidate = Candidates.FindByPredicate(
 		[](const FVerseSemanticCandidate& Candidate)

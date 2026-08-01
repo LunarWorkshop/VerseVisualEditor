@@ -727,4 +727,61 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseQuerySyntaxTypeBridgeMaintenanceTest,
+	"VerseVisualEditor.Integration.QueryCompatibility.SyntaxTypeBridge",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseQuerySyntaxTypeBridgeMaintenanceTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this, TEXT("functions.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot =
+		FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	struct FPrimitiveParameterCase
+	{
+		FUtf8StringView FunctionName;
+		FUtf8StringView TypeName;
+	};
+	const FPrimitiveParameterCase Cases[] = {
+		{UTF8TEXTVIEW("PassLogic"), UTF8TEXTVIEW("logic")},
+		{UTF8TEXTVIEW("PassInteger"), UTF8TEXTVIEW("int")},
+		{UTF8TEXTVIEW("PassFloat"), UTF8TEXTVIEW("float")},
+		{UTF8TEXTVIEW("PassString"), UTF8TEXTVIEW("string")},
+		{UTF8TEXTVIEW("PassCharacter"), UTF8TEXTVIEW("char")},
+	};
+
+	// INTENTIONAL CLEANUP TRIPWIRE: syntax-derived parameter references currently
+	// expose primitive types only through source ranges. Query has a temporary
+	// source-text bridge so its pins still receive a canonical logic type. If an
+	// engine/semantic integration update makes any assertion below fail, remove
+	// that bridge and change this test to require canonical intrinsic names for
+	// every primitive parameter reference instead.
+	for (const FPrimitiveParameterCase& Case : Cases)
+	{
+		const FVerseSourceRegion* Function =
+			VerseParseSnapshotBuilderTests::FindTypedRegion(
+				Snapshot, Snapshot.GetSourceRegions(), Case.FunctionName);
+		if (!TestNotNull(TEXT("Primitive pass-through fixture exists"), Function)
+			|| !TestEqual(TEXT("Primitive pass-through has one expression"),
+				Function->BodyClause.Items.Num(), 1))
+		{
+			continue;
+		}
+		const FVerseExpressionType& Type =
+			Function->BodyClause.Items[0].Expression.Type;
+		TestTrue(
+			TEXT("Maintenance guard: primitive parameter references still require the source-range type bridge"),
+			Type.SourceRange.IsSet()
+				&& Snapshot.GetSourceView(Type.SourceRange) == Case.TypeName
+				&& Type.IntrinsicName.IsNone());
+	}
+	return true;
+}
+
 #endif

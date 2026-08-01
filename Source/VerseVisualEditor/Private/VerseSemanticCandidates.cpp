@@ -189,6 +189,7 @@ namespace
 		case uLang::EAstNodeType::Invoke_UnaryArithmetic:
 		case uLang::EAstNodeType::Invoke_BinaryArithmetic:
 		case uLang::EAstNodeType::Invoke_Comparison:
+		case uLang::EAstNodeType::Invoke_QueryValue:
 			return static_cast<const uLang::CExprInvocation*>(&Expression);
 		default:
 			return nullptr;
@@ -620,7 +621,14 @@ namespace
 		const uLang::CFunctionType::ParamTypes Params = FunctionType->GetParamTypes();
 		const bool bExtensionMethod = Function._ExtensionFieldAccessorKind ==
 			uLang::EExtensionFieldAccessorKind::ExtensionMethod;
-		const bool bInfix = !bExtensionMethod
+		// UE 6.0 interns query as `operator'?'`, so IsOperatorOpName reports it as
+		// infix even though Verse syntax and CExprQueryValue are postfix. Keep the
+		// exact intrinsic identity override until Epic moves _OpNameQuery under the
+		// postfix namespace. The semantic workspace test intentionally fails when
+		// that engine taxonomy changes so this compatibility branch gets removed.
+		const bool bQuery = Function.GetName()
+			== Function.GetProgram()._IntrinsicSymbols._OpNameQuery;
+		const bool bInfix = !bQuery && !bExtensionMethod
 			&& Function.GetProgram()._IntrinsicSymbols.IsOperatorOpName(
 				Function.GetName());
 		const bool bPrefix = Function.GetProgram()._IntrinsicSymbols.IsPrefixOpName(
@@ -633,13 +641,19 @@ namespace
 		{
 			return;
 		}
-		const EVerseSemanticCandidateKind Kind = bInfix
-			? EVerseSemanticCandidateKind::InfixOperator
-			: (bPrefix
-				? EVerseSemanticCandidateKind::PrefixOperator
-				: (bPostfix
-					? EVerseSemanticCandidateKind::PostfixOperator
-					: EVerseSemanticCandidateKind::Function));
+		EVerseSemanticCandidateKind Kind = EVerseSemanticCandidateKind::Function;
+		if (bQuery || bPostfix)
+		{
+			Kind = EVerseSemanticCandidateKind::PostfixOperator;
+		}
+		else if (bInfix)
+		{
+			Kind = EVerseSemanticCandidateKind::InfixOperator;
+		}
+		else if (bPrefix)
+		{
+			Kind = EVerseSemanticCandidateKind::PrefixOperator;
+		}
 
 		if (!bDraggingFromOutput)
 		{
@@ -860,7 +874,15 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::BuildAll(
 				const bool bExtensionMethod = Function->_ExtensionFieldAccessorKind ==
 					uLang::EExtensionFieldAccessorKind::ExtensionMethod;
 				Candidate.Kind = EVerseSemanticCandidateKind::Function;
-				if (!bExtensionMethod
+				// See AddFunctionCandidates above. BuildAll also walks compiler functions,
+				// so it needs the same UE 6.0 _OpNameQuery compatibility classification.
+				// Remove both exact-identity branches together when the maintenance
+				// tripwire reports that IsPostfixOpName handles query natively.
+				if (Function->GetName() == Program._IntrinsicSymbols._OpNameQuery)
+				{
+					Candidate.Kind = EVerseSemanticCandidateKind::PostfixOperator;
+				}
+				else if (!bExtensionMethod
 					&& Program._IntrinsicSymbols.IsOperatorOpName(Function->GetName()))
 				{
 					Candidate.Kind = EVerseSemanticCandidateKind::InfixOperator;

@@ -4,6 +4,12 @@ Transform<public>(Used : int, Unused : string)<computes> : int =
 Describe(Value : float, Label : string)<transacts> : string =
     Label
 
+PassLogic(Input : logic)<computes> : logic = Input
+PassInteger(Input : int)<computes> : int = Input
+PassFloat(Input : float)<computes> : float = Input
+PassString(Input : string)<computes> : string = Input
+PassCharacter(Input : char)<computes> : char = Input
+
 ChooseLast(First : int, Last : float)<computes> : float =
     First
 

@@ -161,13 +161,21 @@ namespace
 			uLang::EExtensionFieldAccessorKind::ExtensionMethod;
 		if (bOperator)
 		{
-			Action->SourceSpelling = AffixSpelling(
-				*Function,
-				Candidate.Kind == EVerseSemanticCandidateKind::InfixOperator
-					? uLang::CUTF8StringView("operator'")
-					: (Candidate.Kind == EVerseSemanticCandidateKind::PrefixOperator
-						? uLang::CUTF8StringView("prefix'")
-						: uLang::CUTF8StringView("postfix'")));
+			const uLang::CIntrinsicSymbols& Symbols = Function->GetProgram()._IntrinsicSymbols;
+			// Query is semantically classified as postfix by our compatibility layer,
+			// but UE 6.0 still spells its compiler symbol `operator'?'`. Select the
+			// prefix from the compiler's actual symbol namespace so both today's engine
+			// and a future native `postfix'?'` symbol produce the source spelling `?`.
+			uLang::CUTF8StringView AffixPrefix("postfix'");
+			if (Symbols.IsOperatorOpName(Function->GetName()))
+			{
+				AffixPrefix = uLang::CUTF8StringView("operator'");
+			}
+			else if (Symbols.IsPrefixOpName(Function->GetName()))
+			{
+				AffixPrefix = uLang::CUTF8StringView("prefix'");
+			}
+			Action->SourceSpelling = AffixSpelling(*Function, AffixPrefix);
 		}
 		else if (bExtensionMethod)
 		{

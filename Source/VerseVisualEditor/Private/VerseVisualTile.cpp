@@ -527,6 +527,15 @@ namespace
 				Input.InlineLiteralKind = Operand.LiteralKind;
 			}
 		}
+		if (Descriptor.Kind == EVerseExpressionKind::UnaryOperator
+			&& Descriptor.OperatorSpelling == TEXT("?"))
+		{
+			Tile.Outcome = EVerseExpressionOutcome::FailableValue;
+			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
+			{
+				Output.Outcome = Tile.Outcome;
+			}
+		}
 		return Tile;
 	}
 

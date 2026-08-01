@@ -6,3 +6,4 @@ LiteralFloat()<computes> : float = 3.5
 LiteralNegativeFloat()<computes> : float = -2.25
 LiteralString()<computes> : string = "hello"
 LiteralCharacter()<computes> : char = 'A'
+LiteralLogicQuery(Input : logic)<computes><decides> : logic = Input?

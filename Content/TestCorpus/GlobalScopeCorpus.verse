@@ -60,6 +60,12 @@ Basics := module:
     CorpusFunctionLiteralInt()<computes> : int =
         42
 
+    CorpusFunctionLiteralLogic()<computes> : logic =
+        true
+
+    CorpusFunctionQueryLogic(Input : logic)<computes><decides> : logic =
+        Input?
+
 BinaryOperators := module:
     CorpusFunctionAdd1(Input : int)<computes> : int =
         Input + 1
