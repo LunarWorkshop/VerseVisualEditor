@@ -38,6 +38,73 @@ enum class EVerseExpressionOutcome : uint8
 	FailureOnly,
 };
 
+struct FVerseVisualTileId
+{
+	int32 Value = INDEX_NONE;
+	bool IsValid() const { return Value != INDEX_NONE; }
+	friend bool operator==(FVerseVisualTileId Left, FVerseVisualTileId Right)
+	{
+		return Left.Value == Right.Value;
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVerseVisualTileId& Id)
+{
+	return GetTypeHash(Id.Value);
+}
+
+enum class EVerseVisualSocketDirection : uint8 { Input, Output };
+enum class EVerseVisualSocketRole : uint8
+{
+	Value,
+	Execution,
+	FailureContext,
+	ClauseInsertion,
+	BoundaryBinding,
+};
+
+struct FVerseVisualSocketId
+{
+	EVerseVisualSocketDirection Direction = EVerseVisualSocketDirection::Input;
+	EVerseVisualSocketRole Role = EVerseVisualSocketRole::Value;
+	int32 Index = INDEX_NONE;
+	bool IsValid() const { return Index != INDEX_NONE; }
+	friend bool operator==(const FVerseVisualSocketId&, const FVerseVisualSocketId&) = default;
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVerseVisualSocketId& Id)
+{
+	return HashCombine(
+		HashCombine(GetTypeHash(static_cast<uint8>(Id.Direction)),
+			GetTypeHash(static_cast<uint8>(Id.Role))),
+		GetTypeHash(Id.Index));
+}
+
+struct FVerseVisualSocketEndpoint
+{
+	FVerseVisualTileId Tile;
+	FVerseVisualSocketId Socket;
+	bool IsValid() const { return Tile.IsValid() && Socket.IsValid(); }
+	friend bool operator==(const FVerseVisualSocketEndpoint&, const FVerseVisualSocketEndpoint&) = default;
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVerseVisualSocketEndpoint& Endpoint)
+{
+	return HashCombine(GetTypeHash(Endpoint.Tile.Value), GetTypeHash(Endpoint.Socket));
+}
+
+enum class EVerseVisualConnectionAxis : uint8 { Horizontal, Vertical };
+
+struct FVerseVisualConnection
+{
+	FVerseVisualSocketEndpoint Source;
+	FVerseVisualSocketEndpoint Target;
+	EVerseVisualConnectionAxis Axis = EVerseVisualConnectionAxis::Horizontal;
+	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	int32 ExtraBlankLineMarkers = 0;
+	FVerseVisualTileId PaintScope;
+};
+
 inline FLinearColor GetVerseFailureDecorationColor()
 {
 	return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("FFDC4A")));
@@ -45,16 +112,19 @@ inline FLinearColor GetVerseFailureDecorationColor()
 
 struct FVerseVisualSocket
 {
+	FVerseVisualSocketId Id;
 	FVerseTextRange NameRange;
 	/** Compiler-authored parameter name when it is not represented by this expression's source. */
 	FString SemanticName;
 	FVerseTextRange TypeRange;
-	bool bConnected = false;
 	FName IntrinsicTypeName;
 	/** Compiler-authored type spelling when an exact semantic snapshot is available. */
 	FString SemanticTypeName;
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
+	/** An omitted fixed formal parameter currently uses its declared default. */
+	bool bUsesDeclaredDefault = false;
+	bool bNamedParameter = false;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	/** Exact compiler identity for a predicate binding exposed at a context boundary. */
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
@@ -62,6 +132,34 @@ struct FVerseVisualSocket
 	TArray<const uLang::CScope*> LegalConsumerScopes;
 	/** Keeps SemanticDataDefinition and LegalConsumerScopes alive. */
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
+};
+
+class FVerseVisualSocketTopology
+{
+public:
+	TConstArrayView<FVerseVisualSocket> GetValueInputs() const { return ValueInputs; }
+	TConstArrayView<FVerseVisualSocket> GetValueOutputs() const { return ValueOutputs; }
+	TConstArrayView<FVerseVisualSocket> GetOtherInputs() const { return OtherInputs; }
+	TConstArrayView<FVerseVisualSocket> GetOtherOutputs() const { return OtherOutputs; }
+	const FVerseVisualSocket* Find(FVerseVisualSocketId Id) const;
+#if WITH_DEV_AUTOMATION_TESTS
+	static FVerseVisualSocketTopology MakeInvalidForTesting(
+		TArray<FVerseVisualSocket> InValueInputs,
+		TArray<FVerseVisualSocket> InValueOutputs = {})
+	{
+		FVerseVisualSocketTopology Result;
+		Result.ValueInputs = MoveTemp(InValueInputs);
+		Result.ValueOutputs = MoveTemp(InValueOutputs);
+		return Result;
+	}
+#endif
+
+private:
+	TArray<FVerseVisualSocket> ValueInputs;
+	TArray<FVerseVisualSocket> ValueOutputs;
+	TArray<FVerseVisualSocket> OtherInputs;
+	TArray<FVerseVisualSocket> OtherOutputs;
+	friend class FVerseVisualTopologyBuilder;
 };
 
 struct FVerseVisualExpressionDescriptor
@@ -81,6 +179,10 @@ struct FVerseVisualExpressionDescriptor
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
+	TArray<FString> SemanticInputNames;
+	TArray<FString> SemanticInputTypeNames;
+	TArray<bool> SemanticInputNamed;
+	TArray<bool> SemanticInputHasDefault;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseVisualExpressionDescriptor> Operands;
@@ -141,6 +243,7 @@ struct FVerseVisualFunctionParameter
 /** Read-only presentation data. All text remains referenced by snapshot byte ranges. */
 struct FVerseVisualTile
 {
+	FVerseVisualTileId Id;
 	FVerseTextRange Range;
 	int32 FirstSourceLine = INDEX_NONE;
 	int32 LastSourceLine = INDEX_NONE;
@@ -158,9 +261,14 @@ struct FVerseVisualTile
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
+	TArray<FString> SemanticInputNames;
+	TArray<FString> SemanticInputTypeNames;
+	TArray<bool> SemanticInputNamed;
+	TArray<bool> SemanticInputHasDefault;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	const uLang::CFunction* SemanticFunction = nullptr;
+	TArray<const uLang::CScope*> LegalConsumerScopes;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseTextRange> SpecifierRanges;
 	TArray<FVerseTextRange> FunctionAccessSpecifierRanges;
@@ -172,18 +280,20 @@ struct FVerseVisualTile
 	TArray<FVerseVisualTile> Children;
 	TArray<FVerseVisualExpressionDescriptor::FControlRegion> ControlRegions;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
-	TArray<FVerseVisualSocket> ValueInputs;
-	TArray<FVerseVisualSocket> ValueOutputs;
+	FVerseVisualSocketTopology SocketTopology;
+	TConstArrayView<FVerseVisualSocket> GetValueInputs() const { return SocketTopology.GetValueInputs(); }
+	TConstArrayView<FVerseVisualSocket> GetValueOutputs() const { return SocketTopology.GetValueOutputs(); }
+	const FVerseVisualSocket* FindSocket(FVerseVisualSocketId SocketId) const
+	{
+		return SocketTopology.Find(SocketId);
+	}
 	/** Ordered clause containing this statement-level tile, when directly editable. */
 	TOptional<FVerseVisualClauseDescriptor> EditableClause;
 	int32 ClauseItemIndex = INDEX_NONE;
 	int32 ExtraBlankLineCount = 0;
-	bool bHasExecutionInput = false;
-	bool bHasExecutionOutput = false;
-	/** A list-capable failure context starts its ordered child chain inside the tile. */
-	bool bHasInternalExecutionEntry = false;
-	bool bExecutionInputConnected = false;
-	bool bExecutionOutputConnected = false;
+	bool bStatementLevel = false;
+	bool bValueConsumed = false;
+	bool bProducesValue = false;
 	bool bImplicitReturnValue = false;
 	/** Transient editor state: replace this generated tile until the user adopts it. */
 	bool bIsProvisional = false;
@@ -198,4 +308,14 @@ public:
 	static TArray<FVerseVisualTile> BuildFunctionGraph(
 		const FVerseVisualTile& FunctionTile,
 		const FVerseParseSnapshot& Snapshot);
+	static void FinalizeSocketTopology(TArray<FVerseVisualTile>& GraphTiles);
+	static TArray<FVerseVisualConnection> BuildConnections(
+		TConstArrayView<FVerseVisualTile> GraphTiles);
+	static bool IsSocketConnected(
+		TConstArrayView<FVerseVisualConnection> Connections,
+		FVerseVisualSocketEndpoint Endpoint);
+	static bool ValidateConnections(
+		TConstArrayView<FVerseVisualTile> GraphTiles,
+		TConstArrayView<FVerseVisualConnection> Connections,
+		FString* OutDiagnostic = nullptr);
 };

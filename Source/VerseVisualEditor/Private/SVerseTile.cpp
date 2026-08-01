@@ -352,6 +352,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		FLinearColor::White,
 		FVector4(0.0f, 0.0f, InnerCornerRadius, InnerCornerRadius));
 	Tile = InArgs._Tile;
+	ConnectedSockets = InArgs._ConnectedSockets;
 	SetRenderOpacity(Tile.bIsProvisional ? 0.5f : 1.0f);
 	Document = InArgs._Document;
 	IsSelected = InArgs._IsSelected;
@@ -366,17 +367,20 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		Tile.Kind == EVerseVisualTileKind::Expression
 		&& IsVerseOperatorExpression(Tile.ExpressionKind));
 	const bool bHasLabeledExecutionOutputs = !InArgs._ExecutionOutputLabels.IsEmpty();
-	const bool bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
+	bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	TSharedPtr<SVerseTileExecutionPin> ExecutionInputPin;
-	if (Tile.bHasExecutionInput)
+	const FVerseVisualSocketId ExecutionInputId{
+		EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution, 0};
+	const bool bHasExecutionInput = Tile.FindSocket(ExecutionInputId) != nullptr;
+	if (bHasExecutionInput)
 	{
 		ExecutionInputPin =
 			SNew(SVerseTileExecutionPin)
 			.Input(true)
-			.Connected(Tile.bExecutionInputConnected);
-		ExecutionInputAnchor = ExecutionInputPin;
+			.Connected(ConnectedSockets.Contains(ExecutionInputId));
+		SocketAnchors.Add(ExecutionInputId, ExecutionInputPin);
 		TileWithExecution->AddSlot()
 		.AutoHeight()
 		.HAlign(HAlign_Left)
@@ -414,15 +418,19 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
 		TSharedRef<SVerticalBox> FailureChain = SNew(SVerticalBox);
-		if (Tile.bHasInternalExecutionEntry)
+		const FVerseVisualSocketId ClauseInsertionId{
+			EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::ClauseInsertion,
+			0};
+		if (Tile.FindSocket(ClauseInsertionId) != nullptr)
 		{
 			const TSharedRef<SVerseTileExecutionPin> EntryPin =
 				SNew(SVerseTileExecutionPin)
 				.Input(false)
-				.Connected(!Tile.Children.IsEmpty())
+				.Connected(ConnectedSockets.Contains(ClauseInsertionId))
 				.Compact(true)
 				.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, -2.0f)));
-			InternalExecutionEntryAnchor = EntryPin;
+			SocketAnchors.Add(ClauseInsertionId, EntryPin);
 			FailureChain->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Center)
@@ -436,6 +444,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					&SVerseTile::HandleClauseInsertionMouseButtonDown,
 					TSharedPtr<SWidget>(EntryPin),
 					GetVerseExecutionPinAnchorCoordinate(false, true),
+					ClauseInsertionId,
 					0)
 				[
 					EntryPin
@@ -464,28 +473,36 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	TSharedRef<SWidget> FailureContextInputWidget = SNullWidget::NullWidget;
 	if (bIfTile)
 	{
+		const FVerseVisualSocketId FailureInputId{
+			EVerseVisualSocketDirection::Input,
+			EVerseVisualSocketRole::FailureContext,
+			0};
 		const TSharedRef<SVerseFailableValuePin> Pin =
 			SNew(SVerseFailableValuePin)
 				.Color(GetVerseFailureDecorationColor())
-				.Connected(true)
+				.Connected(ConnectedSockets.Contains(FailureInputId))
 				.Visibility(EVisibility::HitTestInvisible)
 				.RenderTransform(FSlateRenderTransform(FVector2D(-5.5f, 0.0f)));
-		FailureContextInputAnchor = Pin;
+		SocketAnchors.Add(FailureInputId, Pin);
 		FailureContextInputWidget = Pin;
 	}
 	TSharedRef<SWidget> FailureContextOutputWidget = SNullWidget::NullWidget;
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
+		const FVerseVisualSocketId FailureOutputId{
+			EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::FailureContext,
+			0};
 		const TSharedRef<SVerseFailableValuePin> Pin =
 			SNew(SVerseFailableValuePin)
 				.Color(GetVerseFailureDecorationColor())
-				.Connected(true)
+				.Connected(ConnectedSockets.Contains(FailureOutputId))
 				.Visibility(EVisibility::HitTestInvisible)
 				.RenderTransform(FSlateRenderTransform(FVector2D(5.5f, 0.0f)));
-		FailureContextOutputAnchor = Pin;
+		SocketAnchors.Add(FailureOutputId, Pin);
 		FailureContextOutputWidget = Pin;
 	}
-	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.ValueOutputs, true);
+	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.GetValueOutputs(), true);
 	TSharedRef<SWidget> HeaderOutputGroup = ValueOutputWidget;
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
@@ -549,7 +566,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					.AutoWidth()
 					.VAlign(VAlign_Center)
 					[
-						BuildSocketColumn(Tile.ValueInputs, false)
+						BuildSocketColumn(Tile.GetValueInputs(), false)
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -657,16 +674,23 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		[
 			SNew(SBox)
-			.HeightOverride(Tile.bHasExecutionOutput
+			.HeightOverride(Tile.FindSocket({EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution, 0}) != nullptr
 				? (bCompactExecutionSpacing ? 12.0f : 41.0f)
 				: 0.0f)
 		]
 	];
 
-	if (Tile.bHasExecutionOutput)
+	if (Tile.FindSocket({EVerseVisualSocketDirection::Output,
+		EVerseVisualSocketRole::Execution, 0}) != nullptr)
 	{
 		const TArray<FText>& OutputLabels = InArgs._ExecutionOutputLabels;
-		const int32 OutputCount = FMath::Max(1, OutputLabels.Num());
+		int32 OutputCount = 0;
+		while (Tile.FindSocket({EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::Execution, OutputCount}) != nullptr)
+		{
+			++OutputCount;
+		}
 		TSharedRef<SHorizontalBox> OutputRow = SNew(SHorizontalBox);
 		for (int32 OutputIndex = 0; OutputIndex < OutputCount; ++OutputIndex)
 		{
@@ -678,9 +702,11 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					: Tile.ClauseItemIndex + 1;
 			}
 			const float OutputColumnWidth = OutputIndex == 0 ? 72.0f : 64.0f;
-			const bool bConnected = InArgs._ExecutionOutputConnectedStates.IsValidIndex(OutputIndex)
-				? InArgs._ExecutionOutputConnectedStates[OutputIndex]
-				: Tile.bExecutionOutputConnected;
+			const FVerseVisualSocketId OutputId{
+				EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution,
+				OutputIndex};
+			const bool bConnected = ConnectedSockets.Contains(OutputId);
 			const TSharedRef<SVerseTileExecutionPin> OutputAnchor =
 				SNew(SVerseTileExecutionPin)
 				.Input(false)
@@ -722,6 +748,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 							GetVerseExecutionPinAnchorCoordinate(
 								false,
 								bCompactExecutionSpacing),
+							OutputId,
 							ClauseInsertionIndex)
 						[
 							OutputAnchor
@@ -729,7 +756,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					]
 				]
 			];
-			ExecutionOutputAnchors.Add(OutputAnchor);
+			SocketAnchors.Add(OutputId, OutputAnchor);
 		}
 		TileAndOutput->AddSlot()
 		.HAlign(HAlign_Left)
@@ -741,7 +768,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 
 	TileWithExecution->AddSlot()
 	.AutoHeight()
-	.Padding(0.0f, Tile.bHasExecutionInput ? -8.0f : 0.0f, 0.0f, 0.0f)
+	.Padding(0.0f, bHasExecutionInput ? -8.0f : 0.0f, 0.0f, 0.0f)
 	[
 		TileAndOutput
 	];
@@ -773,7 +800,8 @@ float SVerseTile::GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const
 	// Execution input consumes 32 Slate units, while the tile surface overlaps
 	// it by 8. The outer one-unit outline precedes the header contents. Both
 	// value-pin columns are vertically centered in HeaderSocketRow.
-	const float ExecutionOffset = Tile.bHasExecutionInput ? 24.0f : 0.0f;
+	const float ExecutionOffset = Tile.FindSocket({EVerseVisualSocketDirection::Input,
+		EVerseVisualSocketRole::Execution, 0}) != nullptr ? 24.0f : 0.0f;
 	const float OperatorLineHeight = OperatorLineWidget.IsValid()
 		? OperatorLineWidget->GetDesiredSize().Y
 		: 0.0f;
@@ -966,24 +994,24 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			{
 				PinWidget = SNew(SVerseFailableValuePin)
 					.Color(PinColor)
-					.Connected(Socket.bConnected)
+					.Connected(ConnectedSockets.Contains(Socket.Id))
 					.Visibility(EVisibility::HitTestInvisible);
 			}
 			else
 			{
 				PinWidget = SNew(SImage)
-					.Image(GetVerseTilePinBrush(Type, Socket.bConnected))
+					.Image(GetVerseTilePinBrush(Type, ConnectedSockets.Contains(Socket.Id)))
 					.ColorAndOpacity(PinColor)
 					.Visibility(EVisibility::HitTestInvisible)
 					.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
 			}
 			if (bOutput)
 			{
-				ValueOutputAnchors.Add(PinWidget);
+				SocketAnchors.Add(Socket.Id, PinWidget);
 			}
 			else
 			{
-				ValueInputAnchors.Add(PinWidget);
+				SocketAnchors.Add(Socket.Id, PinWidget);
 			}
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
@@ -1060,7 +1088,8 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 {
 	const bool bDraggableStatementOutput = bOutput
 		&& Tile.Kind == EVerseVisualTileKind::Expression
-		&& Tile.bHasExecutionInput;
+		&& Tile.FindSocket({EVerseVisualSocketDirection::Input,
+			EVerseVisualSocketRole::Execution, 0}) != nullptr;
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
 		|| !bDraggableStatementOutput
 		|| !OnSocketDragStarted.IsBound())
@@ -1069,9 +1098,9 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	}
 	FVerseSocketDragStart DragStart;
 	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.Endpoint = {Tile.Id, Socket.Id};
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
-	DragStart.Tile = Tile;
-	DragStart.Socket = Socket;
+	DragStart.TileRange = Tile.Range;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = GetVerseTilePinColor(!Socket.SemanticTypeName.IsEmpty()
 		? Socket.SemanticTypeName
@@ -1084,7 +1113,6 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 		DragStart.WireColor = GetVerseFailureDecorationColor();
 	}
 	DragStart.bOutput = bOutput;
-	DragStart.SocketIndex = SocketIndex;
 	if (DragStart.bAdoptsProvisionalTile)
 	{
 		// Adoption is transient UI state. Make the existing widget opaque
@@ -1100,6 +1128,7 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	const FPointerEvent& MouseEvent,
 	TSharedPtr<SWidget> Anchor,
 	FVector2D AnchorCoordinate,
+	FVerseVisualSocketId SocketId,
 	int32 InsertIndex)
 {
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
@@ -1112,9 +1141,10 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	FVerseSocketDragStart DragStart;
 	DragStart.Purpose = FVerseSocketDragStart::EPurpose::ClauseInsertion;
 	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.Endpoint = {Tile.Id, SocketId};
 	DragStart.AnchorCoordinate = AnchorCoordinate;
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
-	DragStart.Tile = Tile;
+	DragStart.TileRange = Tile.Range;
 	DragStart.Clause = Tile.EditableClause;
 	DragStart.ClauseInsertionIndex = InsertIndex;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
@@ -1126,6 +1156,22 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 		SetRenderOpacity(1.0f);
 	}
 	return OnSocketDragStarted.Execute(DragStart);
+}
+
+FVector2D SVerseTile::GetSocketAnchorCoordinate(
+	const FVerseVisualSocketId& SocketId) const
+{
+	if (SocketId.Role == EVerseVisualSocketRole::ClauseInsertion)
+	{
+		return GetVerseExecutionPinAnchorCoordinate(false, true);
+	}
+	if (SocketId.Role == EVerseVisualSocketRole::Execution)
+	{
+		return GetVerseExecutionPinAnchorCoordinate(
+			SocketId.Direction == EVerseVisualSocketDirection::Input,
+			bCompactExecutionSpacing);
+	}
+	return FVector2D(0.5f, 0.5f);
 }
 
 FText SVerseTile::Decode(FVerseByteRange Range) const

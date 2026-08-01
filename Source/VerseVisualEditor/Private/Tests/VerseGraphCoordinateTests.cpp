@@ -7,6 +7,17 @@
 #include "Misc/AutomationTest.h"
 #include "Widgets/Layout/SBox.h"
 
+namespace
+{
+	FVerseVisualTile FinalizeTestTile(FVerseVisualTile Tile)
+	{
+		TArray<FVerseVisualTile> Tiles;
+		Tiles.Add(MoveTemp(Tile));
+		FVerseVisualTileBuilder::FinalizeSocketTopology(Tiles);
+		return MoveTemp(Tiles[0]);
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseGraphWindowOriginTest,
 	"VerseVisualEditor.Graph.Coordinates.WindowOrigin",
@@ -229,7 +240,7 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 
 	FVerseVisualTile EmptyBlock;
 	EmptyBlock.Kind = EVerseVisualTileKind::FailableBlock;
-	EmptyBlock.bHasInternalExecutionEntry = true;
+	EmptyBlock = FinalizeTestTile(MoveTemp(EmptyBlock));
 	const TSharedRef<SVerseTile> EmptyWidget =
 		SNew(SVerseTile)
 		.Tile(EmptyBlock)
@@ -241,13 +252,15 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		];
 	EmptyWidget->SlatePrepass();
 	TestTrue(TEXT("List-capable empty block exposes its internal execution entry"),
-		EmptyWidget->GetInternalExecutionEntryAnchor().IsValid());
+		EmptyWidget->GetSocketAnchor({EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::ClauseInsertion, 0}).IsValid());
 
 	FVerseVisualTile PopulatedBlock = EmptyBlock;
 	PopulatedBlock.Children.AddDefaulted();
-	FVerseVisualSocket& Result = PopulatedBlock.ValueOutputs.AddDefaulted_GetRef();
-	Result.SemanticTypeName = TEXT("int");
-	Result.Outcome = EVerseExpressionOutcome::FailableValue;
+	PopulatedBlock.bProducesValue = true;
+	PopulatedBlock.SemanticTypeName = TEXT("int");
+	PopulatedBlock.Outcome = EVerseExpressionOutcome::FailableValue;
+	PopulatedBlock = FinalizeTestTile(MoveTemp(PopulatedBlock));
 	const TSharedRef<SVerseTile> PopulatedWidget =
 		SNew(SVerseTile)
 		.Tile(PopulatedBlock)
@@ -260,19 +273,24 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		];
 	PopulatedWidget->SlatePrepass();
 	TestTrue(TEXT("Result-producing block exposes its right-edge value anchor"),
-		PopulatedWidget->GetFirstValueOutputAnchor().IsValid());
+		!PopulatedBlock.GetValueOutputs().IsEmpty()
+		&& PopulatedWidget->GetSocketAnchor(PopulatedBlock.GetValueOutputs()[0].Id).IsValid());
 	TestTrue(TEXT("Populated block expands to contain its ordered child area"),
 		PopulatedWidget->GetDesiredSize().X > EmptyWidget->GetDesiredSize().X
 			&& PopulatedWidget->GetDesiredSize().Y > EmptyWidget->GetDesiredSize().Y);
 
 	FVerseVisualTile OneBindingBlock = EmptyBlock;
-	FVerseVisualSocket& OneBinding = OneBindingBlock.ValueOutputs.AddDefaulted_GetRef();
-	OneBinding.SemanticName = TEXT("Value");
-	OneBinding.SemanticTypeName = TEXT("int");
+	FVerseVisualTile& OneDefinition = OneBindingBlock.Children.AddDefaulted_GetRef();
+	OneDefinition.Kind = EVerseVisualTileKind::Definition;
+	OneDefinition.SemanticDataDefinition = reinterpret_cast<const uLang::CDataDefinition*>(1);
+	OneDefinition.SemanticTypeName = TEXT("int");
+	OneBindingBlock = FinalizeTestTile(MoveTemp(OneBindingBlock));
 	FVerseVisualTile TwoBindingBlock = OneBindingBlock;
-	FVerseVisualSocket& TwoBinding = TwoBindingBlock.ValueOutputs.AddDefaulted_GetRef();
-	TwoBinding.SemanticName = TEXT("MutableValue");
-	TwoBinding.SemanticTypeName = TEXT("float");
+	FVerseVisualTile& TwoDefinition = TwoBindingBlock.Children.AddDefaulted_GetRef();
+	TwoDefinition.Kind = EVerseVisualTileKind::Definition;
+	TwoDefinition.SemanticDataDefinition = reinterpret_cast<const uLang::CDataDefinition*>(2);
+	TwoDefinition.SemanticTypeName = TEXT("float");
+	TwoBindingBlock = FinalizeTestTile(MoveTemp(TwoBindingBlock));
 	const TSharedRef<SVerseTile> OneBindingWidget =
 		SNew(SVerseTile)
 		.Tile(OneBindingBlock)
@@ -288,9 +306,12 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 	OneBindingWidget->SlatePrepass();
 	TwoBindingWidget->SlatePrepass();
 	TestTrue(TEXT("Failure and binding pins share one right-edge group"),
-		OneBindingWidget->GetFailureContextOutputAnchor().IsValid()
-		&& OneBindingWidget->GetValueOutputAnchor(0).IsValid()
-		&& TwoBindingWidget->GetValueOutputAnchor(1).IsValid());
+		OneBindingWidget->GetSocketAnchor({EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::FailureContext, 0}).IsValid()
+		&& OneBindingBlock.GetValueOutputs().Num() >= 1
+		&& OneBindingWidget->GetSocketAnchor(OneBindingBlock.GetValueOutputs()[0].Id).IsValid()
+		&& TwoBindingBlock.GetValueOutputs().Num() >= 2
+		&& TwoBindingWidget->GetSocketAnchor(TwoBindingBlock.GetValueOutputs()[1].Id).IsValid());
 	TestTrue(TEXT("The Condition header grows to contain additional bindings"),
 		TwoBindingWidget->GetDesiredSize().Y > OneBindingWidget->GetDesiredSize().Y);
 	return true;

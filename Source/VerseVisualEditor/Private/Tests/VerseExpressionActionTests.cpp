@@ -228,14 +228,14 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	const FVerseVisualTile& Identifier = Functions[0].GraphTiles[1];
 	const TArray<TSharedPtr<FVerseExpressionAction>> Actions = FVerseExpressionActionQuery::Build(
 		Functions[0].Parameters,
-		Identifier.ValueOutputs[0],
+		Identifier.GetValueOutputs()[0],
 		true,
 		*Session.GetParseSnapshot().GetDocument());
 	TestTrue(TEXT("Syntax-only fallback never invents callable or operator signatures"),
 		Actions.IsEmpty());
 	const TArray<TSharedPtr<FVerseExpressionAction>> IntProducers =
 		FVerseExpressionActionQuery::Build(
-			Functions[0].Parameters, Identifier.ValueOutputs[0], false,
+			Functions[0].Parameters, Identifier.GetValueOutputs()[0], false,
 			*Session.GetParseSnapshot().GetDocument());
 	TestTrue(TEXT("A matching identifier naturally appears as a producer"),
 		IntProducers.ContainsByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)

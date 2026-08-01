@@ -31,9 +31,9 @@ struct FVerseSocketDragStart
 	};
 
 	TSharedPtr<SWidget> Anchor;
+	FVerseVisualSocketEndpoint Endpoint;
 	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
-	FVerseVisualTile Tile;
-	FVerseVisualSocket Socket;
+	FVerseTextRange TileRange;
 	TOptional<FVerseVisualClauseDescriptor> Clause;
 	/** Existing provisional clause item replaced by this insertion gesture, if any. */
 	TOptional<FVerseTextRange> ProvisionalReplacementRange;
@@ -43,7 +43,6 @@ struct FVerseSocketDragStart
 	bool bOutput = false;
 	/** Starting this drag adopts the source tile and clears its provisional state. */
 	bool bAdoptsProvisionalTile = false;
-	int32 SocketIndex = INDEX_NONE;
 	int32 ClauseInsertionIndex = INDEX_NONE;
 	EPurpose Purpose = EPurpose::ValueConnection;
 };
@@ -82,7 +81,7 @@ public:
 		SLATE_ARGUMENT(bool, CompactExecutionSpacing)
 		SLATE_ARGUMENT(FText, DiagnosticText)
 		SLATE_ARGUMENT(TArray<FText>, ExecutionOutputLabels)
-		SLATE_ARGUMENT(TArray<bool>, ExecutionOutputConnectedStates)
+		SLATE_ARGUMENT(TSet<FVerseVisualSocketId>, ConnectedSockets)
 		SLATE_ATTRIBUTE(bool, IsSelected)
 		SLATE_EVENT(FOnClicked, OnSelected)
 		SLATE_EVENT(FOnClicked, OnOpened)
@@ -94,35 +93,13 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
-	TSharedPtr<SWidget> GetValueInputAnchor(int32 Index) const
+	TSharedPtr<SWidget> GetSocketAnchor(const FVerseVisualSocketId& SocketId) const
 	{
-		return ValueInputAnchors.IsValidIndex(Index) ? ValueInputAnchors[Index] : nullptr;
+		const TSharedPtr<SWidget>* Anchor = SocketAnchors.Find(SocketId);
+		return Anchor != nullptr ? *Anchor : nullptr;
 	}
-	TSharedPtr<SWidget> GetValueOutputAnchor(int32 Index) const
-	{
-		return ValueOutputAnchors.IsValidIndex(Index) ? ValueOutputAnchors[Index] : nullptr;
-	}
-	TSharedPtr<SWidget> GetFirstValueInputAnchor() const { return GetValueInputAnchor(0); }
-	TSharedPtr<SWidget> GetFirstValueOutputAnchor() const { return GetValueOutputAnchor(0); }
-	TSharedPtr<SWidget> GetExecutionInputAnchor() const { return ExecutionInputAnchor; }
-	TSharedPtr<SWidget> GetInternalExecutionEntryAnchor() const
-	{
-		return InternalExecutionEntryAnchor;
-	}
-	TSharedPtr<SWidget> GetFailureContextInputAnchor() const
-	{
-		return FailureContextInputAnchor;
-	}
-	TSharedPtr<SWidget> GetFailureContextOutputAnchor() const
-	{
-		return FailureContextOutputAnchor;
-	}
-	TSharedPtr<SWidget> GetExecutionOutputAnchor(int32 Index = 0) const
-	{
-		return ExecutionOutputAnchors.IsValidIndex(Index)
-			? ExecutionOutputAnchors[Index]
-			: nullptr;
-	}
+	FVector2D GetSocketAnchorCoordinate(const FVerseVisualSocketId& SocketId) const;
+	const FVerseVisualTile& GetTile() const { return Tile; }
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
 
@@ -151,6 +128,7 @@ private:
 		const FPointerEvent& MouseEvent,
 		TSharedPtr<SWidget> Anchor,
 		FVector2D AnchorCoordinate,
+		FVerseVisualSocketId SocketId,
 		int32 InsertIndex);
 	FText Decode(FVerseByteRange Range) const;
 	FText GetKindText() const;
@@ -176,13 +154,8 @@ private:
 	FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted;
 	FOnVerseClauseReordered OnClauseReordered;
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
-	TArray<TSharedPtr<SWidget>> ValueInputAnchors;
-	TArray<TSharedPtr<SWidget>> ValueOutputAnchors;
-	TSharedPtr<SWidget> ExecutionInputAnchor;
-	TSharedPtr<SWidget> InternalExecutionEntryAnchor;
-	TSharedPtr<SWidget> FailureContextInputAnchor;
-	TSharedPtr<SWidget> FailureContextOutputAnchor;
-	TArray<TSharedPtr<SWidget>> ExecutionOutputAnchors;
+	TMap<FVerseVisualSocketId, TSharedPtr<SWidget>> SocketAnchors;
+	TSet<FVerseVisualSocketId> ConnectedSockets;
 	TSharedPtr<SWidget> OperatorLineWidget;
 	TSharedPtr<SWidget> HeaderSocketRow;
 	TSharedPtr<SWidget> ValueInputColumn;
@@ -196,4 +169,5 @@ private:
 	bool bExpanded = true;
 	bool bShowBody = true;
 	bool bCollapsible = true;
+	bool bCompactExecutionSpacing = false;
 };

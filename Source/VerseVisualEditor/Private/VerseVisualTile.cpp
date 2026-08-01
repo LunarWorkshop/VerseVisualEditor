@@ -250,25 +250,12 @@ namespace
 		return Tiles;
 	}
 
-	FVerseVisualSocket MakeSocket(
-		FVerseTextRange TypeRange,
-		FName IntrinsicTypeName,
-		bool bConnected,
-		FVerseTextRange NameRange = {})
-	{
-		FVerseVisualSocket Socket;
-		Socket.NameRange = NameRange;
-		Socket.TypeRange = TypeRange;
-		Socket.IntrinsicTypeName = IntrinsicTypeName;
-		Socket.bConnected = bConnected;
-		return Socket;
-	}
-
 	FVerseVisualTile MakeExpressionTile(
 		const FVerseVisualExpressionDescriptor& Descriptor,
 		const FVerseParseSnapshot& Snapshot,
 		bool bStatementLevel,
-		bool bImplicitReturnValue)
+		bool bImplicitReturnValue,
+		bool bValueConsumed = false)
 	{
 		FVerseVisualTile Tile;
 		Tile.Kind = Descriptor.Kind == EVerseExpressionKind::Definition
@@ -307,14 +294,25 @@ namespace
 			Tile.IntrinsicTypeName = GetLiteralTypeName(Tile.LiteralKind);
 		}
 		Tile.TypeProvenance = Descriptor.TypeProvenance;
+		Tile.bStatementLevel = bStatementLevel;
+		Tile.bValueConsumed = bValueConsumed;
+		Tile.bProducesValue = Descriptor.Kind == EVerseExpressionKind::Identifier
+			|| Descriptor.Kind == EVerseExpressionKind::Literal
+			|| IsVerseOperatorExpression(Descriptor.Kind)
+			|| Descriptor.Kind == EVerseExpressionKind::Call;
+		if (Tile.bProducesValue)
+		{
+			Tile.bProducesValue = Descriptor.IntrinsicTypeName != TEXT("void")
+				&& (!Descriptor.TypeRange.IsSet()
+					|| !Snapshot.GetDocument()->DecodeOriginalRange(Descriptor.TypeRange)
+						.TrimStartAndEnd().Equals(TEXT("void"), ESearchCase::IgnoreCase));
+		}
 		if (bStatementLevel)
 		{
 			Tile.FirstSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(
 				Descriptor.Range.BeginByte);
 			Tile.LastSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(
 				FMath::Max(Descriptor.Range.BeginByte, Descriptor.Range.EndByte() - 1));
-			Tile.bHasExecutionInput = true;
-			Tile.bHasExecutionOutput = true;
 			Tile.bImplicitReturnValue = bImplicitReturnValue;
 		}
 
@@ -340,7 +338,8 @@ namespace
 				Descriptor.Kind == EVerseExpressionKind::Control
 					&& (!bConditionOperand
 						|| Descriptor.ControlKind == EVerseControlKind::If),
-				false));
+				false,
+				true));
 		}
 		if (Descriptor.Kind == EVerseExpressionKind::Control
 			&& Descriptor.ControlKind == EVerseControlKind::If)
@@ -371,7 +370,6 @@ namespace
 						ConditionRegion->Range.EndByte() - 1));
 				FailablePredicate.VstNodeType = Descriptor.VstNodeType;
 				FailablePredicate.VstTag = Descriptor.VstTag;
-				FailablePredicate.bHasInternalExecutionEntry = true;
 				FailablePredicate.ControlRegions.Add(*ConditionRegion);
 				FailablePredicate.ControlRegions[0].FirstOperandIndex = 0;
 				FailablePredicate.BodyClause.InteriorRange = ConditionRegion->InteriorRange;
@@ -432,192 +430,291 @@ namespace
 				}
 			}
 		}
-		else if (IsVerseOperatorExpression(Descriptor.Kind) || Descriptor.Kind == EVerseExpressionKind::Call)
-		{
-			for (const FVerseVisualExpressionDescriptor& Operand : Descriptor.Operands)
-			{
-				Tile.ValueInputs.Add(MakeSocket(
-					Operand.TypeRange.IsSet() ? Operand.TypeRange : Descriptor.TypeRange,
-					!Operand.IntrinsicTypeName.IsNone()
-						? Operand.IntrinsicTypeName
-						: Descriptor.IntrinsicTypeName,
-					true));
-			}
-			const bool bVoidResult = Descriptor.IntrinsicTypeName == TEXT("void")
-				|| (Descriptor.TypeRange.IsSet()
-					&& Snapshot.GetDocument()->DecodeOriginalRange(Descriptor.TypeRange)
-						.TrimStartAndEnd() == TEXT("void"));
-			if (!bVoidResult)
-			{
-				Tile.ValueOutputs.Add(MakeSocket(
-					Descriptor.TypeRange,
-					Descriptor.IntrinsicTypeName,
-					bImplicitReturnValue));
-			}
-			for (FVerseVisualTile& Child : Tile.Children)
-			{
-				if (Child.LiteralKind == EVerseLiteralKind::None)
-				{
-					if (Child.ValueOutputs.IsEmpty())
-					{
-						Child.ValueOutputs.Add(MakeSocket(
-							Child.TypeRange,
-							Child.IntrinsicTypeName,
-							true));
-					}
-					else
-					{
-						Child.ValueOutputs[0].bConnected = true;
-					}
-				}
-			}
-		}
-		else if (Descriptor.Kind == EVerseExpressionKind::Definition
-			&& Descriptor.Operands.Num() == 1)
-		{
-			const FVerseVisualExpressionDescriptor& Value = Descriptor.Operands[0];
-			Tile.ValueInputs.Add(MakeSocket(
-				Descriptor.DeclaredTypeRange,
-				Value.IntrinsicTypeName,
-				Value.LiteralKind == EVerseLiteralKind::None));
-			if (!Tile.Children.IsEmpty()
-				&& Value.LiteralKind == EVerseLiteralKind::None)
-			{
-				FVerseVisualTile& Initializer = Tile.Children[0];
-				if (Initializer.ValueOutputs.IsEmpty())
-				{
-					Initializer.ValueOutputs.Add(MakeSocket(
-						Value.TypeRange.IsSet() ? Value.TypeRange : Descriptor.DeclaredTypeRange,
-						Value.IntrinsicTypeName,
-						true));
-				}
-				else
-				{
-					Initializer.ValueOutputs[0].bConnected = true;
-				}
-			}
-		}
-		else if (Descriptor.Kind == EVerseExpressionKind::Identifier && bStatementLevel)
-		{
-			Tile.ValueInputs.Add(MakeSocket(Tile.TypeRange, Tile.IntrinsicTypeName, false));
-			Tile.ValueOutputs.Add(MakeSocket(
-				Tile.TypeRange,
-				Tile.IntrinsicTypeName,
-				bImplicitReturnValue));
-		}
-		else if (Descriptor.Kind == EVerseExpressionKind::Literal && bStatementLevel)
-		{
-			Tile.ValueOutputs.Add(MakeSocket(
-				Tile.TypeRange,
-				Tile.IntrinsicTypeName,
-				bImplicitReturnValue));
-		}
-		else if (bStatementLevel && bImplicitReturnValue)
-		{
-			Tile.ValueOutputs.Add(MakeSocket(
-				Tile.TypeRange,
-				Tile.IntrinsicTypeName,
-				true));
-		}
-
-		// Inline literal editing is a property of every input socket, independent
-		// of which expression kind created that input. Future calls and operators
-		// get the same behavior by exposing operands and corresponding inputs.
-		const int32 InputCount = FMath::Min(Tile.ValueInputs.Num(), Descriptor.Operands.Num());
-		for (int32 InputIndex = 0; InputIndex < InputCount; ++InputIndex)
-		{
-			const FVerseVisualExpressionDescriptor& Operand = Descriptor.Operands[InputIndex];
-			if (Operand.LiteralKind != EVerseLiteralKind::None)
-			{
-				FVerseVisualSocket& Input = Tile.ValueInputs[InputIndex];
-				Input.bConnected = false;
-				Input.InlineLiteralRange = Operand.Range;
-				Input.InlineLiteralKind = Operand.LiteralKind;
-			}
-		}
 		if (Descriptor.Kind == EVerseExpressionKind::UnaryOperator
 			&& Descriptor.OperatorSpelling == TEXT("?"))
 		{
 			Tile.Outcome = EVerseExpressionOutcome::FailableValue;
-			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
-			{
-				Output.Outcome = Tile.Outcome;
-			}
 		}
 		return Tile;
 	}
+}
 
-	void SetSequentialExecutionConnections(
-		TConstArrayView<FVerseVisualTile*> Sequence,
-		bool bHasIncomingConnection)
+const FVerseVisualSocket* FVerseVisualSocketTopology::Find(FVerseVisualSocketId Id) const
+{
+	const TArray<FVerseVisualSocket>* Collections[] = {
+		&ValueInputs, &ValueOutputs, &OtherInputs, &OtherOutputs};
+	for (const TArray<FVerseVisualSocket>* Collection : Collections)
 	{
-		for (int32 Index = 0; Index < Sequence.Num(); ++Index)
+		if (const FVerseVisualSocket* Socket = Collection->FindByPredicate(
+			[Id](const FVerseVisualSocket& Candidate) { return Candidate.Id == Id; }))
 		{
-			FVerseVisualTile& Tile = *Sequence[Index];
-			Tile.bExecutionInputConnected = Tile.bHasExecutionInput
-				&& (Index > 0 || bHasIncomingConnection);
-			Tile.bExecutionOutputConnected = Tile.bHasExecutionOutput
-				&& Index + 1 < Sequence.Num();
+			return Socket;
+		}
+	}
+	return nullptr;
+}
+
+class FVerseVisualTopologyBuilder
+{
+public:
+	static void Build(TArray<FVerseVisualTile>& GraphTiles)
+	{
+		int32 NextTileId = 0;
+		for (FVerseVisualTile& Tile : GraphTiles)
+		{
+			AssignIds(Tile, NextTileId);
+		}
+		for (FVerseVisualTile& Tile : GraphTiles)
+		{
+			BuildTile(Tile, false, false);
 		}
 	}
 
-	void SetNestedExecutionConnections(FVerseVisualTile& Tile)
+private:
+	static FVerseVisualSocket MakeSocket(
+		EVerseVisualSocketDirection Direction,
+		EVerseVisualSocketRole Role,
+		int32 Index,
+		FVerseTextRange TypeRange = {},
+		FName IntrinsicTypeName = NAME_None,
+		FVerseTextRange NameRange = {})
 	{
+		FVerseVisualSocket Socket;
+		Socket.Id = {Direction, Role, Index};
+		Socket.NameRange = NameRange;
+		Socket.TypeRange = TypeRange;
+		Socket.IntrinsicTypeName = IntrinsicTypeName;
+		return Socket;
+	}
+
+	static FVerseVisualSocket& AddValueInput(
+		FVerseVisualTile& Tile,
+		FVerseTextRange TypeRange,
+		FName IntrinsicTypeName,
+		FVerseTextRange NameRange = {})
+	{
+		const int32 Index = Tile.SocketTopology.ValueInputs.Num();
+		return Tile.SocketTopology.ValueInputs.Add_GetRef(MakeSocket(
+			EVerseVisualSocketDirection::Input,
+			EVerseVisualSocketRole::Value,
+			Index,
+			TypeRange,
+			IntrinsicTypeName,
+			NameRange));
+	}
+
+	static FVerseVisualSocket& AddValueOutput(
+		FVerseVisualTile& Tile,
+		FVerseTextRange TypeRange,
+		FName IntrinsicTypeName,
+		EVerseVisualSocketRole Role = EVerseVisualSocketRole::Value,
+		FVerseTextRange NameRange = {})
+	{
+		int32 Index = 0;
+		for (const FVerseVisualSocket& Existing : Tile.SocketTopology.ValueOutputs)
+		{
+			Index += Existing.Id.Role == Role ? 1 : 0;
+		}
+		FVerseVisualSocket Socket = MakeSocket(
+			EVerseVisualSocketDirection::Output,
+			Role,
+			Index,
+			TypeRange,
+			IntrinsicTypeName,
+			NameRange);
+		Socket.Outcome = Tile.Outcome;
+		return Tile.SocketTopology.ValueOutputs.Add_GetRef(MoveTemp(Socket));
+	}
+
+	static void AddOther(
+		FVerseVisualTile& Tile,
+		EVerseVisualSocketDirection Direction,
+		EVerseVisualSocketRole Role,
+		int32 Index)
+	{
+		TArray<FVerseVisualSocket>& Collection = Direction == EVerseVisualSocketDirection::Input
+			? Tile.SocketTopology.OtherInputs
+			: Tile.SocketTopology.OtherOutputs;
+		Collection.Add(MakeSocket(Direction, Role, Index));
+	}
+
+	static void AssignIds(FVerseVisualTile& Tile, int32& NextTileId)
+	{
+		Tile.Id.Value = NextTileId++;
 		for (FVerseVisualTile& Child : Tile.Children)
 		{
-			SetNestedExecutionConnections(Child);
-		}
-
-		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
-		{
-			TArray<FVerseVisualTile*> Sequence;
-			Sequence.Reserve(Tile.Children.Num());
-			for (FVerseVisualTile& Child : Tile.Children)
-			{
-				if (Child.bHasExecutionInput || Child.bHasExecutionOutput)
-				{
-					Sequence.Add(&Child);
-				}
-			}
-			SetSequentialExecutionConnections(Sequence, Tile.bHasInternalExecutionEntry);
-			return;
-		}
-
-		if (Tile.ExpressionKind != EVerseExpressionKind::Control)
-		{
-			return;
-		}
-
-		for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
-			Tile.ControlRegions)
-		{
-			if (Region.Kind == EVerseControlRegionKind::Condition)
-			{
-				continue;
-			}
-
-			TArray<FVerseVisualTile*> Sequence;
-			Sequence.Reserve(Region.OperandCount);
-			for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
-			{
-				const int32 ChildIndex = Region.FirstOperandIndex + Offset;
-				if (Tile.Children.IsValidIndex(ChildIndex)
-					&& (Tile.Children[ChildIndex].bHasExecutionInput
-						|| Tile.Children[ChildIndex].bHasExecutionOutput))
-				{
-					Sequence.Add(&Tile.Children[ChildIndex]);
-				}
-			}
-			SetSequentialExecutionConnections(Sequence, true);
+			AssignIds(Child, NextTileId);
 		}
 	}
-}
+
+	static void BuildTile(
+		FVerseVisualTile& Tile,
+		bool bInsideFailableBlock,
+		bool bInlineLiteral)
+	{
+		Tile.SocketTopology.ValueInputs.Reset();
+		Tile.SocketTopology.ValueOutputs.Reset();
+		Tile.SocketTopology.OtherInputs.Reset();
+		Tile.SocketTopology.OtherOutputs.Reset();
+		for (FVerseVisualTile& Child : Tile.Children)
+		{
+			const bool bChildIsInlineLiteral =
+				(IsVerseOperatorExpression(Tile.ExpressionKind)
+					|| Tile.ExpressionKind == EVerseExpressionKind::Call
+					|| Tile.ExpressionKind == EVerseExpressionKind::Definition)
+				&& Child.LiteralKind != EVerseLiteralKind::None;
+			BuildTile(
+				Child,
+				Tile.Kind == EVerseVisualTileKind::FailableBlock,
+				bChildIsInlineLiteral);
+		}
+
+		if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
+		{
+			AddOther(Tile, EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution, 0);
+			for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
+			{
+				AddValueOutput(Tile, Parameter.TypeRange, NAME_None,
+					EVerseVisualSocketRole::Value, Parameter.NameRange);
+			}
+			return;
+		}
+		if (Tile.Kind == EVerseVisualTileKind::FunctionReturn)
+		{
+			if (Tile.TypeRange.IsSet())
+			{
+				AddValueInput(Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
+			}
+			return;
+		}
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			AddOther(Tile, EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::ClauseInsertion, 0);
+			AddOther(Tile, EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::FailureContext, 0);
+			if (Tile.bProducesValue)
+			{
+				FVerseVisualSocket& Result = AddValueOutput(
+					Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
+				Result.SemanticTypeName = Tile.SemanticTypeName;
+			}
+			for (const FVerseVisualTile& Child : Tile.Children)
+			{
+				if (Child.Kind != EVerseVisualTileKind::Definition
+					|| Child.SemanticDataDefinition == nullptr)
+				{
+					continue;
+				}
+				FVerseVisualSocket& Binding = AddValueOutput(
+					Tile, Child.TypeRange, NAME_None,
+					EVerseVisualSocketRole::BoundaryBinding, Child.NameRange);
+				Binding.SemanticTypeName = Child.SemanticTypeName;
+				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
+				Binding.LegalConsumerScopes = Child.LegalConsumerScopes;
+				Binding.SemanticSnapshot = Child.SemanticSnapshot;
+			}
+			return;
+		}
+
+		if (Tile.bStatementLevel)
+		{
+			AddOther(Tile, EVerseVisualSocketDirection::Input,
+				EVerseVisualSocketRole::Execution, 0);
+			const int32 OutputCount = Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.ControlKind == EVerseControlKind::If ? 3 : 1;
+			for (int32 Index = 0; Index < OutputCount; ++Index)
+			{
+				AddOther(Tile, EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::Execution, Index);
+			}
+		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::If)
+		{
+			AddOther(Tile, EVerseVisualSocketDirection::Input,
+				EVerseVisualSocketRole::FailureContext, 0);
+		}
+
+		if (IsVerseOperatorExpression(Tile.ExpressionKind)
+			|| Tile.ExpressionKind == EVerseExpressionKind::Call)
+		{
+			const int32 InputCount = FMath::Max(
+				Tile.Children.Num(), Tile.SemanticInputTypeNames.Num());
+			for (int32 Index = 0; Index < InputCount; ++Index)
+			{
+				const FVerseVisualTile* Child = Tile.Children.IsValidIndex(Index)
+					? &Tile.Children[Index] : nullptr;
+				FVerseVisualSocket& Input = AddValueInput(
+					Tile,
+					Child && Child->TypeRange.IsSet() ? Child->TypeRange : Tile.TypeRange,
+					Child && !Child->IntrinsicTypeName.IsNone()
+						? Child->IntrinsicTypeName : Tile.IntrinsicTypeName);
+				if (Tile.SemanticInputNames.IsValidIndex(Index))
+				{
+					Input.SemanticName = Tile.SemanticInputNames[Index];
+				}
+				if (Tile.SemanticInputTypeNames.IsValidIndex(Index))
+				{
+					Input.SemanticTypeName = Tile.SemanticInputTypeNames[Index];
+				}
+				Input.bNamedParameter = Tile.SemanticInputNamed.IsValidIndex(Index)
+					&& Tile.SemanticInputNamed[Index];
+				Input.bUsesDeclaredDefault = !Tile.Children.IsValidIndex(Index)
+					&& Tile.SemanticInputHasDefault.IsValidIndex(Index)
+					&& Tile.SemanticInputHasDefault[Index];
+				if (Child && Child->LiteralKind != EVerseLiteralKind::None)
+				{
+					Input.InlineLiteralRange = Child->Range;
+					Input.InlineLiteralKind = Child->LiteralKind;
+				}
+			}
+		}
+		else if (Tile.ExpressionKind == EVerseExpressionKind::Definition
+			&& Tile.Children.Num() == 1)
+		{
+			const FVerseVisualTile& Initializer = Tile.Children[0];
+			FVerseVisualSocket& Input = AddValueInput(
+				Tile, Tile.TypeRange, Initializer.IntrinsicTypeName);
+			if (Initializer.LiteralKind != EVerseLiteralKind::None)
+			{
+				Input.InlineLiteralRange = Initializer.Range;
+				Input.InlineLiteralKind = Initializer.LiteralKind;
+			}
+		}
+		else if (Tile.ExpressionKind == EVerseExpressionKind::Identifier
+			&& Tile.bStatementLevel)
+		{
+			AddValueInput(Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
+		}
+
+		const bool bNeedsOutput = (Tile.bProducesValue
+			&& (Tile.bValueConsumed || Tile.bStatementLevel))
+			|| Tile.Outcome == EVerseExpressionOutcome::FailureOnly
+			|| (Tile.Kind == EVerseVisualTileKind::Definition && bInsideFailableBlock);
+		if (bNeedsOutput && !bInlineLiteral)
+		{
+			const EVerseVisualSocketRole Role = Tile.Kind == EVerseVisualTileKind::Definition
+				? EVerseVisualSocketRole::BoundaryBinding
+				: EVerseVisualSocketRole::Value;
+			FVerseVisualSocket& Output = AddValueOutput(
+				Tile, Tile.TypeRange, Tile.IntrinsicTypeName, Role, Tile.NameRange);
+			Output.SemanticTypeName = Tile.SemanticTypeName;
+			Output.SemanticDataDefinition = Tile.SemanticDataDefinition;
+			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
+			Output.SemanticSnapshot = Tile.SemanticSnapshot;
+		}
+	}
+};
 
 TArray<FVerseVisualTile> FVerseVisualTileBuilder::Build(
 	const FVerseParseSnapshot& Snapshot,
 	FVerseDocumentRevision Revision)
 {
-	return BuildTiles(Snapshot, Snapshot.GetSourceRegions(), Revision);
+	TArray<FVerseVisualTile> Tiles = BuildTiles(Snapshot, Snapshot.GetSourceRegions(), Revision);
+	FinalizeSocketTopology(Tiles);
+	return Tiles;
 }
 
 TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
@@ -642,15 +739,9 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		? Snapshot.GetDocument()->GetOriginalLineNumber(
 			FMath::Max(FunctionTile.HeaderRange.BeginByte, FunctionTile.HeaderRange.EndByte() - 1))
 		: FunctionTile.FirstSourceLine;
-	Entry.bHasExecutionOutput = true;
+	Entry.FunctionParameters = FunctionTile.FunctionParameters;
 	Entry.EditableClause = FunctionTile.BodyClause;
 	Entry.ClauseItemIndex = INDEX_NONE;
-	for (const FVerseVisualFunctionParameter& Parameter : FunctionTile.FunctionParameters)
-	{
-		FVerseVisualSocket& Socket = Entry.ValueOutputs.AddDefaulted_GetRef();
-		Socket.NameRange = Parameter.NameRange;
-		Socket.TypeRange = Parameter.TypeRange;
-	}
 
 	const FString ReturnType = FunctionTile.TypeRange.IsSet()
 		? Snapshot.GetDocument()->DecodeOriginalRange(FunctionTile.TypeRange).TrimStartAndEnd()
@@ -673,31 +764,13 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 			&& Expression.bImplicitReturnValue)
 		{
 			Expression.TypeRange = FunctionTile.TypeRange;
-			if (!Expression.ValueOutputs.IsEmpty())
-			{
-				Expression.ValueOutputs[0].TypeRange = FunctionTile.TypeRange;
-			}
 		}
 		GraphTiles.Add(MoveTemp(Expression));
 	}
 
-	for (FVerseVisualTile& Tile : GraphTiles)
-	{
-		SetNestedExecutionConnections(Tile);
-	}
-	TArray<FVerseVisualTile*> RootSequence;
-	RootSequence.Reserve(GraphTiles.Num());
-	for (FVerseVisualTile& Tile : GraphTiles)
-	{
-		if (Tile.bHasExecutionInput || Tile.bHasExecutionOutput)
-		{
-			RootSequence.Add(&Tile);
-		}
-	}
-	SetSequentialExecutionConnections(RootSequence, false);
-
 	if (FunctionTile.BodyClause.Items.IsEmpty() || !bHasReturnValue)
 	{
+		FinalizeSocketTopology(GraphTiles);
 		return GraphTiles;
 	}
 
@@ -711,15 +784,356 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 				FunctionTile.BodyRange.EndByte(),
 				FunctionTile.BodyRange.EndByte()))
 		: FVerseTextRange();
-	if (bHasReturnValue)
-	{
-		FVerseVisualSocket& Socket = Return.ValueInputs.AddDefaulted_GetRef();
-		Socket.TypeRange = FunctionTile.TypeRange;
-		Socket.bConnected = FunctionTile.BodyClause.Items.ContainsByPredicate(
-			[](const FVerseVisualClauseItemDescriptor& Item)
-			{
-				return Item.bIsFinalValuePosition;
-			});
-	}
+	FinalizeSocketTopology(GraphTiles);
 	return GraphTiles;
+}
+
+void FVerseVisualTileBuilder::FinalizeSocketTopology(TArray<FVerseVisualTile>& GraphTiles)
+{
+	FVerseVisualTopologyBuilder::Build(GraphTiles);
+}
+
+namespace
+{
+	void AddVisualConnection(
+		TArray<FVerseVisualConnection>& Connections,
+		const FVerseVisualTile& SourceTile,
+		FVerseVisualSocketId SourceSocket,
+		const FVerseVisualTile& TargetTile,
+		FVerseVisualSocketId TargetSocket,
+		EVerseVisualConnectionAxis Axis,
+		EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved,
+		int32 ExtraBlankLines = 0,
+		FVerseVisualTileId PaintScope = {})
+	{
+		if (!ensureMsgf(SourceSocket.Direction == EVerseVisualSocketDirection::Output
+				&& TargetSocket.Direction == EVerseVisualSocketDirection::Input,
+			TEXT("Verse graph connections must run from an output socket to an input socket."))
+			|| !ensureMsgf(SourceTile.FindSocket(SourceSocket) != nullptr,
+				TEXT("Verse graph connection references a missing source socket."))
+			|| !ensureMsgf(TargetTile.FindSocket(TargetSocket) != nullptr,
+				TEXT("Verse graph connection references a missing target socket.")))
+		{
+			return;
+		}
+		Connections.Add({
+			{SourceTile.Id, SourceSocket},
+			{TargetTile.Id, TargetSocket},
+			Axis,
+			Outcome,
+			ExtraBlankLines,
+			PaintScope});
+	}
+
+	const FVerseVisualSocket* FirstValueOutput(const FVerseVisualTile& Tile)
+	{
+		return Tile.GetValueOutputs().IsEmpty() ? nullptr : &Tile.GetValueOutputs()[0];
+	}
+
+	void AddSequentialConnections(
+		TArray<FVerseVisualConnection>& Connections,
+		TConstArrayView<const FVerseVisualTile*> Sequence,
+		const FVerseVisualTile* InitialSource,
+		FVerseVisualSocketId InitialSocket,
+		FVerseVisualTileId PaintScope = {})
+	{
+		const FVerseVisualTile* Previous = InitialSource;
+		FVerseVisualSocketId PreviousSocket = InitialSocket;
+		for (const FVerseVisualTile* Current : Sequence)
+		{
+			if (Previous != nullptr)
+			{
+				AddVisualConnection(
+					Connections,
+					*Previous,
+					PreviousSocket,
+					*Current,
+					{EVerseVisualSocketDirection::Input,
+						EVerseVisualSocketRole::Execution, 0},
+					EVerseVisualConnectionAxis::Vertical,
+					EVerseExpressionOutcome::Unresolved,
+					Previous == InitialSource ? 0 : Previous->ExtraBlankLineCount,
+					PaintScope);
+			}
+			Previous = Current;
+			PreviousSocket = {EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution, 0};
+		}
+	}
+
+	void BuildNestedConnections(
+		const FVerseVisualTile& Tile,
+		TArray<FVerseVisualConnection>& Connections)
+	{
+		for (const FVerseVisualTile& Child : Tile.Children)
+		{
+			BuildNestedConnections(Child, Connections);
+		}
+
+		if (IsVerseOperatorExpression(Tile.ExpressionKind)
+			|| Tile.ExpressionKind == EVerseExpressionKind::Call
+			|| Tile.ExpressionKind == EVerseExpressionKind::Definition)
+		{
+			for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
+			{
+				const FVerseVisualTile& Child = Tile.Children[Index];
+				const FVerseVisualSocket* Output = FirstValueOutput(Child);
+				const FVerseVisualSocketId InputId{
+					EVerseVisualSocketDirection::Input,
+					EVerseVisualSocketRole::Value,
+					Index};
+				if (Child.LiteralKind == EVerseLiteralKind::None
+					&& Output != nullptr && Tile.FindSocket(InputId) != nullptr)
+				{
+					AddVisualConnection(
+						Connections, Child, Output->Id, Tile, InputId,
+						EVerseVisualConnectionAxis::Horizontal, Output->Outcome);
+				}
+			}
+		}
+
+		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		{
+			TArray<const FVerseVisualTile*> Sequence;
+			for (const FVerseVisualTile& Child : Tile.Children)
+			{
+				if (Child.FindSocket({EVerseVisualSocketDirection::Input,
+					EVerseVisualSocketRole::Execution, 0}))
+				{
+					Sequence.Add(&Child);
+				}
+			}
+			AddSequentialConnections(
+				Connections,
+				Sequence,
+				&Tile,
+				{EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::ClauseInsertion, 0},
+				Tile.Id);
+			return;
+		}
+
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::If)
+		{
+			const FVerseVisualExpressionDescriptor::FControlRegion* Condition =
+				Tile.ControlRegions.FindByPredicate(
+					[](const auto& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Condition
+							&& Region.OperandCount > 0;
+					});
+			if (Condition && Tile.Children.IsValidIndex(Condition->FirstOperandIndex))
+			{
+				const FVerseVisualTile& Predicate = Tile.Children[Condition->FirstOperandIndex];
+				AddVisualConnection(
+					Connections,
+					Predicate,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::FailureContext, 0},
+					Tile,
+					{EVerseVisualSocketDirection::Input,
+						EVerseVisualSocketRole::FailureContext, 0},
+					EVerseVisualConnectionAxis::Horizontal,
+					EVerseExpressionOutcome::FailureOnly);
+			}
+			for (const auto& Region : Tile.ControlRegions)
+			{
+				const int32 OutputIndex = Region.Kind == EVerseControlRegionKind::Body ? 1
+					: Region.Kind == EVerseControlRegionKind::Else ? 2 : INDEX_NONE;
+				if (OutputIndex == INDEX_NONE)
+				{
+					continue;
+				}
+				TArray<const FVerseVisualTile*> Sequence;
+				for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+				{
+					const int32 ChildIndex = Region.FirstOperandIndex + Offset;
+					if (Tile.Children.IsValidIndex(ChildIndex))
+					{
+						Sequence.Add(&Tile.Children[ChildIndex]);
+					}
+				}
+				AddSequentialConnections(
+					Connections,
+					Sequence,
+					&Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, OutputIndex});
+			}
+		}
+	}
+}
+
+TArray<FVerseVisualConnection> FVerseVisualTileBuilder::BuildConnections(
+	TConstArrayView<FVerseVisualTile> GraphTiles)
+{
+	TArray<FVerseVisualConnection> Connections;
+	for (const FVerseVisualTile& Tile : GraphTiles)
+	{
+		BuildNestedConnections(Tile, Connections);
+	}
+
+	TArray<const FVerseVisualTile*> RootStatements;
+	const FVerseVisualTile* Entry = nullptr;
+	for (const FVerseVisualTile& Tile : GraphTiles)
+	{
+		if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
+		{
+			Entry = &Tile;
+		}
+		else if (Tile.FindSocket({EVerseVisualSocketDirection::Input,
+			EVerseVisualSocketRole::Execution, 0}))
+		{
+			RootStatements.Add(&Tile);
+		}
+	}
+	if (Entry != nullptr)
+	{
+		AddSequentialConnections(
+			Connections,
+			RootStatements,
+			Entry,
+			{EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution, 0});
+	}
+
+	for (int32 Index = 0; Index + 1 < GraphTiles.Num(); ++Index)
+	{
+		const FVerseVisualTile& Source = GraphTiles[Index];
+		const FVerseVisualTile& Target = GraphTiles[Index + 1];
+		if (Source.bImplicitReturnValue && Target.Kind == EVerseVisualTileKind::FunctionReturn)
+		{
+			const FVerseVisualSocket* Output = FirstValueOutput(Source);
+			const FVerseVisualSocketId InputId{
+				EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Value, 0};
+			if (Output && Target.FindSocket(InputId))
+			{
+				AddVisualConnection(
+					Connections, Source, Output->Id, Target, InputId,
+					EVerseVisualConnectionAxis::Horizontal, Output->Outcome);
+			}
+		}
+	}
+	FString Diagnostic;
+	ensureMsgf(ValidateConnections(GraphTiles, Connections, &Diagnostic),
+		TEXT("Invalid immutable Verse graph topology: %s"), *Diagnostic);
+	return Connections;
+}
+
+bool FVerseVisualTileBuilder::ValidateConnections(
+	TConstArrayView<FVerseVisualTile> GraphTiles,
+	TConstArrayView<FVerseVisualConnection> Connections,
+	FString* OutDiagnostic)
+{
+	auto Fail = [OutDiagnostic](FString Diagnostic)
+	{
+		if (OutDiagnostic != nullptr)
+		{
+			*OutDiagnostic = MoveTemp(Diagnostic);
+		}
+		return false;
+	};
+	TMap<FVerseVisualTileId, const FVerseVisualTile*> TilesById;
+	TFunction<bool(const FVerseVisualTile&)> RegisterTile =
+		[&](const FVerseVisualTile& Tile)
+		{
+			if (!Tile.Id.IsValid() || TilesById.Contains(Tile.Id))
+			{
+				return Fail(FString::Printf(
+					TEXT("Duplicate or invalid tile id %d."), Tile.Id.Value));
+			}
+			TilesById.Add(Tile.Id, &Tile);
+			TSet<FVerseVisualSocketId> SocketIds;
+			const TConstArrayView<FVerseVisualSocket> Collections[] = {
+				Tile.SocketTopology.GetValueInputs(),
+				Tile.SocketTopology.GetValueOutputs(),
+				Tile.SocketTopology.GetOtherInputs(),
+				Tile.SocketTopology.GetOtherOutputs()};
+			for (const TConstArrayView<FVerseVisualSocket> Collection : Collections)
+			{
+				for (const FVerseVisualSocket& Socket : Collection)
+				{
+					if (!Socket.Id.IsValid() || SocketIds.Contains(Socket.Id))
+					{
+						return Fail(FString::Printf(
+							TEXT("Tile %d has a duplicate or invalid socket id."),
+							Tile.Id.Value));
+					}
+					SocketIds.Add(Socket.Id);
+				}
+			}
+			for (const FVerseVisualTile& Child : Tile.Children)
+			{
+				if (!RegisterTile(Child))
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+	for (const FVerseVisualTile& Tile : GraphTiles)
+	{
+		if (!RegisterTile(Tile))
+		{
+			return false;
+		}
+	}
+
+	TSet<FVerseVisualSocketEndpoint> OccupiedInputs;
+	TSet<FVerseVisualSocketEndpoint> OccupiedSingleOutputs;
+	for (const FVerseVisualConnection& Connection : Connections)
+	{
+		const FVerseVisualTile* const* SourceTile = TilesById.Find(Connection.Source.Tile);
+		const FVerseVisualTile* const* TargetTile = TilesById.Find(Connection.Target.Tile);
+		if (SourceTile == nullptr || TargetTile == nullptr)
+		{
+			return Fail(TEXT("A connection references a missing tile."));
+		}
+		const FVerseVisualSocket* SourceSocket = (*SourceTile)->FindSocket(Connection.Source.Socket);
+		const FVerseVisualSocket* TargetSocket = (*TargetTile)->FindSocket(Connection.Target.Socket);
+		if (SourceSocket == nullptr || TargetSocket == nullptr)
+		{
+			return Fail(TEXT("A connection references a missing socket."));
+		}
+		if (SourceSocket->Id.Direction != EVerseVisualSocketDirection::Output
+			|| TargetSocket->Id.Direction != EVerseVisualSocketDirection::Input)
+		{
+			return Fail(TEXT("A connection has incompatible endpoint directions."));
+		}
+		if (OccupiedInputs.Contains(Connection.Target))
+		{
+			return Fail(TEXT("More than one connection targets the same input socket."));
+		}
+		OccupiedInputs.Add(Connection.Target);
+		const bool bSingleConnectionOutput =
+			SourceSocket->Id.Role == EVerseVisualSocketRole::Execution
+			|| SourceSocket->Id.Role == EVerseVisualSocketRole::FailureContext
+			|| SourceSocket->Id.Role == EVerseVisualSocketRole::ClauseInsertion;
+		if (bSingleConnectionOutput && OccupiedSingleOutputs.Contains(Connection.Source))
+		{
+			return Fail(TEXT("A single-cardinality output has more than one connection."));
+		}
+		if (bSingleConnectionOutput)
+		{
+			OccupiedSingleOutputs.Add(Connection.Source);
+		}
+	}
+	if (OutDiagnostic != nullptr)
+	{
+		OutDiagnostic->Reset();
+	}
+	return true;
+}
+
+bool FVerseVisualTileBuilder::IsSocketConnected(
+	TConstArrayView<FVerseVisualConnection> Connections,
+	FVerseVisualSocketEndpoint EndpointToFind)
+{
+	return Connections.ContainsByPredicate(
+		[EndpointToFind](const FVerseVisualConnection& Connection)
+		{
+			return Connection.Source == EndpointToFind
+				|| Connection.Target == EndpointToFind;
+		});
 }

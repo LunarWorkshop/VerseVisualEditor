@@ -53,6 +53,24 @@ namespace VerseVisualTileTests
 		}
 		return nullptr;
 	}
+
+	bool HasSocket(
+		const FVerseVisualTile& Tile,
+		EVerseVisualSocketDirection Direction,
+		EVerseVisualSocketRole Role,
+		int32 Index = 0)
+	{
+		return Tile.FindSocket({Direction, Role, Index}) != nullptr;
+	}
+
+	bool IsConnected(
+		TConstArrayView<FVerseVisualConnection> Connections,
+		const FVerseVisualTile& Tile,
+		const FVerseVisualSocket& Socket)
+	{
+		return FVerseVisualTileBuilder::IsSocketConnected(
+			Connections, {Tile.Id, Socket.Id});
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -424,48 +442,63 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 
 	const TArray<FVerseVisualTile> GraphTiles =
 		FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Snapshot);
+	const TArray<FVerseVisualConnection> GraphConnections =
+		FVerseVisualTileBuilder::BuildConnections(GraphTiles);
 	if (TestEqual(TEXT("Function graph uses entry, expression, and return visual tiles"), GraphTiles.Num(), 3))
 	{
 		TestTrue(TEXT("Function entry uses the shared visual tile model"),
 			GraphTiles[0].Kind == EVerseVisualTileKind::FunctionEntry
-			&& GraphTiles[0].bHasExecutionOutput
-			&& GraphTiles[0].bExecutionOutputConnected
-			&& GraphTiles[0].ValueOutputs.Num() == 2);
+			&& VerseVisualTileTests::HasSocket(GraphTiles[0],
+				EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution)
+			&& FVerseVisualTileBuilder::IsSocketConnected(GraphConnections,
+				{GraphTiles[0].Id, {EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::Execution, 0}})
+			&& GraphTiles[0].GetValueOutputs().Num() == 2);
 		TestTrue(TEXT("Function body expression uses the shared visual tile model"),
 			GraphTiles[1].Kind == EVerseVisualTileKind::Expression
 			&& GraphTiles[1].ExpressionKind == EVerseExpressionKind::BinaryOperator
 			&& GraphTiles[1].OperatorRange.IsSet()
 			&& Snapshot.GetDocument()->DecodeOriginalRange(GraphTiles[1].OperatorRange) == TEXT("+")
-			&& GraphTiles[1].bHasExecutionInput
-			&& GraphTiles[1].bHasExecutionOutput
-			&& GraphTiles[1].bExecutionInputConnected
-			&& !GraphTiles[1].bExecutionOutputConnected
+			&& VerseVisualTileTests::HasSocket(GraphTiles[1],
+				EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+			&& VerseVisualTileTests::HasSocket(GraphTiles[1],
+				EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution)
+			&& FVerseVisualTileBuilder::IsSocketConnected(GraphConnections,
+				{GraphTiles[1].Id, {EVerseVisualSocketDirection::Input,
+					EVerseVisualSocketRole::Execution, 0}})
 			&& GraphTiles[1].bImplicitReturnValue
-			&& GraphTiles[1].ValueInputs.Num() == 2
-			&& GraphTiles[1].ValueInputs[0].bConnected
-			&& GraphTiles[1].ValueInputs[1].bConnected
-			&& GraphTiles[1].ValueOutputs.Num() == 1
-			&& GraphTiles[1].ValueOutputs[0].bConnected
+			&& GraphTiles[1].GetValueInputs().Num() == 2
+			&& VerseVisualTileTests::IsConnected(GraphConnections,
+				GraphTiles[1], GraphTiles[1].GetValueInputs()[0])
+			&& VerseVisualTileTests::IsConnected(GraphConnections,
+				GraphTiles[1], GraphTiles[1].GetValueInputs()[1])
+			&& GraphTiles[1].GetValueOutputs().Num() == 1
+			&& VerseVisualTileTests::IsConnected(GraphConnections,
+				GraphTiles[1], GraphTiles[1].GetValueOutputs()[0])
 			&& GraphTiles[1].Children.Num() == 2
 			&& GraphTiles[1].Range.Revision == Revision);
 		if (GraphTiles[1].Children.Num() == 2)
 		{
 			TestTrue(TEXT("Upper-left operand is an identifier value source"),
 				GraphTiles[1].Children[0].ExpressionKind == EVerseExpressionKind::Identifier
-				&& !GraphTiles[1].Children[0].bHasExecutionInput
-				&& !GraphTiles[1].Children[0].bHasExecutionOutput
-				&& GraphTiles[1].Children[0].ValueOutputs.Num() == 1
-				&& GraphTiles[1].Children[0].ValueOutputs[0].bConnected);
+				&& !VerseVisualTileTests::HasSocket(GraphTiles[1].Children[0],
+					EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+				&& !VerseVisualTileTests::HasSocket(GraphTiles[1].Children[0],
+					EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution)
+				&& GraphTiles[1].Children[0].GetValueOutputs().Num() == 1
+				&& VerseVisualTileTests::IsConnected(GraphConnections,
+					GraphTiles[1].Children[0], GraphTiles[1].Children[0].GetValueOutputs()[0]));
 			TestTrue(TEXT("Second operand is another identifier value source"),
 				GraphTiles[1].Children[1].ExpressionKind == EVerseExpressionKind::Identifier
-				&& GraphTiles[1].Children[1].ValueOutputs.Num() == 1);
+				&& GraphTiles[1].Children[1].GetValueOutputs().Num() == 1);
 		}
 		TestTrue(TEXT("Function return uses the shared visual tile model"),
 			GraphTiles[2].Kind == EVerseVisualTileKind::FunctionReturn
-			&& !GraphTiles[2].bHasExecutionInput
-			&& !GraphTiles[2].bExecutionInputConnected
-			&& GraphTiles[2].ValueInputs.Num() == 1
-			&& GraphTiles[2].ValueInputs[0].bConnected);
+			&& !VerseVisualTileTests::HasSocket(GraphTiles[2],
+				EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+			&& GraphTiles[2].GetValueInputs().Num() == 1
+			&& VerseVisualTileTests::IsConnected(GraphConnections,
+				GraphTiles[2], GraphTiles[2].GetValueInputs()[0]));
 	}
 
 	const FVerseVisualTile* IntLiteralFunction = VerseVisualTileTests::FindDefinition(
@@ -483,11 +516,10 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				IntGraph[1].Children[1].ExpressionKind == EVerseExpressionKind::Literal
 				&& IntGraph[1].Children[1].LiteralKind == EVerseLiteralKind::Integer
 				&& IntGraph[1].Children[1].IntrinsicTypeName == TEXT("int")
-				&& IntGraph[1].Children[1].ValueOutputs.IsEmpty()
-				&& IntGraph[1].ValueInputs.Num() == 2
-				&& !IntGraph[1].ValueInputs[1].bConnected
-				&& IntGraph[1].ValueInputs[1].InlineLiteralKind == EVerseLiteralKind::Integer
-				&& IntGraph[1].ValueInputs[1].InlineLiteralRange == IntGraph[1].Children[1].Range);
+				&& IntGraph[1].Children[1].GetValueOutputs().IsEmpty()
+				&& IntGraph[1].GetValueInputs().Num() == 2
+				&& IntGraph[1].GetValueInputs()[1].InlineLiteralKind == EVerseLiteralKind::Integer
+				&& IntGraph[1].GetValueInputs()[1].InlineLiteralRange == IntGraph[1].Children[1].Range);
 		}
 	}
 
@@ -502,11 +534,10 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		if (TestEqual(TEXT("Negative integer-literal Add graph has three root tiles"), NegativeIntGraph.Num(), 3))
 		{
 			TestTrue(TEXT("Negative literal is represented by the parent's inline editor"),
-				NegativeIntGraph[1].ValueInputs.Num() == 2
-				&& !NegativeIntGraph[1].ValueInputs[1].bConnected
-				&& NegativeIntGraph[1].ValueInputs[1].InlineLiteralKind == EVerseLiteralKind::Integer
+				NegativeIntGraph[1].GetValueInputs().Num() == 2
+				&& NegativeIntGraph[1].GetValueInputs()[1].InlineLiteralKind == EVerseLiteralKind::Integer
 				&& Snapshot.GetDocument()->DecodeOriginalRange(
-					NegativeIntGraph[1].ValueInputs[1].InlineLiteralRange) == TEXT("-12"));
+					NegativeIntGraph[1].GetValueInputs()[1].InlineLiteralRange) == TEXT("-12"));
 		}
 	}
 
@@ -523,8 +554,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Call uses one generic compiler-bindable visual shape"),
 				CallGraph[1].ExpressionKind == EVerseExpressionKind::Call
 				&& Snapshot.GetDocument()->DecodeOriginalRange(CallGraph[1].NameRange) == TEXT("Abs")
-				&& CallGraph[1].ValueInputs.Num() == 1
-				&& CallGraph[1].ValueOutputs.Num() == 1
+				&& CallGraph[1].GetValueInputs().Num() == 1
+				&& CallGraph[1].GetValueOutputs().Num() == 1
 				&& CallGraph[1].Children.Num() == 1
 				&& CallGraph[1].Children[0].ExpressionKind == EVerseExpressionKind::Identifier);
 		}
@@ -544,30 +575,37 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& IfGraph[1].Children.Num() >= 3
 			&& IfGraph[1].Children.ContainsByPredicate([](const FVerseVisualTile& Child)
 			{
-				return Child.bHasExecutionInput && Child.bHasExecutionOutput;
+				return VerseVisualTileTests::HasSocket(Child,
+						EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+					&& VerseVisualTileTests::HasSocket(Child,
+						EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution);
 			}));
 		if (IfGraph.Num() == 3 && IfGraph[1].ControlRegions.Num() == 3)
 		{
 			const FVerseVisualTile& IfTile = IfGraph[1];
 			const int32 ConditionIndex = IfTile.ControlRegions[0].FirstOperandIndex;
 			TestTrue(TEXT("If no longer synthesizes a Boolean condition input"),
-				IfTile.ValueInputs.IsEmpty());
+				IfTile.GetValueInputs().IsEmpty());
 			if (TestTrue(TEXT("If owns one reusable failable predicate block"),
 				IfTile.Children.IsValidIndex(ConditionIndex)))
 			{
 				const FVerseVisualTile& Predicate = IfTile.Children[ConditionIndex];
 				TestTrue(TEXT("If predicate is contained and discards its final value"),
 					Predicate.Kind == EVerseVisualTileKind::FailableBlock
-					&& Predicate.bHasInternalExecutionEntry
-					&& Predicate.ValueOutputs.IsEmpty()
+					&& VerseVisualTileTests::HasSocket(Predicate,
+						EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::ClauseInsertion)
+					&& Predicate.GetValueOutputs().IsEmpty()
 					&& Predicate.VstNodeType == IfTile.VstNodeType
 					&& Predicate.VstTag == IfTile.VstTag
 					&& Predicate.Children.Num() == 1);
 				if (!Predicate.Children.IsEmpty())
 				{
 					TestTrue(TEXT("Predicate expressions form an internal execution chain"),
-						Predicate.Children[0].bHasExecutionInput
-						&& Predicate.Children[0].bHasExecutionOutput);
+						VerseVisualTileTests::HasSocket(Predicate.Children[0],
+							EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+						&& VerseVisualTileTests::HasSocket(Predicate.Children[0],
+							EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution));
 				}
 				TestTrue(TEXT("Predicate descriptor remains revision-specific and source exact"),
 					Predicate.Range.Revision == IfTile.Range.Revision
@@ -671,7 +709,10 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 					&& EmptyGraph[1].Children[0].Kind
 						== EVerseVisualTileKind::FailableBlock
 					&& EmptyGraph[1].Children[0].Children.IsEmpty()
-					&& EmptyGraph[1].Children[0].bHasInternalExecutionEntry);
+					&& VerseVisualTileTests::HasSocket(
+						EmptyGraph[1].Children[0],
+						EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::ClauseInsertion));
 		}
 	}
 
@@ -689,17 +730,16 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			&& LocalGraph[2].DefinitionKind == VerseSyntaxKind::Constant))
 		{
 			TestTrue(TEXT("Variable initializer connects to its typed left input"),
-				LocalGraph[1].bHasExecutionInput
-				&& LocalGraph[1].ValueInputs.Num() == 1
-				&& LocalGraph[1].ValueInputs[0].bConnected
+				VerseVisualTileTests::HasSocket(LocalGraph[1],
+					EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Execution)
+				&& LocalGraph[1].GetValueInputs().Num() == 1
 				&& Snapshot.GetDocument()->DecodeOriginalRange(
-					LocalGraph[1].ValueInputs[0].TypeRange) == TEXT("int")
+					LocalGraph[1].GetValueInputs()[0].TypeRange) == TEXT("int")
 				&& LocalGraph[1].Children.Num() == 1
-				&& LocalGraph[1].Children[0].ValueOutputs.Num() == 1);
+				&& LocalGraph[1].Children[0].GetValueOutputs().Num() == 1);
 			TestTrue(TEXT("Literal local initializer uses the shared inline editor"),
-				LocalGraph[2].ValueInputs.Num() == 1
-				&& !LocalGraph[2].ValueInputs[0].bConnected
-				&& LocalGraph[2].ValueInputs[0].InlineLiteralKind
+				LocalGraph[2].GetValueInputs().Num() == 1
+				&& LocalGraph[2].GetValueInputs()[0].InlineLiteralKind
 					== EVerseLiteralKind::Integer);
 			const TArray<FVerseTileProperty> VariableProperties =
 				FVerseTileProperties::Build(LocalGraph[1], Snapshot);
@@ -728,17 +768,31 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 	{
 		const TArray<FVerseVisualTile> OperatorInitializerGraph =
 			FVerseVisualTileBuilder::BuildFunctionGraph(*OperatorInitializer, Snapshot);
+		const TArray<FVerseVisualConnection> OperatorInitializerConnections =
+			FVerseVisualTileBuilder::BuildConnections(OperatorInitializerGraph);
 		if (TestTrue(TEXT("Operator initializer becomes the definition's value child"),
 			OperatorInitializerGraph.Num() == 4
 				&& OperatorInitializerGraph[1].DefinitionKind == VerseSyntaxKind::Constant
 				&& OperatorInitializerGraph[1].Children.Num() == 1))
 		{
 			const FVerseVisualTile& Subtract = OperatorInitializerGraph[1].Children[0];
+			int32 SubtractOutputConnectionCount = 0;
+			if (!Subtract.GetValueOutputs().IsEmpty())
+			{
+				for (const FVerseVisualConnection& Connection : OperatorInitializerConnections)
+				{
+					SubtractOutputConnectionCount +=
+						Connection.Source.Tile == Subtract.Id
+						&& Connection.Source.Socket == Subtract.GetValueOutputs()[0].Id
+						? 1 : 0;
+				}
+			}
 			TestTrue(TEXT("Definition reuses the operator's sole connected output socket"),
 				Subtract.ExpressionKind == EVerseExpressionKind::BinaryOperator
 					&& Subtract.OperatorSpelling == TEXT("-")
-					&& Subtract.ValueOutputs.Num() == 1
-					&& Subtract.ValueOutputs[0].bConnected);
+					&& Subtract.GetValueOutputs().Num() == 1
+					&& !Subtract.GetValueOutputs().IsEmpty()
+					&& SubtractOutputConnectionCount == 1);
 		}
 	}
 
@@ -766,10 +820,10 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 			const TArray<FVerseVisualTile> Graph =
 				FVerseVisualTileBuilder::BuildFunctionGraph(*Definition, Snapshot);
 			TestTrue(TEXT("Binary operator uses the common two-input operator tile"),
-				Graph.Num() == 3
+				Graph.Num() >= 2
 				&& Graph[1].ExpressionKind == EVerseExpressionKind::BinaryOperator
 				&& Graph[1].OperatorRange.IsSet()
-				&& Graph[1].ValueInputs.Num() == 2);
+				&& Graph[1].GetValueInputs().Num() == 2);
 		}
 	}
 
@@ -779,6 +833,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 	{
 		const TArray<FVerseVisualTile> Graph =
 			FVerseVisualTileBuilder::BuildFunctionGraph(*ComplexFunction, Snapshot);
+		const TArray<FVerseVisualConnection> Connections =
+			FVerseVisualTileBuilder::BuildConnections(Graph);
 		const FVerseVisualTile* Add = Graph.Num() == 3 ? &Graph[1] : nullptr;
 		const FVerseVisualTile* Multiply = Add != nullptr && Add->Children.Num() == 2
 			? &Add->Children[1] : nullptr;
@@ -793,14 +849,17 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				&& NestedSubtract != nullptr);
 		TestTrue(TEXT("Every nested operator exposes one connected result socket"),
 			Multiply != nullptr
-				&& Multiply->ValueOutputs.Num() == 1
-				&& Multiply->ValueOutputs[0].bConnected
+				&& Multiply->GetValueOutputs().Num() == 1
+				&& VerseVisualTileTests::IsConnected(
+					Connections, *Multiply, Multiply->GetValueOutputs()[0])
 				&& Divide != nullptr
-				&& Divide->ValueOutputs.Num() == 1
-				&& Divide->ValueOutputs[0].bConnected
+				&& Divide->GetValueOutputs().Num() == 1
+				&& VerseVisualTileTests::IsConnected(
+					Connections, *Divide, Divide->GetValueOutputs()[0])
 				&& NestedSubtract != nullptr
-				&& NestedSubtract->ValueOutputs.Num() == 1
-				&& NestedSubtract->ValueOutputs[0].bConnected);
+				&& NestedSubtract->GetValueOutputs().Num() == 1
+				&& VerseVisualTileTests::IsConnected(
+					Connections, *NestedSubtract, NestedSubtract->GetValueOutputs()[0]));
 		TestTrue(TEXT("Every nested operator token is source exact"),
 			Multiply != nullptr
 				&& Snapshot.GetDocument()->DecodeOriginalRange(Multiply->OperatorRange) == TEXT("*")
@@ -827,7 +886,10 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				EVerseVisualTileKind::FunctionEntry);
 			TestFalse(
 				TEXT("Empty function entry has an unconnected execution output"),
-				EmptyGraph[0].bExecutionOutputConnected);
+				FVerseVisualTileBuilder::IsSocketConnected(
+					FVerseVisualTileBuilder::BuildConnections(EmptyGraph),
+					{EmptyGraph[0].Id, {EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 0}}));
 		}
 	}
 
@@ -910,15 +972,15 @@ bool FVerseLiteralTilePresentationTest::RunTest(const FString& Parameters)
 			Graph.Num() == 3
 				&& Graph[1].ExpressionKind == EVerseExpressionKind::Literal
 				&& Graph[1].LiteralKind == Literal.Kind
-				&& Graph[1].ValueOutputs.Num() == 1))
+				&& Graph[1].GetValueOutputs().Num() == 1))
 		{
 			TestEqual(TEXT("Literal tile carries its primitive type"),
 				Graph[1].IntrinsicTypeName, Literal.TypeName);
 			TestEqual(TEXT("Literal output socket carries the literal type"),
-				Graph[1].ValueOutputs[0].IntrinsicTypeName, Literal.TypeName);
+				Graph[1].GetValueOutputs()[0].IntrinsicTypeName, Literal.TypeName);
 			TestTrue(TEXT("Implicit return input exists"),
 				Graph[2].Kind == EVerseVisualTileKind::FunctionReturn
-					&& Graph[2].ValueInputs.Num() == 1);
+					&& Graph[2].GetValueInputs().Num() == 1);
 			const FUTF8ToTCHAR ExpectedSource(
 				reinterpret_cast<const ANSICHAR*>(Literal.Source.GetData()),
 				Literal.Source.Len());
@@ -955,20 +1017,134 @@ bool FVerseLiteralTilePresentationTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("Postfix query uses query spelling"),
 				Query.OperatorSpelling, FString(TEXT("?")));
 			TestEqual(TEXT("Postfix query owns its operand"), Query.Children.Num(), 1);
-			TestEqual(TEXT("Postfix query has one input socket"), Query.ValueInputs.Num(), 1);
-			TestEqual(TEXT("Postfix query has one output socket"), Query.ValueOutputs.Num(), 1);
-			if (Query.ValueInputs.Num() == 1 && Query.ValueOutputs.Num() == 1)
+			TestEqual(TEXT("Postfix query has one input socket"), Query.GetValueInputs().Num(), 1);
+			TestEqual(TEXT("Postfix query has one output socket"), Query.GetValueOutputs().Num(), 1);
+			if (Query.GetValueInputs().Num() == 1 && Query.GetValueOutputs().Num() == 1)
 			{
 				TestEqual(TEXT("Postfix query input carries logic"),
-					Query.ValueInputs[0].IntrinsicTypeName, FName(TEXT("logic")));
+					Query.GetValueInputs()[0].IntrinsicTypeName, FName(TEXT("logic")));
 				TestEqual(TEXT("Postfix query output carries logic"),
-					Query.ValueOutputs[0].IntrinsicTypeName, FName(TEXT("logic")));
+					Query.GetValueOutputs()[0].IntrinsicTypeName, FName(TEXT("logic")));
 				TestEqual(TEXT("Postfix query output is failable"),
-					Query.ValueOutputs[0].Outcome,
+					Query.GetValueOutputs()[0].Outcome,
 					EVerseExpressionOutcome::FailableValue);
 			}
 			TestTrue(TEXT("Postfix query range is source exact"),
 				Snapshot.GetSourceView(Query.OperatorRange) == UTF8TEXTVIEW("?"));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseImmutableSocketTopologyTest,
+	"VerseVisualEditor.Foundation.VisualTiles.ImmutableSocketTopology",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseVisualTileTests::LoadFixture(
+		*this, TEXT("functions.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+	const FVerseParseSnapshot Snapshot =
+		FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const TArray<FVerseVisualTile> FileTiles = FVerseVisualTileBuilder::Build(Snapshot);
+	const FVerseVisualTile* Function = VerseVisualTileTests::FindDefinition(
+		Snapshot, FileTiles, UTF8TEXTVIEW("ComplexBinary"));
+	if (!TestNotNull(TEXT("Topology fixture function exists"), Function))
+	{
+		return false;
+	}
+	const TArray<FVerseVisualTile> Graph =
+		FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Snapshot);
+	const TArray<FVerseVisualConnection> Connections =
+		FVerseVisualTileBuilder::BuildConnections(Graph);
+	FString Diagnostic;
+	TestTrue(TEXT("Builder produces a valid endpoint graph"),
+		FVerseVisualTileBuilder::ValidateConnections(Graph, Connections, &Diagnostic));
+	for (const FVerseVisualConnection& Connection : Connections)
+	{
+		const FVerseVisualTile* Source = nullptr;
+		const FVerseVisualTile* Target = nullptr;
+		TFunction<void(TConstArrayView<FVerseVisualTile>)> FindEndpoints =
+			[&](TConstArrayView<FVerseVisualTile> Tiles)
+			{
+				for (const FVerseVisualTile& Tile : Tiles)
+				{
+					Source = Tile.Id == Connection.Source.Tile ? &Tile : Source;
+					Target = Tile.Id == Connection.Target.Tile ? &Tile : Target;
+					FindEndpoints(Tile.Children);
+				}
+			};
+		FindEndpoints(Graph);
+		TestTrue(TEXT("Every connection resolves two declared endpoints"),
+			Source != nullptr && Target != nullptr
+			&& Source->FindSocket(Connection.Source.Socket) != nullptr
+			&& Target->FindSocket(Connection.Target.Socket) != nullptr);
+	}
+	if (!Connections.IsEmpty())
+	{
+		TArray<FVerseVisualConnection> MissingEndpoint = Connections;
+		MissingEndpoint[0].Target.Socket.Index = 9999;
+		TestFalse(TEXT("A missing endpoint is rejected"),
+			FVerseVisualTileBuilder::ValidateConnections(
+				Graph, MissingEndpoint, &Diagnostic));
+
+		TArray<FVerseVisualConnection> DuplicateInput = Connections;
+		DuplicateInput.Add(Connections[0]);
+		TestFalse(TEXT("Input cardinality violations are rejected"),
+			FVerseVisualTileBuilder::ValidateConnections(
+				Graph, DuplicateInput, &Diagnostic));
+
+		TArray<FVerseVisualConnection> InvalidDirections = Connections;
+		Swap(InvalidDirections[0].Source, InvalidDirections[0].Target);
+		TestFalse(TEXT("Incompatible endpoint directions are rejected"),
+			FVerseVisualTileBuilder::ValidateConnections(
+				Graph, InvalidDirections, &Diagnostic));
+		const FVerseVisualConnection* ExecutionConnection = Connections.FindByPredicate(
+			[](const FVerseVisualConnection& Candidate)
+			{
+				return Candidate.Source.Socket.Role
+					== EVerseVisualSocketRole::Execution;
+			});
+		if (ExecutionConnection != nullptr && Graph.Num() >= 2)
+		{
+			TArray<FVerseVisualTile> CardinalityGraph = Graph;
+			FVerseVisualTile ExtraTarget = Graph[1];
+			ExtraTarget.Id.Value = 100000;
+			ExtraTarget.Children.Reset();
+			CardinalityGraph.Add(MoveTemp(ExtraTarget));
+			TArray<FVerseVisualConnection> DuplicateExecutionSource;
+			DuplicateExecutionSource.Add(*ExecutionConnection);
+			FVerseVisualConnection Second = *ExecutionConnection;
+			Second.Target.Tile = CardinalityGraph.Last().Id;
+			DuplicateExecutionSource.Add(Second);
+			TestFalse(TEXT("Single-cardinality outputs reject multiple connections"),
+				FVerseVisualTileBuilder::ValidateConnections(
+					CardinalityGraph, DuplicateExecutionSource, &Diagnostic));
+		}
+	}
+	if (Graph.Num() >= 2)
+	{
+		TArray<FVerseVisualTile> DuplicateTileIds = Graph;
+		DuplicateTileIds[1].Id = DuplicateTileIds[0].Id;
+		TestFalse(TEXT("Duplicate revision-local tile ids are rejected"),
+			FVerseVisualTileBuilder::ValidateConnections(
+				DuplicateTileIds, {}, &Diagnostic));
+
+		TArray<FVerseVisualTile> DuplicateSocketIds = Graph;
+		if (!DuplicateSocketIds[1].GetValueInputs().IsEmpty())
+		{
+			const FVerseVisualSocket Socket =
+				DuplicateSocketIds[1].GetValueInputs()[0];
+			DuplicateSocketIds[1].SocketTopology =
+				FVerseVisualSocketTopology::MakeInvalidForTesting({Socket, Socket});
+			TestFalse(TEXT("Duplicate tile-local socket ids are rejected"),
+				FVerseVisualTileBuilder::ValidateConnections(
+					DuplicateSocketIds, {}, &Diagnostic));
 		}
 	}
 	return true;

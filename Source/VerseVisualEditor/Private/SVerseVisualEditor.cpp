@@ -574,6 +574,14 @@ namespace
 				: "Graph.Pin.Disconnected");
 	}
 
+	using FVerseTileWidgetRegistry =
+		TMap<FVerseVisualTileId, TSharedPtr<SVerseTile>>;
+	TArray<FVerseGraphConnection> ResolveModelConnections(
+		TConstArrayView<FVerseVisualConnection> ModelConnections,
+		const FVerseTileWidgetRegistry& Widgets,
+		TSharedRef<const FVerseDocument> Document,
+		FVerseVisualTileId PaintScope = {});
+
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
 		TSharedRef<const FVerseDocument> Document,
@@ -584,8 +592,22 @@ namespace
 		TSharedPtr<SWidget> BodyUnderlay = nullptr,
 		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
 		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
-		FOnVerseClauseReordered OnClauseReordered = {})
+		FOnVerseClauseReordered OnClauseReordered = {},
+		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
+		FVerseTileWidgetRegistry* WidgetRegistry = nullptr)
 	{
+		TSet<FVerseVisualSocketId> ConnectedSockets;
+		for (const FVerseVisualConnection& Connection : ModelConnections)
+		{
+			if (Connection.Source.Tile == Tile.Id)
+			{
+				ConnectedSockets.Add(Connection.Source.Socket);
+			}
+			if (Connection.Target.Tile == Tile.Id)
+			{
+				ConnectedSockets.Add(Connection.Target.Socket);
+			}
+		}
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
 		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
@@ -636,31 +658,14 @@ namespace
 				];
 		}
 		TArray<FText> ExecutionOutputLabels;
-		TArray<bool> ExecutionOutputConnectedStates;
 		if (bControl && Tile.ControlKind == EVerseControlKind::If)
 		{
 			ExecutionOutputLabels = {
 				LOCTEXT("IfCompletedOutput", "Completed"),
 				LOCTEXT("IfTrueOutput", "True"),
 				LOCTEXT("IfFalseOutput", "False")};
-			const bool bHasTrueBody = Tile.ControlRegions.ContainsByPredicate(
-				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
-				{
-					return Region.Kind == EVerseControlRegionKind::Body
-						&& Region.OperandCount > 0;
-				});
-			const bool bHasFalseBody = Tile.ControlRegions.ContainsByPredicate(
-				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
-				{
-					return Region.Kind == EVerseControlRegionKind::Else
-						&& Region.OperandCount > 0;
-				});
-			ExecutionOutputConnectedStates = {
-				Tile.bExecutionOutputConnected,
-				bHasTrueBody,
-				bHasFalseBody};
 		}
-		return SNew(SVerseTile)
+		TSharedRef<SVerseTile> Result = SNew(SVerseTile)
 			.Tile(Tile)
 			.Document(Document)
 			.TileColor(TileColor)
@@ -676,7 +681,7 @@ namespace
 				|| (bExpression && !bIdentifier && !bControl))
 			.CompactExecutionSpacing(bCompactExecutionSpacing)
 			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
-			.ExecutionOutputConnectedStates(MoveTemp(ExecutionOutputConnectedStates))
+			.ConnectedSockets(MoveTemp(ConnectedSockets))
 			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
 			{
 				return IsTileSelected.IsBound()
@@ -701,6 +706,11 @@ namespace
 			[
 				Body
 			];
+		if (WidgetRegistry != nullptr)
+		{
+			WidgetRegistry->Add(Tile.Id, Result);
+		}
+		return Result;
 	}
 
 	FString GetVisualTypeName(
@@ -741,27 +751,107 @@ namespace
 
 	EVerseExpressionOutcome GetFirstOutputOutcome(const FVerseVisualTile& Tile)
 	{
-		return !Tile.ValueOutputs.IsEmpty()
-			? Tile.ValueOutputs[0].Outcome
+		return !Tile.GetValueOutputs().IsEmpty()
+			? Tile.GetValueOutputs()[0].Outcome
 			: Tile.Outcome;
 	}
 
-	void SetConnectionOutcome(
-		FVerseGraphConnection& Connection,
-		EVerseExpressionOutcome Outcome)
+	const FVerseVisualTile* FindTileById(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseVisualTileId TileId)
 	{
-		Connection.Outcome = Outcome;
-		if (Outcome == EVerseExpressionOutcome::FailureOnly)
+		for (const FVerseVisualTile& Tile : Tiles)
 		{
-			Connection.Color = GetVerseFailureDecorationColor();
+			if (Tile.Id == TileId)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Child = FindTileById(Tile.Children, TileId))
+			{
+				return Child;
+			}
 		}
+		return nullptr;
+	}
+
+	TArray<FVerseGraphConnection> ResolveModelConnections(
+		TConstArrayView<FVerseVisualConnection> ModelConnections,
+		const FVerseTileWidgetRegistry& Widgets,
+		TSharedRef<const FVerseDocument> Document,
+		FVerseVisualTileId PaintScope)
+	{
+		TArray<FVerseGraphConnection> Result;
+		for (const FVerseVisualConnection& Model : ModelConnections)
+		{
+			if (!(Model.PaintScope == PaintScope))
+			{
+				continue;
+			}
+			const TSharedPtr<SVerseTile>* SourceWidget = Widgets.Find(Model.Source.Tile);
+			const TSharedPtr<SVerseTile>* TargetWidget = Widgets.Find(Model.Target.Tile);
+			if (SourceWidget == nullptr || TargetWidget == nullptr
+				|| !SourceWidget->IsValid() || !TargetWidget->IsValid())
+			{
+				continue;
+			}
+			const TSharedPtr<SWidget> SourceAnchor =
+				(*SourceWidget)->GetSocketAnchor(Model.Source.Socket);
+			const TSharedPtr<SWidget> TargetAnchor =
+				(*TargetWidget)->GetSocketAnchor(Model.Target.Socket);
+			if (!SourceAnchor.IsValid() || !TargetAnchor.IsValid())
+			{
+				continue;
+			}
+			const FVerseVisualSocket* SourceSocket =
+				(*SourceWidget)->GetTile().FindSocket(Model.Source.Socket);
+			const FVerseVisualSocket* TargetSocket =
+				(*TargetWidget)->GetTile().FindSocket(Model.Target.Socket);
+			const FVerseVisualSocket* TypedSocket = SourceSocket != nullptr
+				&& (!SourceSocket->SemanticTypeName.IsEmpty()
+					|| SourceSocket->TypeRange.IsSet()
+					|| !SourceSocket->IntrinsicTypeName.IsNone())
+				? SourceSocket : TargetSocket;
+			FLinearColor Color = FLinearColor::White;
+			if (Model.Outcome == EVerseExpressionOutcome::FailureOnly
+				|| Model.Source.Socket.Role == EVerseVisualSocketRole::FailureContext)
+			{
+				Color = GetVerseFailureDecorationColor();
+			}
+			else if (TypedSocket != nullptr
+				&& Model.Source.Socket.Role != EVerseVisualSocketRole::Execution
+				&& Model.Source.Socket.Role != EVerseVisualSocketRole::ClauseInsertion)
+			{
+				Color = GetBlueprintPinColor(GetVisualTypeName(
+					TypedSocket->TypeRange,
+					TypedSocket->IntrinsicTypeName,
+					*Document,
+					TypedSocket->SemanticTypeName));
+			}
+			FVerseGraphConnection& Connection = Result.AddDefaulted_GetRef();
+			Connection.SourceAnchor = SourceAnchor;
+			Connection.TargetAnchor = TargetAnchor;
+			Connection.Axis = Model.Axis == EVerseVisualConnectionAxis::Horizontal
+				? EVerseGraphConnectionAxis::Horizontal
+				: EVerseGraphConnectionAxis::Vertical;
+			Connection.Color = Color;
+			Connection.Thickness =
+				Model.Source.Socket.Role == EVerseVisualSocketRole::Execution
+				|| Model.Source.Socket.Role == EVerseVisualSocketRole::ClauseInsertion
+				? 2.5f : 2.0f;
+			Connection.ExtraBlankLineMarkers = Model.ExtraBlankLineMarkers;
+			Connection.SourceAnchorCoordinate =
+				(*SourceWidget)->GetSocketAnchorCoordinate(Model.Source.Socket);
+			Connection.TargetAnchorCoordinate =
+				(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket);
+			Connection.Outcome = Model.Outcome;
+		}
+		return Result;
 	}
 
 	struct FBuiltFunctionGraphRow
 	{
 		TSharedRef<SWidget> Widget;
 		TSharedRef<SVerseTile> RootTile;
-		TArray<FVerseGraphConnection> Connections;
 	};
 
 	FBuiltFunctionGraphRow BuildFunctionGraphRow(
@@ -772,7 +862,9 @@ namespace
 		bool bCompactOperands = false,
 		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
 		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
-		FOnVerseClauseReordered OnClauseReordered = {})
+		FOnVerseClauseReordered OnClauseReordered = {},
+		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
+		FVerseTileWidgetRegistry* WidgetRegistry = nullptr)
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -786,8 +878,6 @@ namespace
 			TSharedRef<SVerticalBox> Chain = SNew(SVerticalBox);
 			TSharedRef<SVerseGraphConnectionLayer> ConnectionLayer =
 				SNew(SVerseGraphConnectionLayer);
-			TArray<FVerseGraphConnection> Connections;
-			TArray<TSharedPtr<SVerseTile>> ChildRoots;
 			for (int32 ChildIndex = 0; ChildIndex < Tile.Children.Num(); ++ChildIndex)
 			{
 				FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
@@ -798,7 +888,9 @@ namespace
 					true,
 					OnTileSelected,
 					IsTileSelected,
-					OnClauseReordered);
+					OnClauseReordered,
+					ModelConnections,
+					WidgetRegistry);
 				Chain->AddSlot()
 				.AutoHeight()
 				.HAlign(HAlign_Center)
@@ -806,8 +898,6 @@ namespace
 				[
 					ChildRow.Widget
 				];
-				Connections.Append(ChildRow.Connections);
-				ChildRoots.Add(ChildRow.RootTile);
 			}
 
 			const TSharedRef<SVerseTile> BlockTile = BuildFunctionGraphTile(
@@ -820,53 +910,17 @@ namespace
 				ConnectionLayer,
 				OnTileSelected,
 				IsTileSelected,
-				OnClauseReordered);
-			if (!ChildRoots.IsEmpty())
-			{
-				const TSharedPtr<SWidget> Entry =
-					BlockTile->GetInternalExecutionEntryAnchor();
-				const TSharedPtr<SWidget> FirstInput =
-					ChildRoots[0]->GetExecutionInputAnchor();
-				if (Entry.IsValid() && FirstInput.IsValid())
-				{
-					Connections.Add({
-						Entry,
-						FirstInput,
-						EVerseGraphConnectionAxis::Vertical,
-						FLinearColor::White,
-						2.5f,
-						0});
-					Connections.Last().SourceAnchorCoordinate =
-						FVector2D(0.5f, 8.0f / 20.0f);
-					Connections.Last().TargetAnchorCoordinate =
-						FVector2D(0.5f, 24.0f / 32.0f);
-				}
-				for (int32 ChildIndex = 1; ChildIndex < ChildRoots.Num(); ++ChildIndex)
-				{
-					const TSharedPtr<SWidget> Source =
-						ChildRoots[ChildIndex - 1]->GetExecutionOutputAnchor();
-					const TSharedPtr<SWidget> Target =
-						ChildRoots[ChildIndex]->GetExecutionInputAnchor();
-					if (Source.IsValid() && Target.IsValid())
-					{
-						Connections.Add({
-							Source,
-							Target,
-							EVerseGraphConnectionAxis::Vertical,
-							FLinearColor::White,
-							2.5f,
-							Tile.Children[ChildIndex - 1].ExtraBlankLineCount});
-						Connections.Last().SourceAnchorCoordinate =
-							FVector2D(0.5f, 8.0f / 20.0f);
-						Connections.Last().TargetAnchorCoordinate =
-							FVector2D(0.5f, 24.0f / 32.0f);
-					}
-				}
-			}
-			ConnectionLayer->SetConnections(MoveTemp(Connections));
+				OnClauseReordered,
+				ModelConnections,
+				WidgetRegistry);
+			ConnectionLayer->SetConnections(
+				WidgetRegistry != nullptr
+					? ResolveModelConnections(
+						ModelConnections, *WidgetRegistry, Document, Tile.Id)
+					: TArray<FVerseGraphConnection>());
 			if (bCompactOperands)
 			{
-				return {BlockTile, BlockTile, {}};
+				return {BlockTile, BlockTile};
 			}
 			return {
 				SNew(SHorizontalBox)
@@ -878,15 +932,12 @@ namespace
 				[
 					BlockTile
 				],
-				BlockTile,
-				{}};
+				BlockTile};
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
-			TArray<FVerseGraphConnection> Connections;
 			TSharedRef<SWidget> PredicatePresentation = SNullWidget::NullWidget;
-			TSharedPtr<SVerseTile> PredicateTile;
 			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
 				Tile.ControlRegions.FindByPredicate(
 					[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
@@ -905,10 +956,10 @@ namespace
 					true,
 					OnTileSelected,
 					IsTileSelected,
-					OnClauseReordered);
+					OnClauseReordered,
+					ModelConnections,
+					WidgetRegistry);
 				PredicatePresentation = PredicateRow.Widget;
-				PredicateTile = PredicateRow.RootTile;
-				Connections.Append(PredicateRow.Connections);
 			}
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 				Tile,
@@ -920,28 +971,10 @@ namespace
 				nullptr,
 				OnTileSelected,
 				IsTileSelected,
-				OnClauseReordered);
-			if (PredicateTile.IsValid())
-			{
-				const TSharedPtr<SWidget> Source =
-					PredicateTile->GetFailureContextOutputAnchor();
-				const TSharedPtr<SWidget> Target =
-					RootTile->GetFailureContextInputAnchor();
-				if (Source.IsValid() && Target.IsValid())
-				{
-					Connections.Add({
-						Source,
-						Target,
-						EVerseGraphConnectionAxis::Horizontal,
-						GetVerseFailureDecorationColor(),
-						2.5f,
-						0});
-					Connections.Last().Outcome =
-						EVerseExpressionOutcome::FailureOnly;
-				}
-			}
-
-			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind, int32 OutputIndex)
+				OnClauseReordered,
+				ModelConnections,
+				WidgetRegistry);
+			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind)
 			{
 				TSharedRef<SVerticalBox> Branch = SNew(SVerticalBox);
 				const FVerseVisualExpressionDescriptor::FControlRegion* Region =
@@ -950,8 +983,6 @@ namespace
 						{
 							return Candidate.Kind == RegionKind;
 						});
-				TSharedPtr<SVerseTile> FirstTile;
-				TSharedPtr<SVerseTile> PreviousTile;
 				if (Region != nullptr)
 				{
 					for (int32 Offset = 0; Offset < Region->OperandCount; ++Offset)
@@ -969,52 +1000,24 @@ namespace
 							bCompactOperands,
 							OnTileSelected,
 							IsTileSelected,
-							OnClauseReordered);
+							OnClauseReordered,
+							ModelConnections,
+							WidgetRegistry);
 						Branch->AddSlot()
 						.AutoHeight()
 						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
 						[
 							ChildRow.Widget
 						];
-						Connections.Append(ChildRow.Connections);
-						if (!FirstTile.IsValid())
-						{
-							FirstTile = ChildRow.RootTile;
-						}
-						if (PreviousTile.IsValid())
-						{
-							Connections.Add({
-								PreviousTile->GetExecutionOutputAnchor(),
-								ChildRow.RootTile->GetExecutionInputAnchor(),
-								EVerseGraphConnectionAxis::Vertical,
-								FLinearColor::White,
-								2.5f,
-								0});
-						}
-						PreviousTile = ChildRow.RootTile;
 					}
-				}
-				if (FirstTile.IsValid())
-				{
-					Connections.Add({
-						RootTile->GetExecutionOutputAnchor(OutputIndex),
-						FirstTile->GetExecutionInputAnchor(),
-						EVerseGraphConnectionAxis::Vertical,
-						FLinearColor::White,
-						2.5f,
-						0,
-						FVector2D(
-							0.5f,
-							8.0f / (bCompactOperands ? 20.0f : 48.0f)),
-						FVector2D(0.5f, 24.0f / 32.0f)});
 				}
 				return Branch;
 			};
 
 			const TSharedRef<SVerticalBox> TrueBranch =
-				BuildExecutionBranch(EVerseControlRegionKind::Body, 1);
+				BuildExecutionBranch(EVerseControlRegionKind::Body);
 			const TSharedRef<SVerticalBox> FalseBranch =
-				BuildExecutionBranch(EVerseControlRegionKind::Else, 2);
+				BuildExecutionBranch(EVerseControlRegionKind::Else);
 			PredicatePresentation->SlatePrepass();
 			RootTile->SlatePrepass();
 			const float PredicateColumnWidth = FMath::Max(
@@ -1068,8 +1071,7 @@ namespace
 						FalseBranch
 					]
 				],
-				RootTile,
-				MoveTemp(Connections)};
+				RootTile};
 		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile,
@@ -1081,10 +1083,11 @@ namespace
 			nullptr,
 			OnTileSelected,
 			IsTileSelected,
-			OnClauseReordered);
+			OnClauseReordered,
+			ModelConnections,
+			WidgetRegistry);
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
-			TArray<FVerseGraphConnection> Connections;
 			TSharedRef<SHorizontalBox> RegionRow = SNew(SHorizontalBox);
 			for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
 				Tile.ControlRegions)
@@ -1110,8 +1113,7 @@ namespace
 						? LOCTEXT("IndentedBodyStyle", "Indented")
 						: FText::GetEmpty();
 				TSharedRef<SVerticalBox> RegionContent = SNew(SVerticalBox);
-				TSharedPtr<SVerseTile> FirstRegionTile;
-				TSharedPtr<SVerseTile> PreviousRegionTile;
+				bool bHasRegionTile = false;
 				for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
 				{
 					const int32 ChildIndex = Region.FirstOperandIndex + Offset;
@@ -1127,41 +1129,18 @@ namespace
 						bCompactOperands,
 						OnTileSelected,
 						IsTileSelected,
-						OnClauseReordered);
+						OnClauseReordered,
+						ModelConnections,
+						WidgetRegistry);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
 					[
 						ChildRow.Widget
 					];
-					Connections.Append(ChildRow.Connections);
-					if (!FirstRegionTile.IsValid())
-					{
-						FirstRegionTile = ChildRow.RootTile;
-					}
-					if (PreviousRegionTile.IsValid())
-					{
-						Connections.Add({
-							PreviousRegionTile->GetExecutionOutputAnchor(),
-							ChildRow.RootTile->GetExecutionInputAnchor(),
-							EVerseGraphConnectionAxis::Vertical,
-							FLinearColor::White,
-							2.5f,
-							0});
-					}
-					PreviousRegionTile = ChildRow.RootTile;
+					bHasRegionTile = true;
 				}
-				if (FirstRegionTile.IsValid())
-				{
-					Connections.Add({
-						RootTile->GetExecutionOutputAnchor(),
-						FirstRegionTile->GetExecutionInputAnchor(),
-						EVerseGraphConnectionAxis::Vertical,
-						FLinearColor::White,
-						2.5f,
-						0});
-				}
-				else
+				if (!bHasRegionTile)
 				{
 					RegionContent->AddSlot().AutoHeight().Padding(8.0f)
 					[
@@ -1206,8 +1185,7 @@ namespace
 				[
 					RegionRow
 				],
-				RootTile,
-				MoveTemp(Connections)};
+				RootTile};
 		}
 		const bool bHasOperandLayout = IsVerseOperatorExpression(Tile.ExpressionKind)
 			|| Tile.ExpressionKind == EVerseExpressionKind::Call
@@ -1216,7 +1194,7 @@ namespace
 		{
 			if (bCompactOperands)
 			{
-				return {RootTile, RootTile, {}};
+				return {RootTile, RootTile};
 			}
 			return {
 				SNew(SHorizontalBox)
@@ -1228,13 +1206,9 @@ namespace
 				[
 					RootTile
 				],
-				RootTile,
-				{}};
+				RootTile};
 		}
 
-		TArray<TSharedPtr<SVerseTile>> OperandTiles;
-		OperandTiles.SetNum(Tile.Children.Num());
-		TArray<FVerseGraphConnection> Connections;
 		TSharedRef<SVerticalBox> OperandColumn = SNew(SVerticalBox);
 		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
@@ -1250,10 +1224,10 @@ namespace
 					true,
 					OnTileSelected,
 					IsTileSelected,
-					OnClauseReordered);
-				OperandTiles[Index] = OperandRow.RootTile;
+					OnClauseReordered,
+					ModelConnections,
+					WidgetRegistry);
 				Presentation = OperandRow.Widget;
-				Connections.Append(MoveTemp(OperandRow.Connections));
 			}
 			OperandColumn->AddSlot()
 			.AutoHeight()
@@ -1289,22 +1263,7 @@ namespace
 				RootTile
 			];
 
-		for (int32 Index = 0; Index < OperandTiles.Num(); ++Index)
-		{
-			if (OperandTiles[Index].IsValid() && Tile.ValueInputs.IsValidIndex(Index))
-			{
-				const FVerseVisualSocket& Input = Tile.ValueInputs[Index];
-				const FString TypeName = GetVisualTypeName(
-					Input.TypeRange, Input.IntrinsicTypeName, *Document, Input.SemanticTypeName);
-				Connections.Add({OperandTiles[Index]->GetValueOutputAnchor(0),
-					RootTile->GetValueInputAnchor(Index), EVerseGraphConnectionAxis::Horizontal,
-					GetBlueprintPinColor(TypeName), 2.0f, 0});
-				SetConnectionOutcome(
-					Connections.Last(),
-					GetFirstOutputOutcome(Tile.Children[Index]));
-			}
-		}
-		return {Subtree, RootTile, MoveTemp(Connections)};
+		return {Subtree, RootTile};
 	}
 
 	FText GetSourceControlStatus(const FString& FilePath)
@@ -2990,12 +2949,12 @@ FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStar
 	{
 		return FReply::Unhandled();
 	}
+
 	FinishExpressionSearch();
 	FVerseSocketDragStart EffectiveDrag = DragStart;
 	if (EffectiveDrag.bAdoptsProvisionalTile)
 	{
-		AdoptProvisionalTile(*ActiveDocument, EffectiveDrag.Tile.Range);
-		EffectiveDrag.Tile.bIsProvisional = false;
+		AdoptProvisionalTile(*ActiveDocument, EffectiveDrag.TileRange);
 	}
 	if (EffectiveDrag.Purpose == FVerseSocketDragStart::EPurpose::ClauseInsertion
 		&& EffectiveDrag.Clause.IsSet()
@@ -3055,7 +3014,7 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 			: TArray<TSharedPtr<const FVerseSemanticSnapshot>>();
 	const bool bClauseInsertion = SocketDrag->Purpose
 		== FVerseSocketDragStart::EPurpose::ClauseInsertion;
-	FVerseTextRange SearchScopeRange = SocketDrag->Tile.Range;
+	FVerseTextRange SearchScopeRange = SocketDrag->TileRange;
 	if (bClauseInsertion && SocketDrag->Clause.IsSet())
 	{
 		const FVerseVisualClauseDescriptor& Clause = SocketDrag->Clause.GetValue();
@@ -3066,21 +3025,32 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 				Clause.Items.Num() - 1)].Expression.Range
 			: Clause.InteriorRange;
 	}
+	const FVerseVisualTile* SourceTile = bClauseInsertion
+		? nullptr
+		: FindTileById(Tab.GraphTiles, SocketDrag->Endpoint.Tile);
+	const FVerseVisualSocket* SourceSocket = SourceTile != nullptr
+		? SourceTile->FindSocket(SocketDrag->Endpoint.Socket)
+		: nullptr;
+	if (!bClauseInsertion && SourceSocket == nullptr)
+	{
+		FinishExpressionSearch();
+		return;
+	}
 	ExpressionActions = bClauseInsertion
 		? FVerseExpressionActionQuery::BuildAll(
 			Tab.Parameters, Document, SearchScopeRange,
 			ActiveDocument->FilePath, SemanticSnapshots)
 		: FVerseExpressionActionQuery::Build(
-			Tab.Parameters, SocketDrag->Socket, SocketDrag->bOutput,
-			Document, SocketDrag->Tile.Range,
+			Tab.Parameters, *SourceSocket, SocketDrag->bOutput,
+			Document, SocketDrag->TileRange,
 			ActiveDocument->FilePath, SemanticSnapshots);
 	const FString SocketType = bClauseInsertion
 		? FString()
 		: GetVisualTypeName(
-			SocketDrag->Socket.TypeRange,
-			SocketDrag->Socket.IntrinsicTypeName,
+			SourceSocket->TypeRange,
+			SourceSocket->IntrinsicTypeName,
 			Document,
-			SocketDrag->Socket.SemanticTypeName);
+			SourceSocket->SemanticTypeName);
 	const FText ContextDescription = bClauseInsertion
 		? LOCTEXT("ExpressionInsertionContext", "All expressions")
 		: FText::Format(
@@ -3180,7 +3150,7 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	{
 		bApplied = TryApplyVerseExpressionAction(
 			*ActiveDocument->Session,
-			SocketDrag->Tile.Range,
+			SocketDrag->TileRange,
 			*Action,
 			Error);
 	}
@@ -3938,12 +3908,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		const TSharedRef<const FVerseDocument> SourceDocument =
 			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
-		TArray<FVerseGraphConnection> GraphConnections;
-		TArray<TSharedPtr<SVerseTile>> RootTiles;
-		TSharedPtr<SVerseTile> ImplicitReturnSourceTile;
-		TSharedPtr<SVerseTile> ReturnTile;
-		EVerseExpressionOutcome ImplicitReturnOutcome =
-			EVerseExpressionOutcome::Unresolved;
+		const TArray<FVerseVisualConnection> ModelConnections =
+			FVerseVisualTileBuilder::BuildConnections(FunctionTab.GraphTiles);
+		FVerseTileWidgetRegistry WidgetRegistry;
 		const FOnVerseFunctionGraphTileSelected OnFunctionTileSelected =
 			FOnVerseFunctionGraphTileSelected::CreateLambda(
 				[this, OpenDocument = ActiveDocument](const FVerseVisualTile& Tile)
@@ -3983,7 +3950,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			OnFunctionTileSelected,
 			IsFunctionTileSelected,
 			FOnVerseClauseReordered::CreateSP(
-				this, &SVerseVisualEditor::HandleClauseReordered));
+				this, &SVerseVisualEditor::HandleClauseReordered),
+			ModelConnections,
+			&WidgetRegistry);
 			const bool bPairWithImplicitReturn = Tile.bImplicitReturnValue
 				&& FunctionTab.GraphTiles.IsValidIndex(Index + 1)
 				&& FunctionTab.GraphTiles[Index + 1].Kind
@@ -3995,26 +3964,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				const EVerseExpressionOutcome ReturnOutcome =
 					GetFirstOutputOutcome(Tile);
 				ReturnDisplayTile.Outcome = ReturnOutcome;
-				if (!ReturnDisplayTile.ValueInputs.IsEmpty())
-				{
-					FVerseVisualSocket& ReturnInput =
-						ReturnDisplayTile.ValueInputs[0];
-					ReturnInput.Outcome = ReturnOutcome;
-					if (!Tile.ValueOutputs.IsEmpty())
-					{
-						const FVerseVisualSocket& SourceOutput = Tile.ValueOutputs[0];
-						ReturnInput.TypeRange = SourceOutput.TypeRange.IsSet()
-							? SourceOutput.TypeRange
-							: ReturnInput.TypeRange;
-						ReturnInput.IntrinsicTypeName = !SourceOutput.IntrinsicTypeName.IsNone()
-							? SourceOutput.IntrinsicTypeName
-							: ReturnInput.IntrinsicTypeName;
-						if (!SourceOutput.SemanticTypeName.IsEmpty())
-						{
-							ReturnInput.SemanticTypeName = SourceOutput.SemanticTypeName;
-						}
-					}
-				}
 				const TSharedRef<SVerseTile> ReturnRoot = BuildFunctionGraphTile(
 					ReturnDisplayTile,
 					SourceDocument,
@@ -4030,7 +3979,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					OnFunctionTileSelected,
 					IsFunctionTileSelected,
 					FOnVerseClauseReordered::CreateSP(
-						this, &SVerseVisualEditor::HandleClauseReordered));
+						this, &SVerseVisualEditor::HandleClauseReordered),
+					ModelConnections,
+					&WidgetRegistry);
 				GraphRow.RootTile->SlatePrepass();
 				ReturnRoot->SlatePrepass();
 				const float ReturnTopPadding =
@@ -4058,12 +4009,6 @@ void SVerseVisualEditor::RefreshActiveDocument()
 						]
 					]
 				];
-				GraphConnections.Append(GraphRow.Connections);
-				RootTiles.Add(GraphRow.RootTile);
-				RootTiles.Add(ReturnRoot);
-				ImplicitReturnSourceTile = GraphRow.RootTile;
-				ReturnTile = ReturnRoot;
-				ImplicitReturnOutcome = ReturnOutcome;
 				++Index;
 				continue;
 			}
@@ -4073,48 +4018,16 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			[
 				GraphRow.Widget
 			];
-			GraphConnections.Append(GraphRow.Connections);
-			RootTiles.Add(GraphRow.RootTile);
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
 				FunctionEntryAnchor = GraphRow.RootTile;
 			}
-			if (Tile.bImplicitReturnValue)
-			{
-				ImplicitReturnSourceTile = GraphRow.RootTile;
-				ImplicitReturnOutcome = GetFirstOutputOutcome(Tile);
-			}
-			else if (Tile.Kind == EVerseVisualTileKind::FunctionReturn)
-			{
-				ReturnTile = GraphRow.RootTile;
-			}
-		}
-		for (int32 Index = 1; Index < RootTiles.Num(); ++Index)
-		{
-			const TSharedPtr<SWidget> Source = RootTiles[Index - 1]->GetExecutionOutputAnchor();
-			const TSharedPtr<SWidget> Target = RootTiles[Index]->GetExecutionInputAnchor();
-			if (Source.IsValid() && Target.IsValid())
-			{
-				GraphConnections.Add({Source, Target, EVerseGraphConnectionAxis::Vertical,
-					FLinearColor::White, 2.5f,
-					FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount,
-					FVector2D(0.5f, 8.0f / 48.0f),
-					FVector2D(0.5f, 24.0f / 32.0f)});
-			}
-		}
-		if (ImplicitReturnSourceTile.IsValid() && ReturnTile.IsValid())
-		{
-			const FString ReturnType = GetVisualTypeName(
-				FunctionTab.GraphTiles.Last().TypeRange,
-				FunctionTab.GraphTiles.Last().IntrinsicTypeName,
-				*SourceDocument,
-				FunctionTab.GraphTiles.Last().SemanticTypeName);
-			GraphConnections.Add({ImplicitReturnSourceTile->GetFirstValueOutputAnchor(),
-				ReturnTile->GetFirstValueInputAnchor(), EVerseGraphConnectionAxis::Horizontal,
-				GetBlueprintPinColor(ReturnType), 2.0f, 0});
-			SetConnectionOutcome(GraphConnections.Last(), ImplicitReturnOutcome);
 		}
 
+		// Rendering consumes only immutable model endpoints. The positional layout
+		// code above may arrange widgets, but it cannot invent sockets or wires.
+		TArray<FVerseGraphConnection> GraphConnections = ResolveModelConnections(
+			ModelConnections, WidgetRegistry, SourceDocument);
 		if (FunctionTab.FunctionCanvas.IsValid())
 		{
 			FunctionTab.FunctionCanvas->RefreshContent(
@@ -4385,14 +4298,14 @@ void SVerseVisualEditor::HandleTypeSelected(
 	// An inline literal is part of the definition's editable value. Keep its
 	// syntax in lockstep with a primitive annotation change so the rebuilt tile
 	// immediately exposes the correct editor (for example float 0.0, not int 0).
-	if (DefinitionTile.ValueInputs.Num() == 1
-		&& DefinitionTile.ValueInputs[0].InlineLiteralRange.IsSet())
+	if (DefinitionTile.GetValueInputs().Num() == 1
+		&& DefinitionTile.GetValueInputs()[0].InlineLiteralRange.IsSet())
 	{
 		if (const TOptional<FString> DefaultSource =
 			GetDefaultVerseLiteralSourceForType(*NewType))
 		{
 			Edits.Add({
-				DefinitionTile.ValueInputs[0].InlineLiteralRange,
+				DefinitionTile.GetValueInputs()[0].InlineLiteralRange,
 				FUtf8String(DefaultSource.GetValue())});
 		}
 	}

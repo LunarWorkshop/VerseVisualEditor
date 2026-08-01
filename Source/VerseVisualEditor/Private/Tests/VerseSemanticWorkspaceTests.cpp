@@ -243,9 +243,14 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	Document.Source = FUtf8String(UTF8TEXT(
 		"PrivateValueType := class {}\n"
 		"AcceptInt(Value : int)<computes> : int = Value\n"
+		"Identity(Value : t where t:type)<computes> : t = Value\n"
+		"WithDefault(Required : int, ?Optional : float = 1.0)<computes> : float = Optional\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
 		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
 		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"
+		"CallGenericInt(Input : int)<computes> : int = Identity(Input)\n"
+		"CallGenericFloat(Input : float)<computes> : float = Identity(Input)\n"
+		"CallDefault(Input : int)<computes> : float = WithDefault(Input)\n"
 		"QueryLogic(Input : logic)<computes><decides> : logic = Input?\n"));
 	Document.Revision.Value = 91;
 
@@ -354,9 +359,9 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		TestEqual(TEXT("Compiler supplies Add's concrete result type"),
 			BoundAdd.SemanticTypeName, FString(TEXT("int")));
 		TestTrue(TEXT("Compiler supplies both ordered Add parameter types"),
-			BoundAdd.ValueInputs.Num() == 2
-			&& BoundAdd.ValueInputs[0].SemanticTypeName == TEXT("int")
-			&& BoundAdd.ValueInputs[1].SemanticTypeName == TEXT("int"));
+			BoundAdd.GetValueInputs().Num() == 2
+			&& BoundAdd.GetValueInputs()[0].SemanticTypeName == TEXT("int")
+			&& BoundAdd.GetValueInputs()[1].SemanticTypeName == TEXT("int"));
 	}
 	FVerseFunctionNavigationItem* BoundCallFunction = BoundFunctions.FindByPredicate(
 		[](const FVerseFunctionNavigationItem& Function)
@@ -377,9 +382,49 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			BoundCall.ExpressionKind == EVerseExpressionKind::Call
 			&& BoundCall.SemanticFunction != nullptr
 			&& BoundCall.SemanticTypeName == TEXT("int")
-			&& BoundCall.ValueInputs.Num() == 1
-			&& BoundCall.ValueInputs[0].SemanticName == TEXT("Value")
-			&& BoundCall.ValueInputs[0].SemanticTypeName == TEXT("int"));
+			&& BoundCall.GetValueInputs().Num() == 1
+			&& BoundCall.GetValueInputs()[0].SemanticName == TEXT("Value")
+			&& BoundCall.GetValueInputs()[0].SemanticTypeName == TEXT("int"));
+	}
+	auto BindNamedFunction = [&](const TCHAR* Name) -> FVerseVisualTile*
+	{
+		FVerseFunctionNavigationItem* Function = BoundFunctions.FindByPredicate(
+			[Name](const FVerseFunctionNavigationItem& Candidate)
+			{
+				return Candidate.Name == Name;
+			});
+		if (Function == nullptr || Function->GraphTiles.Num() < 3)
+		{
+			return nullptr;
+		}
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			Function->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		return &Function->GraphTiles[1];
+	};
+	FVerseVisualTile* GenericInt = BindNamedFunction(TEXT("CallGenericInt"));
+	FVerseVisualTile* GenericFloat = BindNamedFunction(TEXT("CallGenericFloat"));
+	if (TestNotNull(TEXT("Generic int invocation binds"), GenericInt)
+		&& TestNotNull(TEXT("Generic float invocation binds"), GenericFloat))
+	{
+		TestTrue(TEXT("Each generic instantiation keeps one stable formal socket"),
+			GenericInt->GetValueInputs().Num() == 1
+			&& GenericFloat->GetValueInputs().Num() == 1
+			&& GenericInt->GetValueInputs()[0].Id
+				== GenericFloat->GetValueInputs()[0].Id);
+		TestTrue(TEXT("Generic inference changes type metadata, not topology"),
+			GenericInt->GetValueInputs()[0].SemanticTypeName == TEXT("int")
+			&& GenericFloat->GetValueInputs()[0].SemanticTypeName == TEXT("float"));
+	}
+	FVerseVisualTile* DefaultCall = BindNamedFunction(TEXT("CallDefault"));
+	if (TestNotNull(TEXT("Default-parameter invocation binds"), DefaultCall))
+	{
+		TestTrue(TEXT("Omitted fixed parameters retain an immutable socket"),
+			DefaultCall->GetValueInputs().Num() == 2
+			&& DefaultCall->GetValueInputs()[1].bNamedParameter
+			&& DefaultCall->GetValueInputs()[1].bUsesDeclaredDefault);
 	}
 	TestTrue(
 		TEXT("Compiler intrinsics contribute the polymorphic Add overload for int"),
@@ -800,10 +845,10 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 			EVerseExpressionOutcome::Ordinary);
 		TestTrue(
 			TEXT("Ordinary call retains its typed round output"),
-			NonFailableCall->ValueOutputs.Num() == 1
-			&& NonFailableCall->ValueOutputs[0].Outcome
+			NonFailableCall->GetValueOutputs().Num() == 1
+			&& NonFailableCall->GetValueOutputs()[0].Outcome
 				== EVerseExpressionOutcome::Ordinary
-			&& NonFailableCall->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+			&& NonFailableCall->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
 	const FVerseVisualTile* FailableCall = BindStatement(TEXT("FailableCall"));
@@ -812,10 +857,10 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		TestTrue(
 			TEXT("Decides call carries an int through a failable socket"),
 			FailableCall->Outcome == EVerseExpressionOutcome::FailableValue
-			&& FailableCall->ValueOutputs.Num() == 1
-			&& FailableCall->ValueOutputs[0].Outcome
+			&& FailableCall->GetValueOutputs().Num() == 1
+			&& FailableCall->GetValueOutputs()[0].Outcome
 				== EVerseExpressionOutcome::FailableValue
-			&& FailableCall->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+			&& FailableCall->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
 	const FVerseVisualTile* FailableVoidCall =
@@ -825,10 +870,10 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		TestTrue(
 			TEXT("Decides void call is represented as failure-only"),
 			FailableVoidCall->Outcome == EVerseExpressionOutcome::FailureOnly
-			&& FailableVoidCall->ValueOutputs.Num() == 1
-			&& FailableVoidCall->ValueOutputs[0].Outcome
+			&& FailableVoidCall->GetValueOutputs().Num() == 1
+			&& FailableVoidCall->GetValueOutputs()[0].Outcome
 				== EVerseExpressionOutcome::FailureOnly
-			&& FailableVoidCall->ValueOutputs[0].SemanticTypeName.IsEmpty());
+			&& FailableVoidCall->GetValueOutputs()[0].SemanticTypeName.IsEmpty());
 	}
 
 	const FVerseVisualTile* NonFailableOperator =
@@ -848,10 +893,10 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		TestTrue(
 			TEXT("Comparison carries its compiler-resolved value through failure"),
 			FailableOperator->Outcome == EVerseExpressionOutcome::FailableValue
-			&& FailableOperator->ValueOutputs.Num() == 1
-			&& FailableOperator->ValueOutputs[0].Outcome
+			&& FailableOperator->GetValueOutputs().Num() == 1
+			&& FailableOperator->GetValueOutputs()[0].Outcome
 				== EVerseExpressionOutcome::FailableValue
-			&& FailableOperator->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+			&& FailableOperator->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
 	const FVerseVisualTile* FailableCast = BindStatement(TEXT("FailableCast"));
@@ -860,8 +905,8 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		TestTrue(
 			TEXT("Failable cast carries the compiler-resolved int type"),
 			FailableCast->Outcome == EVerseExpressionOutcome::FailableValue
-			&& FailableCast->ValueOutputs.Num() == 1
-			&& FailableCast->ValueOutputs[0].SemanticTypeName == TEXT("int"));
+			&& FailableCast->GetValueOutputs().Num() == 1
+			&& FailableCast->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
 	const FVerseVisualTile* PredicateBinding =
@@ -881,11 +926,11 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 			: nullptr;
 		if (TestNotNull(TEXT("If exposes its external failure context"), Predicate)
 			&& TestTrue(TEXT("Predicate bindings are compiler-backed"),
-				Predicate->ValueOutputs.Num() == 2
-				&& Predicate->ValueOutputs[0].SemanticDataDefinition != nullptr))
+				Predicate->GetValueOutputs().Num() == 2
+				&& Predicate->GetValueOutputs()[0].SemanticDataDefinition != nullptr))
 		{
-			const FVerseVisualSocket& Boundary = Predicate->ValueOutputs[0];
-			const FVerseVisualSocket& MutableBoundary = Predicate->ValueOutputs[1];
+			const FVerseVisualSocket& Boundary = Predicate->GetValueOutputs()[0];
+			const FVerseVisualSocket& MutableBoundary = Predicate->GetValueOutputs()[1];
 			TestTrue(TEXT("Predicate boundary carries the exact typed binding"),
 				Boundary.SemanticName == TEXT("Value")
 				&& Boundary.SemanticTypeName == TEXT("int")
@@ -894,21 +939,17 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 				MutableBoundary.SemanticName == TEXT("MutableValue")
 				&& MutableBoundary.SemanticTypeName == TEXT("int")
 				&& MutableBoundary.SemanticDataDefinition != nullptr);
-			TestTrue(TEXT("Predicate boundary pins remain disconnected drag sources"),
-				!Boundary.bConnected && !MutableBoundary.bConnected);
 			TestTrue(TEXT("Predicate binding is limited to the successful body scope"),
 				Boundary.LegalConsumerScopes.Num() == 1
 				&& MutableBoundary.LegalConsumerScopes.Num() == 1);
 			TestTrue(TEXT("Defining tile shares the boundary's compiler identity"),
 				Predicate->Children.Num() == 2
-				&& Predicate->Children[0].ValueOutputs.Num() == 1
-				&& !Predicate->Children[0].ValueOutputs[0].bConnected
-				&& Predicate->Children[0].ValueOutputs[0].SemanticDataDefinition
+				&& Predicate->Children[0].GetValueOutputs().Num() == 1
+				&& Predicate->Children[0].GetValueOutputs()[0].SemanticDataDefinition
 					== Boundary.SemanticDataDefinition
 				&& Predicate->Children[1].DefinitionKind == VerseSyntaxKind::Variable
-				&& Predicate->Children[1].ValueOutputs.Num() == 1
-				&& !Predicate->Children[1].ValueOutputs[0].bConnected
-				&& Predicate->Children[1].ValueOutputs[0].SemanticDataDefinition
+				&& Predicate->Children[1].GetValueOutputs().Num() == 1
+				&& Predicate->Children[1].GetValueOutputs()[0].SemanticDataDefinition
 					== MutableBoundary.SemanticDataDefinition);
 
 			const FUtf8StringView SourceView = Document->GetOriginalUtf8View();

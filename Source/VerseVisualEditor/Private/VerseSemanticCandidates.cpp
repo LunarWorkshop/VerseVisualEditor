@@ -279,32 +279,6 @@ namespace
 
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
-			Tile.ValueOutputs.Reset();
-			for (FVerseVisualTile& Child : Tile.Children)
-			{
-				if (Child.Kind != EVerseVisualTileKind::Definition
-					|| Child.SemanticDataDefinition == nullptr)
-				{
-					continue;
-				}
-				FVerseVisualSocket Binding;
-				Binding.NameRange = Child.NameRange;
-				Binding.TypeRange = Child.TypeRange;
-				Binding.SemanticName = ToFString(
-					Child.SemanticDataDefinition->AsNameStringView());
-				Binding.SemanticTypeName = GetUserFacingDataType(
-					*Child.SemanticDataDefinition);
-				// Boundary binding pins are future drag sources, not an internal
-				// visualization of the declaration that introduced them.
-				Binding.bConnected = false;
-				Binding.Outcome = EVerseExpressionOutcome::Ordinary;
-				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
-				Binding.SemanticSnapshot = Snapshot;
-				Tile.ValueOutputs.Add(Binding);
-
-				Child.ValueOutputs.Reset();
-				Child.ValueOutputs.Add(MoveTemp(Binding));
-			}
 			Tile.SemanticSnapshot = Snapshot;
 			return;
 		}
@@ -321,12 +295,7 @@ namespace
 			// so it must not replace `int`, `float`, etc. with `type{...}` here.
 			Tile.SemanticTypeName = Tile.IntrinsicTypeName.ToString();
 			Tile.Outcome = EVerseExpressionOutcome::Ordinary;
-			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
-			{
-				Output.IntrinsicTypeName = Tile.IntrinsicTypeName;
-				Output.SemanticTypeName = Tile.SemanticTypeName;
-				Output.Outcome = Tile.Outcome;
-			}
+			Tile.bProducesValue = true;
 			return;
 		}
 
@@ -380,26 +349,17 @@ namespace
 		{
 			Tile.SemanticTypeName = ToFString(ResultType->AsCode());
 			Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
-			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
-			{
-				Output.SemanticTypeName = Tile.SemanticTypeName;
-				Output.Outcome = Tile.Outcome;
-			}
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 			{
-				Tile.ValueOutputs.Reset();
+				Tile.bProducesValue = false;
 				if (bCanFail.Get(false))
 				{
-					FVerseVisualSocket& FailureSocket = Tile.ValueOutputs.AddDefaulted_GetRef();
-					FailureSocket.Outcome = EVerseExpressionOutcome::FailureOnly;
 					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;
 				}
 			}
-			else if (Tile.ValueOutputs.IsEmpty())
+			else
 			{
-				FVerseVisualSocket& Output = Tile.ValueOutputs.AddDefaulted_GetRef();
-				Output.SemanticTypeName = Tile.SemanticTypeName;
-				Output.Outcome = Tile.Outcome;
+				Tile.bProducesValue = true;
 			}
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
@@ -435,9 +395,10 @@ namespace
 					Tile.Children[ConditionRegion->FirstOperandIndex];
 				if (Predicate.Kind == EVerseVisualTileKind::FailableBlock)
 				{
-					for (FVerseVisualSocket& Binding : Predicate.ValueOutputs)
+					for (FVerseVisualTile& Binding : Predicate.Children)
 					{
-						if (ThenScope != nullptr)
+						if (ThenScope != nullptr
+							&& Binding.SemanticDataDefinition != nullptr)
 						{
 							Binding.LegalConsumerScopes.AddUnique(ThenScope);
 						}
@@ -469,10 +430,12 @@ namespace
 				Tile.SemanticFunction != nullptr
 				? &Tile.SemanticFunction->_Signature.GetParams()
 				: nullptr;
-			for (int32 Index = 0; Index < Tile.ValueInputs.Num() && Index < Params.Num(); ++Index)
+			Tile.SemanticInputNames.Reset();
+			Tile.SemanticInputTypeNames.Reset();
+			Tile.SemanticInputNamed.Reset();
+			Tile.SemanticInputHasDefault.Reset();
+			for (int32 Index = 0; Index < Params.Num(); ++Index)
 			{
-				FVerseVisualSocket& Input = Tile.ValueInputs[Index];
-				Input.SemanticTypeName = ToFString(Params[Index]->AsCode());
 				const uLang::CDataDefinition* Param = ParamDefinitions != nullptr
 					&& ParamDefinitions->IsValidIndex(Index)
 					? (*ParamDefinitions)[Index]
@@ -481,28 +444,27 @@ namespace
 					&& Param->_ImplicitParam != nullptr
 					? static_cast<const uLang::CDefinition*>(Param->_ImplicitParam)
 					: static_cast<const uLang::CDefinition*>(Param);
-				Input.SemanticName = NameDefinition != nullptr
+				Tile.SemanticInputNames.Add(NameDefinition != nullptr
 					? ToFString(NameDefinition->AsNameStringView())
-					: FString();
+					: FString());
+				Tile.SemanticInputTypeNames.Add(ToFString(Params[Index]->AsCode()));
+				Tile.SemanticInputNamed.Add(Param != nullptr && Param->_bNamed);
+				Tile.SemanticInputHasDefault.Add(
+					Param != nullptr && Param->GetAstNode() != nullptr
+						&& Param->GetAstNode()->Value());
 			}
 			Tile.SemanticTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 			{
-				Tile.ValueOutputs.Reset();
+				Tile.bProducesValue = false;
 				if (bCanFail.Get(false))
 				{
-					FVerseVisualSocket& FailureSocket = Tile.ValueOutputs.AddDefaulted_GetRef();
-					FailureSocket.Outcome = EVerseExpressionOutcome::FailureOnly;
 					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;
 				}
 			}
-			for (FVerseVisualSocket& Output : Tile.ValueOutputs)
+			else
 			{
-				Output.SemanticTypeName =
-					Output.Outcome == EVerseExpressionOutcome::FailureOnly
-					? FString()
-					: Tile.SemanticTypeName;
-				Output.Outcome = Tile.Outcome;
+				Tile.bProducesValue = true;
 			}
 		}
 	}
@@ -993,4 +955,5 @@ void FVerseSemanticCandidateProvider::BindFunctionGraph(
 	{
 		BindExpressionTile(Tile, Snapshot, FilePath, Document);
 	}
+	FVerseVisualTileBuilder::FinalizeSocketTopology(GraphTiles);
 }
