@@ -54,6 +54,7 @@
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
+#include "Widgets/Input/SSearchableComboBox.h"
 #include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -440,7 +441,9 @@ namespace
 				&& (ExpressionAction->SourceForm
 						== EVerseExpressionSourceForm::IdentifierReference
 					|| ExpressionAction->SourceForm
-						== EVerseExpressionSourceForm::Literal);
+						== EVerseExpressionSourceForm::Literal
+					|| ExpressionAction->SourceForm
+						== EVerseExpressionSourceForm::Definition);
 			const FSlateBrush* Icon = FAppStyle::GetBrush(bValueAction
 				? TEXT("Kismet.AllClasses.VariableIcon")
 				: TEXT("Kismet.AllClasses.FunctionIcon"));
@@ -3214,6 +3217,20 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		RecordGeneratedConditionAsProvisional(
 			*ActiveDocument, AppliedExpressionRange);
 	}
+	if (Action->SourceForm == EVerseExpressionSourceForm::Definition
+		&& AppliedExpressionRange.IsSet())
+	{
+		for (FOpenVerseFunctionTab& Tab : ActiveDocument->FunctionTabs)
+		{
+			if (FVerseVisualTile* CreatedTile = FindTileByRange(
+				Tab.GraphTiles, AppliedExpressionRange))
+			{
+				ActiveDocument->SelectedTile = *CreatedTile;
+				OpenDetailsTab();
+				break;
+			}
+		}
+	}
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 }
@@ -4315,8 +4332,101 @@ void SVerseVisualEditor::HandleRenameCommitted(
 		{
 			OpenDocument->SelectedTile = *ReplacementTile;
 		}
+		else
+		{
+			ReconcileFunctionTabs(
+				*OpenDocument,
+				FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument));
+			for (const FOpenVerseFunctionTab& Tab : OpenDocument->FunctionTabs)
+			{
+				if (const FVerseVisualTile* FunctionGraphReplacement = FindReplacementTile(
+					Tab.GraphTiles, PreviousTile))
+				{
+					OpenDocument->SelectedTile = *FunctionGraphReplacement;
+					break;
+				}
+			}
+		}
 	}
 
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+void SVerseVisualEditor::HandleTypeSelected(
+	TSharedPtr<FString> NewType,
+	ESelectInfo::Type SelectInfo,
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	FVerseTextRange TypeRange)
+{
+	if (!NewType.IsValid()
+		|| SelectInfo == ESelectInfo::Direct
+		|| !OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+	const FString CurrentType = OpenDocument->Session->GetParseSnapshot()
+		.GetDocument()->DecodeOriginalRange(TypeRange);
+	if (CurrentType == *NewType)
+	{
+		return;
+	}
+
+	const TOptional<FVerseVisualTile> PreviousSelection = OpenDocument->SelectedTile;
+	FText EditError;
+	const FTCHARToUTF8 ReplacementUtf8(**NewType);
+	if (!OpenDocument->Session->Replace(
+		TypeRange,
+		FUtf8StringView(
+			reinterpret_cast<const UTF8CHAR*>(ReplacementUtf8.Get()),
+			ReplacementUtf8.Length()),
+		EditError))
+	{
+		OpenDocument->PropertyValidationMessage = EditError;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
+	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
+	OpenDocument->SelectedTile.Reset();
+	if (PreviousSelection.IsSet())
+	{
+		const FVerseVisualTile& PreviousTile = PreviousSelection.GetValue();
+		if (const FVerseVisualTile* ReplacementTile = FindReplacementTile(
+			OpenDocument->Session->GetTiles(), PreviousTile))
+		{
+			OpenDocument->SelectedTile = *ReplacementTile;
+		}
+		else
+		{
+			ReconcileFunctionTabs(
+				*OpenDocument,
+				FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument));
+			for (const FOpenVerseFunctionTab& Tab : OpenDocument->FunctionTabs)
+			{
+				if (const FVerseVisualTile* FunctionGraphReplacement = FindReplacementTile(
+					Tab.GraphTiles, PreviousTile))
+				{
+					OpenDocument->SelectedTile = *FunctionGraphReplacement;
+					break;
+				}
+			}
+		}
+	}
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
@@ -4524,6 +4634,7 @@ void SVerseVisualEditor::RebuildProperties()
 	const TArray<FVerseTileProperty> Properties = FVerseTileProperties::Build(
 		ActiveDocument->SelectedTile.GetValue(),
 		ActiveDocument->Session->GetParseSnapshot());
+	TypeOptions.Reset();
 	int32 VisiblePropertyCount = 0;
 	for (const FVerseTileProperty& Property : Properties)
 	{
@@ -4538,7 +4649,48 @@ void SVerseVisualEditor::RebuildProperties()
 			.AutoWrapText(true);
 		if (Property.bEditable)
 		{
-			if (Property.EditKind == EVerseTilePropertyEditKind::Literal)
+			if (Property.EditKind == EVerseTilePropertyEditKind::Type)
+			{
+				const TArray<FString> VisibleTypes =
+					FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
+						SemanticWorkspace
+							? SemanticWorkspace->GetCandidateSnapshots()
+							: TArray<TSharedPtr<const FVerseSemanticSnapshot>>(),
+						ActiveDocument->FilePath,
+						ActiveDocument->SelectedTile->Range.BeginByte,
+						*ActiveDocument->Session->GetParseSnapshot().GetDocument());
+				for (const FString& TypeName : VisibleTypes)
+				{
+					TypeOptions.Add(MakeShared<FString>(TypeName));
+				}
+				const TSharedPtr<FString>* SelectedOption = TypeOptions.FindByPredicate(
+					[&Property](const TSharedPtr<FString>& Option)
+					{
+						return Option.IsValid() && *Option == Property.Value;
+					});
+				const TSharedPtr<FString> InitiallySelected = SelectedOption != nullptr
+					? *SelectedOption
+					: nullptr;
+				ValueWidget = SNew(SSearchableComboBox)
+					.OptionsSource(&TypeOptions)
+					.InitiallySelectedItem(InitiallySelected)
+					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Option)
+					{
+						return SNew(STextBlock)
+							.Text(Option.IsValid()
+								? FText::FromString(*Option)
+								: FText::GetEmpty());
+					})
+					.OnSelectionChanged(
+						this,
+						&SVerseVisualEditor::HandleTypeSelected,
+						ActiveDocument,
+						Property.EditRange)
+					[
+						SNew(STextBlock).Text(FText::FromString(Property.Value))
+					];
+			}
+			else if (Property.EditKind == EVerseTilePropertyEditKind::Literal)
 			{
 				ValueWidget = SNew(SVerseLiteralEditor)
 					.LiteralKind(Property.LiteralKind)

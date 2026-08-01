@@ -83,7 +83,18 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 			EVerseTilePropertyEditKind::Name});
 		if (Tile.TypeRange.IsSet())
 		{
-			Properties.Add({TEXT("Type"), Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange)});
+			const bool bEditableValueType =
+				Tile.DefinitionKind == VerseSyntaxKind::Variable
+				|| Tile.DefinitionKind == VerseSyntaxKind::Constant;
+			Properties.Add({
+				TEXT("Type"),
+				Snapshot.GetDocument()->DecodeOriginalRange(Tile.TypeRange),
+				bEditableValueType,
+				bEditableValueType
+					? EVerseTilePropertyEditKind::Type
+					: EVerseTilePropertyEditKind::None,
+				EVerseLiteralKind::None,
+				Tile.TypeRange});
 		}
 		if (Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.SpecifierRanges.IsEmpty())
 		{

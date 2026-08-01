@@ -11,6 +11,7 @@ enum class EVerseTilePropertyEditKind : uint8
 {
 	None,
 	Name,
+	Type,
 	AccessSpecifiers,
 	EffectSpecifiers,
 	Literal,

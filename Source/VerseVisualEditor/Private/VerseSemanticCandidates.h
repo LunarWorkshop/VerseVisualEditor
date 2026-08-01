@@ -52,6 +52,12 @@ public:
 		const FString& FilePath,
 		int32 ExpressionBeginByte,
 		const FVerseDocument& Document);
+	/** Returns source-spellable named types visible at the lexical insertion point. */
+	static TArray<FString> BuildVisibleTypeNames(
+		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
+		const FString& FilePath,
+		int32 ExpressionBeginByte,
+		const FVerseDocument& Document);
 
 	/** Bind existing expression tiles to the exact compiler-owned syntax/semantic graph. */
 	static void BindFunctionGraph(

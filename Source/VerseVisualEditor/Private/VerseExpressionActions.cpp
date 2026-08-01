@@ -486,6 +486,22 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	IfAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
 	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 	Result.Add(MoveTemp(IfAction));
+
+	TSharedPtr<FVerseExpressionAction> VariableAction = MakeShared<FVerseExpressionAction>();
+	VariableAction->SourceForm = EVerseExpressionSourceForm::Definition;
+	VariableAction->SourceSpelling = TEXT("var NewVariable : int = 0");
+	VariableAction->DisplayName = LOCTEXT("CreateVariableDefinition", "Variable Definition");
+	VariableAction->Category = LOCTEXT("VariablesCategory", "Variables");
+	VariableAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+	Result.Add(MoveTemp(VariableAction));
+
+	TSharedPtr<FVerseExpressionAction> ConstantAction = MakeShared<FVerseExpressionAction>();
+	ConstantAction->SourceForm = EVerseExpressionSourceForm::Definition;
+	ConstantAction->SourceSpelling = TEXT("NewConstant : int = 0");
+	ConstantAction->DisplayName = LOCTEXT("CreateConstantDefinition", "Constant Definition");
+	ConstantAction->Category = LOCTEXT("VariablesCategory", "Variables");
+	ConstantAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+	Result.Add(MoveTemp(ConstantAction));
 	return Result;
 }
 
@@ -574,7 +590,8 @@ bool BuildVerseExpressionActionSource(
 		OutSource = Action.SourceSpelling;
 		return true;
 	}
-	if (Action.SourceForm == EVerseExpressionSourceForm::StructuralExpression)
+	if (Action.SourceForm == EVerseExpressionSourceForm::StructuralExpression
+		|| Action.SourceForm == EVerseExpressionSourceForm::Definition)
 	{
 		if (Action.SourceSpelling.IsEmpty())
 		{
@@ -693,6 +710,7 @@ bool TryApplyVerseExpressionAction(
 	case EVerseExpressionSourceForm::PostfixOperator: RequiredKind = EVerseExpressionKind::UnaryOperator; break;
 	case EVerseExpressionSourceForm::Literal: RequiredKind = EVerseExpressionKind::Literal; break;
 	case EVerseExpressionSourceForm::StructuralExpression: RequiredKind = EVerseExpressionKind::Control; break;
+	case EVerseExpressionSourceForm::Definition: RequiredKind = EVerseExpressionKind::Definition; break;
 	default: break;
 	}
 

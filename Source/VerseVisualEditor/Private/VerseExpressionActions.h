@@ -21,6 +21,8 @@ enum class EVerseExpressionSourceForm : uint8
 	Literal,
 	/** Parser-known construct with a complete source-safe template. */
 	StructuralExpression,
+	/** Local mutable or immutable definition with a complete source-safe template. */
+	Definition,
 };
 
 /** Transient editor treatment requested by a generated structural template. */

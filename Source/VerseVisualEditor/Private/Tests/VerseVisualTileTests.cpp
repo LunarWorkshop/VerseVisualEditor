@@ -701,6 +701,24 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				&& !LocalGraph[2].ValueInputs[0].bConnected
 				&& LocalGraph[2].ValueInputs[0].InlineLiteralKind
 					== EVerseLiteralKind::Integer);
+			const TArray<FVerseTileProperty> VariableProperties =
+				FVerseTileProperties::Build(LocalGraph[1], Snapshot);
+			TestTrue(TEXT("Local variable type is editable through the type selector"),
+				VariableProperties.ContainsByPredicate(
+					[&LocalGraph](const FVerseTileProperty& Property)
+					{
+						return Property.EditKind == EVerseTilePropertyEditKind::Type
+							&& Property.EditRange == LocalGraph[1].TypeRange;
+					}));
+			const TArray<FVerseTileProperty> ConstantProperties =
+				FVerseTileProperties::Build(LocalGraph[2], Snapshot);
+			TestTrue(TEXT("Local constant type is editable through the type selector"),
+				ConstantProperties.ContainsByPredicate(
+					[&LocalGraph](const FVerseTileProperty& Property)
+					{
+						return Property.EditKind == EVerseTilePropertyEditKind::Type
+							&& Property.EditRange == LocalGraph[2].TypeRange;
+					}));
 		}
 	}
 

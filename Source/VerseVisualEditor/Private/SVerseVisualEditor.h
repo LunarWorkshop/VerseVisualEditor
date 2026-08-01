@@ -125,6 +125,11 @@ private:
 		ETextCommit::Type CommitType,
 		TSharedPtr<FOpenVerseDocument> OpenDocument,
 		FVerseTextRange NameRange);
+	void HandleTypeSelected(
+		TSharedPtr<FString> NewType,
+		ESelectInfo::Type SelectInfo,
+		TSharedPtr<FOpenVerseDocument> OpenDocument,
+		FVerseTextRange TypeRange);
 	void HandleSpecifiersCommitted(
 		const FText& NewText,
 		ETextCommit::Type CommitType,
@@ -205,6 +210,7 @@ private:
 	TSharedPtr<SDockTab> DetailsTab;
 	TSharedPtr<SSearchBox> PropertyFilter;
 	TSharedPtr<SVerticalBox> PropertyRows;
+	TArray<TSharedPtr<FString>> TypeOptions;
 	FString PropertyFilterText;
 
 	FString WatchedDirectory;

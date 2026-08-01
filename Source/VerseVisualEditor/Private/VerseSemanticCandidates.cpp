@@ -1,6 +1,7 @@
 #include "VerseSemanticCandidates.h"
 
 #include "VerseDocument.h"
+#include "VerseIdentifier.h"
 #include "VerseSemanticWorkspace.h"
 #include "VerseVisualTile.h"
 #include "uLang/Semantics/DataDefinition.h"
@@ -909,6 +910,72 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::BuildAll(
 			}
 		}
 	}
+	return Result;
+}
+
+TArray<FString> FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
+	TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
+	const FString& FilePath,
+	int32 ExpressionBeginByte,
+	const FVerseDocument& Document)
+{
+	// These scalar types remain source-safe even while the private semantic
+	// snapshot is rebuilding or the current buffer has semantic errors.
+	TSet<FString> Names = {
+		TEXT("logic"),
+		TEXT("int"),
+		TEXT("float"),
+		TEXT("string"),
+		TEXT("char")};
+	for (const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot : Snapshots)
+	{
+		if (!Snapshot.IsValid() || !Snapshot->GetProgram().IsValid())
+		{
+			continue;
+		}
+		const Verse::Vst::Node* Node = FindSemanticNode(
+			*Snapshot, FilePath, ExpressionBeginByte, Document);
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+		const uLang::CScope* ActiveScope = FindActiveScope(*Node, Program);
+		if (ActiveScope == nullptr)
+		{
+			continue;
+		}
+		const uLang::CAstPackage* Package = ActiveScope->GetPackage();
+		for (const uLang::CDefinition* Definition :
+			CollectVisibleDefinitions(*ActiveScope, Program))
+		{
+			if (Definition == nullptr
+				|| !Definition->IsAccessibleFrom(*ActiveScope)
+				|| !IsVisibleAtCurrentPackageVersion(
+					*Definition, *ActiveScope, Package))
+			{
+				continue;
+			}
+			const uLang::CDefinition::EKind Kind = Definition->GetKind();
+			if (Kind == uLang::CDefinition::EKind::Class
+				|| Kind == uLang::CDefinition::EKind::Enumeration
+				|| Kind == uLang::CDefinition::EKind::TypeAlias
+				|| Kind == uLang::CDefinition::EKind::TypeVariable)
+			{
+				const FString TypeName = ToFString(Definition->AsNameStringView());
+				if (ValidateVerseIdentifier(TypeName).IsEmpty())
+				{
+					Names.Add(TypeName);
+				}
+			}
+		}
+	}
+
+	TArray<FString> Result = Names.Array();
+	Result.Sort([](const FString& Left, const FString& Right)
+	{
+		return Left.Compare(Right, ESearchCase::IgnoreCase) < 0;
+	});
 	return Result;
 }
 

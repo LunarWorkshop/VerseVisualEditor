@@ -337,6 +337,40 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 			(*IfAction)->ProvisionalContentTarget,
 			EVerseProvisionalContentTarget::FirstConditionExpression);
 	}
+	const TSharedPtr<FVerseExpressionAction>* VariableDefinition =
+		UntypedActions.FindByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Definition
+				&& Action->DisplayName.ToString() == TEXT("Variable Definition");
+		});
+	if (TestNotNull(TEXT("Untyped clause search offers a variable definition"), VariableDefinition))
+	{
+		FString Source;
+		FText SourceError;
+		TestTrue(TEXT("Variable definition has a source-safe creation template"),
+			BuildVerseExpressionActionSource(
+				**VariableDefinition, FStringView(), Source, SourceError));
+		TestEqual(TEXT("Variable definition template is valid Verse source"),
+			Source, FString(TEXT("var NewVariable : int = 0")));
+	}
+	const TSharedPtr<FVerseExpressionAction>* ConstantDefinition =
+		UntypedActions.FindByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::Definition
+				&& Action->DisplayName.ToString() == TEXT("Constant Definition");
+		});
+	if (TestNotNull(TEXT("Untyped clause search offers a constant definition"), ConstantDefinition))
+	{
+		FString Source;
+		FText SourceError;
+		TestTrue(TEXT("Constant definition has a source-safe creation template"),
+			BuildVerseExpressionActionSource(
+				**ConstantDefinition, FStringView(), Source, SourceError));
+		TestEqual(TEXT("Constant definition template is valid Verse source"),
+			Source, FString(TEXT("NewConstant : int = 0")));
+	}
 	return true;
 }
 

@@ -241,6 +241,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		FPaths::ProjectPluginsDir()
 		/ TEXT("VerseVisualEditor/Content/TestCorpus/PrivateSemanticOverlayOnly.verse"));
 	Document.Source = FUtf8String(UTF8TEXT(
+		"PrivateValueType := class {}\n"
 		"AcceptInt(Value : int)<computes> : int = Value\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
 		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
@@ -284,6 +285,17 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	}
 	const TArray<TSharedPtr<const FVerseSemanticSnapshot>> CandidateSnapshots =
 		Workspace.GetCandidateSnapshots();
+	const TArray<FString> VisibleTypeNames =
+		FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
+			CandidateSnapshots,
+			Document.FilePath,
+			ExpressionBeginByte,
+			*ParsedDocument);
+	TestTrue(TEXT("Type discovery retains core scalar types"),
+		VisibleTypeNames.Contains(TEXT("int"))
+			&& VisibleTypeNames.Contains(TEXT("logic")));
+	TestTrue(TEXT("Type discovery includes a class visible in the current module"),
+		VisibleTypeNames.Contains(TEXT("PrivateValueType")));
 	const TArray<FVerseSemanticCandidate> Candidates =
 		FVerseSemanticCandidateProvider::Build(
 			CandidateSnapshots,
