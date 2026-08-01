@@ -35,6 +35,8 @@ struct FVerseSocketDragStart
 	FVerseVisualSocketEndpoint Endpoint;
 	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVerseTextRange TileRange;
+	/** Nearest statement ancestor used solely for lexical semantic lookup. */
+	FVerseTextRange SemanticScopeRange;
 	TOptional<FVerseVisualClauseDescriptor> Clause;
 	EVerseVisualSocketInsertionKind InsertionKind =
 		EVerseVisualSocketInsertionKind::Clause;

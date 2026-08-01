@@ -255,6 +255,11 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"        Input\n"
 		"    else:\n"
 		"        0.0\n"
+		"ScopedVisibility(Input : float)<computes> : float =\n"
+		"    Outer : float = Input\n"
+		"    if (Inner : float = Outer; Inner > 0.0):\n"
+		"        Inner\n"
+		"    Outer\n"
 		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"
 		"CallGenericInt(Input : int)<computes> : int = Identity(Input)\n"
 		"CallGenericFloat(Input : float)<computes> : float = Identity(Input)\n"
@@ -337,6 +342,42 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			GenericScopeTypeNames.Contains(TEXT("t")));
 		TestFalse(TEXT("A function type variable is unavailable outside its scope"),
 			VisibleTypeNames.Contains(TEXT("t")));
+	}
+	const int32 InnerScopeBeginByte =
+		SourceView.Find(UTF8TEXTVIEW("        Inner\n    Outer"));
+	const int32 OuterScopeBeginByte = InnerScopeBeginByte != INDEX_NONE
+		? InnerScopeBeginByte + UTF8TEXTVIEW("        Inner\n    ").Len()
+		: INDEX_NONE;
+	if (TestTrue(TEXT("Candidate test locates nested and enclosing statements"),
+		InnerScopeBeginByte != INDEX_NONE && OuterScopeBeginByte != INDEX_NONE))
+	{
+		auto HasIdentifier = [](TConstArrayView<FVerseSemanticCandidate> InCandidates,
+			uLang::CUTF8StringView Name)
+		{
+			return InCandidates.ContainsByPredicate(
+				[Name](const FVerseSemanticCandidate& Candidate)
+				{
+					return Candidate.Kind == EVerseSemanticCandidateKind::Identifier
+						&& Candidate.DataDefinition != nullptr
+						&& Candidate.DataDefinition->AsNameStringView() == Name;
+				});
+		};
+		const TArray<FVerseSemanticCandidate> InnerScopeCandidates =
+			FVerseSemanticCandidateProvider::Build(
+				CandidateSnapshots, Document.FilePath, InnerScopeBeginByte,
+				false, *ParsedDocument);
+		const TArray<FVerseSemanticCandidate> OuterScopeCandidates =
+			FVerseSemanticCandidateProvider::Build(
+				CandidateSnapshots, Document.FilePath, OuterScopeBeginByte,
+				false, *ParsedDocument);
+		TestTrue(TEXT("Nested statement sees identifiers introduced by its condition"),
+			HasIdentifier(InnerScopeCandidates, uLang::CUTF8StringView("Inner")));
+		TestFalse(TEXT("Condition-local identifiers do not leak past the control scope"),
+			HasIdentifier(OuterScopeCandidates, uLang::CUTF8StringView("Inner")));
+		TestTrue(TEXT("Both statements retain identifiers from their enclosing function"),
+			HasIdentifier(InnerScopeCandidates, uLang::CUTF8StringView("Outer"))
+				&& HasIdentifier(
+					OuterScopeCandidates, uLang::CUTF8StringView("Outer")));
 	}
 	const TArray<FVerseSemanticCandidate> Candidates =
 		FVerseSemanticCandidateProvider::Build(

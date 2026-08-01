@@ -784,6 +784,24 @@ namespace
 		return nullptr;
 	}
 
+	bool FindTileAncestry(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseVisualTileId TileId,
+		TArray<const FVerseVisualTile*>& OutAncestry)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			OutAncestry.Add(&Tile);
+			if (Tile.Id == TileId
+				|| FindTileAncestry(Tile.Children, TileId, OutAncestry))
+			{
+				return true;
+			}
+			OutAncestry.Pop(EAllowShrinking::No);
+		}
+		return false;
+	}
+
 	TArray<FVerseGraphConnection> ResolveModelConnections(
 		TConstArrayView<FVerseVisualConnection> ModelConnections,
 		const FVerseTileWidgetRegistry& Widgets,
@@ -3007,6 +3025,27 @@ FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStar
 	SocketDrag = EffectiveDrag;
 	FOpenVerseFunctionTab& Tab =
 		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+	if (EffectiveDrag.Purpose == FVerseSocketDragStart::EPurpose::ValueConnection)
+	{
+		TArray<const FVerseVisualTile*> Ancestry;
+		if (FindTileAncestry(
+			Tab.GraphTiles, EffectiveDrag.Endpoint.Tile, Ancestry))
+		{
+			for (int32 Index = Ancestry.Num() - 1; Index >= 0; --Index)
+			{
+				if (Ancestry[Index]->bStatementLevel)
+				{
+					EffectiveDrag.SemanticScopeRange = Ancestry[Index]->Range;
+					break;
+				}
+			}
+		}
+		if (!EffectiveDrag.SemanticScopeRange.IsSet())
+		{
+			EffectiveDrag.SemanticScopeRange = EffectiveDrag.TileRange;
+		}
+		SocketDrag = EffectiveDrag;
+	}
 	return Tab.FunctionCanvas.IsValid()
 		? Tab.FunctionCanvas->BeginConnectionDrag(EffectiveDrag)
 		: FReply::Unhandled();
@@ -3087,7 +3126,10 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 			ActiveDocument->FilePath, SemanticSnapshots)
 		: FVerseExpressionActionQuery::Build(
 			Tab.Parameters, *SourceSocket, SocketDrag->bOutput,
-			Document, SocketDrag->TileRange,
+			Document,
+			SocketDrag->SemanticScopeRange.IsSet()
+				? SocketDrag->SemanticScopeRange
+				: SocketDrag->TileRange,
 			ActiveDocument->FilePath, SemanticSnapshots);
 	const FString SocketType = bClauseInsertion
 		? FString()
