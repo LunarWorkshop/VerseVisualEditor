@@ -803,6 +803,14 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	const FText Name = GetNameText();
 	const FText Type = GetTypeText();
 	const FText Lines = GetLineText();
+	const bool bInlineDefinitionType = Tile.Kind == EVerseVisualTileKind::Definition
+		&& (Tile.DefinitionKind == VerseSyntaxKind::Variable
+			|| Tile.DefinitionKind == VerseSyntaxKind::Constant)
+		&& !Name.IsEmpty()
+		&& !Type.IsEmpty();
+	const FText HeaderName = bInlineDefinitionType
+		? FText::Format(LOCTEXT("DefinitionNameAndType", "{0} : {1}"), Name, Type)
+		: Name;
 	TSharedRef<SVerticalBox> Header = SNew(SVerticalBox);
 	if (Tile.Kind == EVerseVisualTileKind::Expression
 		&& IsVerseOperatorExpression(Tile.ExpressionKind))
@@ -855,25 +863,27 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 10.0f : 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Visibility(bCompact && !Name.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
-			.Text(Name)
+			.Visibility(bCompact && !HeaderName.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
+			.Text(HeaderName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
 			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 8.0f : 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Visibility(bCompact && !Type.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
+			.Visibility(bCompact && !bInlineDefinitionType && !Type.IsEmpty()
+				? EVisibility::Visible
+				: EVisibility::Collapsed)
 			.Text(Type.IsEmpty() ? FText::GetEmpty() : FText::Format(LOCTEXT("CompactType", ": {0}"), Type))
 			.ColorAndOpacity(FLinearColor(0.82f, 0.84f, 0.88f, 1.0f))
 		]
 	];
-	if (!bCompact && !Name.IsEmpty())
+	if (!bCompact && !HeaderName.IsEmpty())
 	{
 		Header->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Text(Name)
+			.Text(HeaderName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
 		];
@@ -892,7 +902,8 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			.ColorAndOpacity(FLinearColor(0.68f, 0.72f, 0.78f, 1.0f))
 		];
 	}
-	if (!bCompact && !Type.IsEmpty() && Tile.Kind == EVerseVisualTileKind::Definition)
+	if (!bCompact && !bInlineDefinitionType && !Type.IsEmpty()
+		&& Tile.Kind == EVerseVisualTileKind::Definition)
 	{
 		Header->AddSlot().AutoHeight()
 		[
@@ -930,8 +941,11 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			: Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
-		const FText Name = Tile.Kind == EVerseVisualTileKind::Expression
-			&& Tile.OperatorRange.IsSet()
+		const bool bHeaderAlreadyShowsOutputName = bOutput
+			&& Tile.Kind == EVerseVisualTileKind::Definition;
+		const FText Name = bHeaderAlreadyShowsOutputName
+			|| (Tile.Kind == EVerseVisualTileKind::Expression
+				&& Tile.OperatorRange.IsSet())
 			? FText::GetEmpty()
 			: !Socket.SemanticName.IsEmpty()
 			? FText::FromString(Socket.SemanticName)

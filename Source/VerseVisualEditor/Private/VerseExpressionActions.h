@@ -55,6 +55,9 @@ struct FVerseExpressionAction
 	TArray<bool> NamedInputs;
 };
 
+/** Returns the canonical source-safe initializer for an editor-supported primitive type. */
+TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName);
+
 /** Materializes one action's source recipe without mutating a document. */
 bool BuildVerseExpressionActionSource(
 	const FVerseExpressionAction& Action,

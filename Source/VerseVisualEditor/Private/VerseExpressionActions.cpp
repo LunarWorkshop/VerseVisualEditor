@@ -291,17 +291,18 @@ namespace
 		const TCHAR* Source;
 		const TCHAR* Type;
 		FText DisplayName;
+		bool bCanonicalDefault;
 	};
 
 	TConstArrayView<FLiteralActionDescriptor> GetLiteralActionDescriptors()
 	{
 		static const FLiteralActionDescriptor Descriptors[] = {
-			{EVerseLiteralKind::Logic, TEXT("true"), TEXT("logic"), LOCTEXT("TrueLiteral", "True")},
-			{EVerseLiteralKind::Logic, TEXT("false"), TEXT("logic"), LOCTEXT("FalseLiteral", "False")},
-			{EVerseLiteralKind::Integer, TEXT("0"), TEXT("int"), LOCTEXT("IntegerLiteral", "Integer")},
-			{EVerseLiteralKind::Float, TEXT("0.0"), TEXT("float"), LOCTEXT("FloatLiteral", "Float")},
-			{EVerseLiteralKind::String, TEXT("\"\""), TEXT("string"), LOCTEXT("StringLiteral", "String")},
-			{EVerseLiteralKind::Character, TEXT("'a'"), TEXT("char"), LOCTEXT("CharacterLiteral", "Character")},
+			{EVerseLiteralKind::Logic, TEXT("true"), TEXT("logic"), LOCTEXT("TrueLiteral", "True"), false},
+			{EVerseLiteralKind::Logic, TEXT("false"), TEXT("logic"), LOCTEXT("FalseLiteral", "False"), true},
+			{EVerseLiteralKind::Integer, TEXT("0"), TEXT("int"), LOCTEXT("IntegerLiteral", "Integer"), true},
+			{EVerseLiteralKind::Float, TEXT("0.0"), TEXT("float"), LOCTEXT("FloatLiteral", "Float"), true},
+			{EVerseLiteralKind::String, TEXT("\"\""), TEXT("string"), LOCTEXT("StringLiteral", "String"), true},
+			{EVerseLiteralKind::Character, TEXT("'a'"), TEXT("char"), LOCTEXT("CharacterLiteral", "Character"), true},
 		};
 		return Descriptors;
 	}
@@ -392,6 +393,20 @@ namespace
 		}
 		return Candidates;
 	}
+}
+
+TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName)
+{
+	const FString NormalizedType = NormalizeActionType(FString(TypeName));
+	for (const FLiteralActionDescriptor& Descriptor : GetLiteralActionDescriptors())
+	{
+		if (Descriptor.bCanonicalDefault
+			&& NormalizedType == NormalizeActionType(Descriptor.Type))
+		{
+			return FString(Descriptor.Source);
+		}
+	}
+	return {};
 }
 
 TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(

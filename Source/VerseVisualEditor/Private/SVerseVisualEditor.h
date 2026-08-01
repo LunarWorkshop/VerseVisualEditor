@@ -129,7 +129,7 @@ private:
 		TSharedPtr<FString> NewType,
 		ESelectInfo::Type SelectInfo,
 		TSharedPtr<FOpenVerseDocument> OpenDocument,
-		FVerseTextRange TypeRange);
+		FVerseVisualTile DefinitionTile);
 	void HandleSpecifiersCommitted(
 		const FText& NewText,
 		ETextCommit::Type CommitType,

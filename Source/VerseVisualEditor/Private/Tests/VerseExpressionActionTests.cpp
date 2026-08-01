@@ -374,4 +374,42 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVersePrimitiveDefinitionDefaultTest,
+	"VerseVisualEditor.Expressions.Literals.PrimitiveDefinitionDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVersePrimitiveDefinitionDefaultTest::RunTest(const FString& Parameters)
+{
+	struct FExpectedDefault
+	{
+		const TCHAR* Type;
+		const TCHAR* Source;
+	};
+	static const FExpectedDefault Expected[] = {
+		{TEXT("logic"), TEXT("false")},
+		{TEXT("int"), TEXT("0")},
+		{TEXT("float"), TEXT("0.0")},
+		{TEXT("string"), TEXT("\"\"")},
+		{TEXT("char"), TEXT("'a'")},
+	};
+
+	for (const FExpectedDefault& Item : Expected)
+	{
+		const TOptional<FString> Source =
+			GetDefaultVerseLiteralSourceForType(Item.Type);
+		if (TestTrue(
+			*FString::Printf(TEXT("%s has a canonical definition initializer"), Item.Type),
+			Source.IsSet()))
+		{
+			TestEqual(
+				*FString::Printf(TEXT("%s uses its matching literal syntax"), Item.Type),
+				Source.GetValue(), FString(Item.Source));
+		}
+	}
+	TestFalse(TEXT("A non-primitive type has no invented initializer"),
+		GetDefaultVerseLiteralSourceForType(TEXT("SomeClass")).IsSet());
+	return true;
+}
+
 #endif

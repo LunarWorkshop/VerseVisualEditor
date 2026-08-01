@@ -39,6 +39,7 @@
 #include "VerseClauseEditing.h"
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
+#include "VerseExpressionActions.h"
 #include "VerseExternalChange.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseIdentifier.h"
@@ -4360,7 +4361,7 @@ void SVerseVisualEditor::HandleTypeSelected(
 	TSharedPtr<FString> NewType,
 	ESelectInfo::Type SelectInfo,
 	TSharedPtr<FOpenVerseDocument> OpenDocument,
-	FVerseTextRange TypeRange)
+	FVerseVisualTile DefinitionTile)
 {
 	if (!NewType.IsValid()
 		|| SelectInfo == ESelectInfo::Direct
@@ -4370,7 +4371,7 @@ void SVerseVisualEditor::HandleTypeSelected(
 		return;
 	}
 	const FString CurrentType = OpenDocument->Session->GetParseSnapshot()
-		.GetDocument()->DecodeOriginalRange(TypeRange);
+		.GetDocument()->DecodeOriginalRange(DefinitionTile.TypeRange);
 	if (CurrentType == *NewType)
 	{
 		return;
@@ -4378,13 +4379,25 @@ void SVerseVisualEditor::HandleTypeSelected(
 
 	const TOptional<FVerseVisualTile> PreviousSelection = OpenDocument->SelectedTile;
 	FText EditError;
-	const FTCHARToUTF8 ReplacementUtf8(**NewType);
-	if (!OpenDocument->Session->Replace(
-		TypeRange,
-		FUtf8StringView(
-			reinterpret_cast<const UTF8CHAR*>(ReplacementUtf8.Get()),
-			ReplacementUtf8.Length()),
-		EditError))
+	TArray<FVerseDocumentEdit> Edits;
+	Edits.Add({DefinitionTile.TypeRange, FUtf8String(*NewType)});
+
+	// An inline literal is part of the definition's editable value. Keep its
+	// syntax in lockstep with a primitive annotation change so the rebuilt tile
+	// immediately exposes the correct editor (for example float 0.0, not int 0).
+	if (DefinitionTile.ValueInputs.Num() == 1
+		&& DefinitionTile.ValueInputs[0].InlineLiteralRange.IsSet())
+	{
+		if (const TOptional<FString> DefaultSource =
+			GetDefaultVerseLiteralSourceForType(*NewType))
+		{
+			Edits.Add({
+				DefinitionTile.ValueInputs[0].InlineLiteralRange,
+				FUtf8String(DefaultSource.GetValue())});
+		}
+	}
+
+	if (!OpenDocument->Session->ReplaceMany(Edits, EditError))
 	{
 		OpenDocument->PropertyValidationMessage = EditError;
 		if (OpenDocument == ActiveDocument)
@@ -4685,7 +4698,7 @@ void SVerseVisualEditor::RebuildProperties()
 						this,
 						&SVerseVisualEditor::HandleTypeSelected,
 						ActiveDocument,
-						Property.EditRange)
+						ActiveDocument->SelectedTile.GetValue())
 					[
 						SNew(STextBlock).Text(FText::FromString(Property.Value))
 					];
