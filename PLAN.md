@@ -853,6 +853,7 @@ using its failable result.
 - Zoom into the mouse pointer position
 - Inform the user that their open file is not registered with Solaris
 - Context menu hover tooltips for function descriptions
+- Hover sockets
 
 ### 1. Multi-selection and copying
 

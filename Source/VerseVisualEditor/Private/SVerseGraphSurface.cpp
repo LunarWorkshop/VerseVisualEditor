@@ -416,6 +416,16 @@ int32 SVerseGraphSurface::OnPaint(
 	OutDrawElements.PopClip();
 
 	int32 ResultLayer = FMath::Max(ContentLayer, ConnectionLayer);
+	if (ConnectionDrag.IsSet())
+	{
+		// Fixed graph connections belong beneath tiles, but the connection being
+		// dragged is direct manipulation feedback and must remain visible over
+		// nested panels such as an if's failable condition context.
+		OutDrawElements.PushClip(FSlateClippingZone(CanvasGeometry));
+		PaintPreviewConnection(OutDrawElements, ResultLayer + 1);
+		OutDrawElements.PopClip();
+		++ResultLayer;
+	}
 	if (bIsPanning)
 	{
 		const FSlateBrush* CursorBrush = FAppStyle::GetBrush(TEXT("SoftwareCursor_Grab"));
@@ -442,7 +452,6 @@ int32 SVerseGraphSurface::PaintConnections(
 	{
 		PaintConnection(Connection, OutDrawElements, LayerId);
 	}
-	PaintPreviewConnection(OutDrawElements, LayerId);
 	return LayerId;
 }
 
