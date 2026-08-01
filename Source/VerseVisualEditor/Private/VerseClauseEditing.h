@@ -15,7 +15,16 @@ public:
 		const FVerseVisualClauseDescriptor& Clause,
 		int32 InsertIndex,
 		const FVerseExpressionAction& Action,
-		FText& OutError);
+		FText& OutError,
+		FVerseTextRange* OutInsertedRange = nullptr);
+
+	static bool ReplaceExpression(
+		FVerseDocumentSession& Session,
+		const FVerseVisualClauseDescriptor& Clause,
+		int32 ItemIndex,
+		const FVerseExpressionAction& Action,
+		FText& OutError,
+		FVerseTextRange* OutReplacementRange = nullptr);
 
 	static bool DeleteExpression(
 		FVerseDocumentSession& Session,

@@ -352,6 +352,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		FLinearColor::White,
 		FVector4(0.0f, 0.0f, InnerCornerRadius, InnerCornerRadius));
 	Tile = InArgs._Tile;
+	SetRenderOpacity(Tile.bIsProvisional ? 0.5f : 1.0f);
 	Document = InArgs._Document;
 	IsSelected = InArgs._IsSelected;
 	OnSelected = InArgs._OnSelected;
@@ -1054,6 +1055,7 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	}
 	FVerseSocketDragStart DragStart;
 	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.Tile = Tile;
 	DragStart.Socket = Socket;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
@@ -1069,6 +1071,13 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	}
 	DragStart.bOutput = bOutput;
 	DragStart.SocketIndex = SocketIndex;
+	if (DragStart.bAdoptsProvisionalTile)
+	{
+		// Adoption is transient UI state. Make the existing widget opaque
+		// immediately; the editor removes the corresponding session marker.
+		Tile.bIsProvisional = false;
+		SetRenderOpacity(1.0f);
+	}
 	return OnSocketDragStarted.Execute(DragStart);
 }
 
@@ -1090,12 +1099,18 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	DragStart.Purpose = FVerseSocketDragStart::EPurpose::ClauseInsertion;
 	DragStart.Anchor = MoveTemp(Anchor);
 	DragStart.AnchorCoordinate = AnchorCoordinate;
+	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.Tile = Tile;
 	DragStart.Clause = Tile.EditableClause;
 	DragStart.ClauseInsertionIndex = InsertIndex;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = FLinearColor::White;
 	DragStart.bOutput = true;
+	if (DragStart.bAdoptsProvisionalTile)
+	{
+		Tile.bIsProvisional = false;
+		SetRenderOpacity(1.0f);
+	}
 	return OnSocketDragStarted.Execute(DragStart);
 }
 

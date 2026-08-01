@@ -77,8 +77,10 @@ namespace
 			for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
 				Tile.ControlRegions)
 			{
-				if (Region.OpeningPunctuationRange.IsSet()
-					&& Region.OpeningPunctuationRange.BeginByte == OpeningByte)
+				const int32 RegionOpening = Region.OpeningPunctuationRange.IsSet()
+					? Region.OpeningPunctuationRange.BeginByte
+					: Region.InteriorRange.BeginByte;
+				if (RegionOpening == OpeningByte)
 				{
 					return &Region;
 				}
@@ -331,7 +333,8 @@ bool FVerseClauseEditing::InsertExpression(
 	const FVerseVisualClauseDescriptor& Clause,
 	int32 InsertIndex,
 	const FVerseExpressionAction& Action,
-	FText& OutError)
+	FText& OutError,
+	FVerseTextRange* OutInsertedRange)
 {
 	if (Clause.InteriorRange.Revision != Session.GetRevision()
 		|| InsertIndex < 0 || InsertIndex > Clause.Items.Num())
@@ -351,6 +354,7 @@ bool FVerseClauseEditing::InsertExpression(
 		? Clause.EmptyBodyInsertionAnchor.BeginByte
 		: Clause.InteriorRange.BeginByte;
 	FString Replacement;
+	int32 ExpressionOffsetCharacters = 0;
 	if (!Clause.Items.IsEmpty())
 	{
 		if (InsertIndex < Clause.Items.Num())
@@ -372,6 +376,7 @@ bool FVerseClauseEditing::InsertExpression(
 			{
 				Replacement = LineEnding + IndentationAt(
 					Source, Clause.Items.Last().Expression.Range.BeginByte) + ExpressionSource;
+				ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 			}
 			else
 			{
@@ -385,6 +390,7 @@ bool FVerseClauseEditing::InsertExpression(
 			? Clause.OpeningPunctuationRange.BeginByte
 			: Clause.InteriorRange.BeginByte;
 		Replacement = LineEnding + IndentationAt(Source, HeaderByte) + TEXT("    ") + ExpressionSource;
+		ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 	}
 	else
 	{
@@ -397,7 +403,59 @@ bool FVerseClauseEditing::InsertExpression(
 	{
 		return false;
 	}
-	return Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError);
+	if (!Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+	{
+		return false;
+	}
+	if (OutInsertedRange != nullptr)
+	{
+		const FTCHARToUTF8 PrefixUtf8(*Replacement, ExpressionOffsetCharacters);
+		const FTCHARToUTF8 ExpressionUtf8(*ExpressionSource);
+		*OutInsertedRange = FVerseTextRange(
+			Session.GetRevision(),
+			FVerseByteRange(
+				InsertionByte + PrefixUtf8.Length(), ExpressionUtf8.Length()));
+	}
+	return true;
+}
+
+bool FVerseClauseEditing::ReplaceExpression(
+	FVerseDocumentSession& Session,
+	const FVerseVisualClauseDescriptor& Clause,
+	int32 ItemIndex,
+	const FVerseExpressionAction& Action,
+	FText& OutError,
+	FVerseTextRange* OutReplacementRange)
+{
+	if (Clause.InteriorRange.Revision != Session.GetRevision()
+		|| !Clause.Items.IsValidIndex(ItemIndex))
+	{
+		OutError = LOCTEXT(
+			"InvalidClauseReplacement",
+			"The provisional expression is no longer in this clause.");
+		return false;
+	}
+	FString ExpressionSource;
+	if (!BuildVerseExpressionActionSource(Action, FStringView(), ExpressionSource, OutError))
+	{
+		return false;
+	}
+	const FVerseByteRange ReplacedRange = Clause.Items[ItemIndex].Expression.Range;
+	const FVerseDocumentEdit Edit = MakeEdit(
+		Session.GetRevision(), ReplacedRange, ExpressionSource);
+	if (!ValidateCandidate(Session, Clause, MakeArrayView(&Edit, 1), Clause.Items.Num(), OutError)
+		|| !Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+	{
+		return false;
+	}
+	if (OutReplacementRange != nullptr)
+	{
+		const FTCHARToUTF8 ExpressionUtf8(*ExpressionSource);
+		*OutReplacementRange = FVerseTextRange(
+			Session.GetRevision(),
+			FVerseByteRange(ReplacedRange.BeginByte, ExpressionUtf8.Length()));
+	}
+	return true;
 }
 
 bool FVerseClauseEditing::DeleteExpression(

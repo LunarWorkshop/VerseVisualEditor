@@ -315,6 +315,28 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 				return Action.IsValid()
 					&& Action->SourceForm == EVerseExpressionSourceForm::Literal;
 			}));
+
+	const TArray<TSharedPtr<FVerseExpressionAction>> UntypedActions =
+		FVerseExpressionActionQuery::BuildAll(
+			Functions[0].Parameters,
+			*Document,
+			Identifier.Range,
+			FString(),
+			{});
+	const TSharedPtr<FVerseExpressionAction>* IfAction =
+		UntypedActions.FindByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
+		{
+			return Action.IsValid()
+				&& Action->SourceForm == EVerseExpressionSourceForm::StructuralExpression
+				&& Action->SourceSpelling == TEXT("if (true?) {}");
+		});
+	if (TestNotNull(TEXT("Untyped clause search offers If"), IfAction))
+	{
+		TestEqual(
+			TEXT("If identifies its generated condition as provisional content"),
+			(*IfAction)->ProvisionalContentTarget,
+			EVerseProvisionalContentTarget::FirstConditionExpression);
+	}
 	return true;
 }
 

@@ -111,6 +111,8 @@ struct FOpenVerseDocument
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseFileCanvas> FileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
+	/** Revision-specific, editor-only tile state. Deliberately absent from session persistence. */
+	TArray<FVerseTextRange> ProvisionalTileRanges;
 	TArray<FOpenVerseFunctionTab> FunctionTabs;
 	int32 ActiveFunctionTabIndex = INDEX_NONE;
 	FVerseCompilationResult CompilationResult;
@@ -201,6 +203,72 @@ namespace
 			}
 			ReportTileSnapshots(Tile.Children, Document, ReportedSnapshots);
 		}
+	}
+
+	void ApplyProvisionalState(
+		TArray<FVerseVisualTile>& Tiles,
+		TConstArrayView<FVerseTextRange> ProvisionalRanges)
+	{
+		for (FVerseVisualTile& Tile : Tiles)
+		{
+			Tile.bIsProvisional = ProvisionalRanges.Contains(Tile.Range);
+			ApplyProvisionalState(Tile.Children, ProvisionalRanges);
+		}
+	}
+
+	FVerseVisualTile* FindTileByRange(
+		TArray<FVerseVisualTile>& Tiles,
+		FVerseTextRange Range)
+	{
+		for (FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Range == Range)
+			{
+				return &Tile;
+			}
+			if (FVerseVisualTile* Nested = FindTileByRange(Tile.Children, Range))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
+	bool RecordGeneratedConditionAsProvisional(
+		FOpenVerseDocument& Document,
+		FVerseTextRange InsertedControlRange)
+	{
+		for (FOpenVerseFunctionTab& Tab : Document.FunctionTabs)
+		{
+			FVerseVisualTile* ControlTile =
+				FindTileByRange(Tab.GraphTiles, InsertedControlRange);
+			if (ControlTile == nullptr
+				|| ControlTile->ExpressionKind != EVerseExpressionKind::Control)
+			{
+				continue;
+			}
+			FVerseVisualTile* Condition = ControlTile->Children.FindByPredicate(
+				[](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::FailableBlock;
+				});
+			if (Condition == nullptr || Condition->Children.IsEmpty())
+			{
+				return false;
+			}
+			const FVerseTextRange PredicateRange = Condition->Children[0].Range;
+			Document.ProvisionalTileRanges.AddUnique(PredicateRange);
+			Condition->Children[0].bIsProvisional = true;
+			return true;
+		}
+		return false;
+	}
+
+	void AdoptProvisionalTile(
+		FOpenVerseDocument& Document,
+		FVerseTextRange Range)
+	{
+		Document.ProvisionalTileRanges.Remove(Range);
 	}
 
 	DECLARE_DELEGATE_OneParam(FOnVerseExpressionChosen, TSharedPtr<FVerseExpressionAction>);
@@ -1429,6 +1497,9 @@ namespace
 			Tab.Parameters = Item->Parameters;
 			Tab.GraphTiles = Item->GraphTiles;
 			BindGraphTiles(Document, Tab.GraphTiles, SemanticSnapshot);
+			// Provisional is transient editor state, so reapply it after every
+			// parse/semantic graph reconstruction rather than deriving it from source.
+			ApplyProvisionalState(Tab.GraphTiles, Document.ProvisionalTileRanges);
 			Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 			Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		}
@@ -2916,11 +2987,30 @@ FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStar
 		return FReply::Unhandled();
 	}
 	FinishExpressionSearch();
-	SocketDrag = DragStart;
+	FVerseSocketDragStart EffectiveDrag = DragStart;
+	if (EffectiveDrag.bAdoptsProvisionalTile)
+	{
+		AdoptProvisionalTile(*ActiveDocument, EffectiveDrag.Tile.Range);
+		EffectiveDrag.Tile.bIsProvisional = false;
+	}
+	if (EffectiveDrag.Purpose == FVerseSocketDragStart::EPurpose::ClauseInsertion
+		&& EffectiveDrag.Clause.IsSet()
+		&& EffectiveDrag.Clause->Items.IsValidIndex(EffectiveDrag.ClauseInsertionIndex))
+	{
+		const FVerseTextRange ExistingRange =
+			EffectiveDrag.Clause->Items[EffectiveDrag.ClauseInsertionIndex].Expression.Range;
+		if (ActiveDocument->ProvisionalTileRanges.Contains(ExistingRange))
+		{
+			// A drag from the execution anchor immediately before a provisional item
+			// means replace that item, not insert another item ahead of it.
+			EffectiveDrag.ProvisionalReplacementRange = ExistingRange;
+		}
+	}
+	SocketDrag = EffectiveDrag;
 	FOpenVerseFunctionTab& Tab =
 		ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
 	return Tab.FunctionCanvas.IsValid()
-		? Tab.FunctionCanvas->BeginConnectionDrag(DragStart)
+		? Tab.FunctionCanvas->BeginConnectionDrag(EffectiveDrag)
 		: FReply::Unhandled();
 }
 
@@ -3052,25 +3142,54 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		return;
 	}
 	FText Error;
-	const bool bApplied = SocketDrag->Purpose
+	const bool bClauseInsertion = SocketDrag->Purpose
 		== FVerseSocketDragStart::EPurpose::ClauseInsertion
-		&& SocketDrag->Clause.IsSet()
-		? FVerseClauseEditing::InsertExpression(
+		&& SocketDrag->Clause.IsSet();
+	const bool bReplaceProvisional = bClauseInsertion
+		&& SocketDrag->ProvisionalReplacementRange.IsSet()
+		&& SocketDrag->Clause->Items.IsValidIndex(SocketDrag->ClauseInsertionIndex)
+		&& SocketDrag->Clause->Items[SocketDrag->ClauseInsertionIndex].Expression.Range
+			== SocketDrag->ProvisionalReplacementRange.GetValue();
+	FVerseTextRange AppliedExpressionRange;
+	bool bApplied = false;
+	if (bReplaceProvisional)
+	{
+		bApplied = FVerseClauseEditing::ReplaceExpression(
 			*ActiveDocument->Session,
 			SocketDrag->Clause.GetValue(),
 			SocketDrag->ClauseInsertionIndex,
 			*Action,
-			Error)
-		: TryApplyVerseExpressionAction(
+			Error,
+			&AppliedExpressionRange);
+	}
+	else if (bClauseInsertion)
+	{
+		bApplied = FVerseClauseEditing::InsertExpression(
+			*ActiveDocument->Session,
+			SocketDrag->Clause.GetValue(),
+			SocketDrag->ClauseInsertionIndex,
+			*Action,
+			Error,
+			&AppliedExpressionRange);
+	}
+	else
+	{
+		bApplied = TryApplyVerseExpressionAction(
 			*ActiveDocument->Session,
 			SocketDrag->Tile.Range,
 			*Action,
 			Error);
+	}
 	if (!bApplied)
 	{
 		ActiveDocument->LoadError = Error;
 		bLocalCompilePanelOpen = true;
 		return;
+	}
+	if (bReplaceProvisional)
+	{
+		AdoptProvisionalTile(
+			*ActiveDocument, SocketDrag->ProvisionalReplacementRange.GetValue());
 	}
 	ActiveDocument->LoadError = FText::GetEmpty();
 	ActiveDocument->bIsTemporary = false;
@@ -3087,6 +3206,14 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	ReconcileFunctionTabs(
 		*ActiveDocument,
 		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+	const bool bCreatedProvisionalCondition = bClauseInsertion
+		&& Action->ProvisionalContentTarget
+			== EVerseProvisionalContentTarget::FirstConditionExpression;
+	if (bCreatedProvisionalCondition && AppliedExpressionRange.IsSet())
+	{
+		RecordGeneratedConditionAsProvisional(
+			*ActiveDocument, AppliedExpressionRange);
+	}
 	RebuildDocumentTabs();
 	RefreshActiveDocument();
 }

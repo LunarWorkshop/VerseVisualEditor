@@ -23,6 +23,14 @@ enum class EVerseExpressionSourceForm : uint8
 	StructuralExpression,
 };
 
+/** Transient editor treatment requested by a generated structural template. */
+enum class EVerseProvisionalContentTarget : uint8
+{
+	None,
+	/** First expression inside the generated control's failable condition. */
+	FirstConditionExpression,
+};
+
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
@@ -36,6 +44,8 @@ struct FVerseExpressionAction
 	FVerseTextRange IdentifierNameRange;
 	/** Direct source spelling for compiler-discovered identifiers and callables. */
 	FString SourceSpelling;
+	EVerseProvisionalContentTarget ProvisionalContentTarget =
+		EVerseProvisionalContentTarget::None;
 	bool bUsesFailureCallSyntax = false;
 	int32 BoundInputIndex = INDEX_NONE;
 	TArray<FString> InputDefaultSources;

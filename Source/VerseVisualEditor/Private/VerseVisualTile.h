@@ -185,6 +185,8 @@ struct FVerseVisualTile
 	bool bExecutionInputConnected = false;
 	bool bExecutionOutputConnected = false;
 	bool bImplicitReturnValue = false;
+	/** Transient editor state: replace this generated tile until the user adopts it. */
+	bool bIsProvisional = false;
 };
 
 class FVerseVisualTileBuilder

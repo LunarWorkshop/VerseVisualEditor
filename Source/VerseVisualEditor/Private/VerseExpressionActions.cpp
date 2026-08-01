@@ -480,6 +480,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
 	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
 	IfAction->SourceSpelling = TEXT("if (true?) {}");
+	IfAction->ProvisionalContentTarget =
+		EVerseProvisionalContentTarget::FirstConditionExpression;
 	IfAction->DisplayName = LOCTEXT("CreateIfExpression", "If");
 	IfAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
 	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");

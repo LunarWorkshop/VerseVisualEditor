@@ -35,10 +35,14 @@ struct FVerseSocketDragStart
 	FVerseVisualTile Tile;
 	FVerseVisualSocket Socket;
 	TOptional<FVerseVisualClauseDescriptor> Clause;
+	/** Existing provisional clause item replaced by this insertion gesture, if any. */
+	TOptional<FVerseTextRange> ProvisionalReplacementRange;
 	FVerseDesktopPoint DesktopPosition;
 	FLinearColor WireColor = FLinearColor::White;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	bool bOutput = false;
+	/** Starting this drag adopts the source tile and clears its provisional state. */
+	bool bAdoptsProvisionalTile = false;
 	int32 SocketIndex = INDEX_NONE;
 	int32 ClauseInsertionIndex = INDEX_NONE;
 	EPurpose Purpose = EPurpose::ValueConnection;

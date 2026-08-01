@@ -440,6 +440,7 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 			FVerseExpressionAction IfAction;
 			IfAction.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
 			IfAction.SourceSpelling = TEXT("if (true?) {}");
+			FVerseTextRange InsertedIfRange;
 			TestTrue(
 				TEXT("An empty if with a valid default condition inserts into an empty function"),
 				FVerseClauseEditing::InsertExpression(
@@ -447,7 +448,12 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 					EmptyFunction->BodyClause,
 					0,
 					IfAction,
-					Error));
+					Error,
+					&InsertedIfRange));
+			TestEqual(
+				TEXT("Clause insertion reports the exact generated expression range"),
+				EmptySession.GetParseSnapshot().GetDocument()->DecodeOriginalRange(InsertedIfRange),
+				FString(TEXT("if (true?) {}")));
 			const FVerseVisualTile* RebuiltEmptyFunction =
 				EmptySession.GetTiles().FindByPredicate(
 					[](const FVerseVisualTile& Tile)
@@ -465,13 +471,49 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 					{
 						return Tile.ControlKind == EVerseControlKind::If;
 					});
-				TestTrue(
-					TEXT("Inserted if rebuilds with its automatic failable context"),
+				const bool bHasGeneratedCondition =
 					IfTile != nullptr
 						&& !IfTile->Children.IsEmpty()
 						&& IfTile->Children[0].Kind
 							== EVerseVisualTileKind::FailableBlock
-						&& IfTile->Children[0].Children.Num() == 1);
+						&& IfTile->Children[0].Children.Num() == 1;
+				TestTrue(
+					TEXT("Inserted if rebuilds with its automatic failable context"),
+					bHasGeneratedCondition);
+				if (bHasGeneratedCondition)
+				{
+					const FVerseVisualClauseDescriptor& PredicateClause =
+						IfTile->Children[0].BodyClause;
+					FVerseExpressionAction Replacement;
+					Replacement.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+					Replacement.SourceSpelling = TEXT("false?");
+					FVerseTextRange ReplacementRange;
+					const bool bReplaced = FVerseClauseEditing::ReplaceExpression(
+						EmptySession,
+						PredicateClause,
+						0,
+						Replacement,
+						Error,
+						&ReplacementRange);
+					TestTrue(
+						*FString::Printf(
+							TEXT("A generated predicate can be replaced without inserting a second item: %s"),
+							*Error.ToString()),
+						bReplaced);
+					TestEqual(
+						TEXT("Replacement reports the exact replacement expression range"),
+						EmptySession.GetParseSnapshot().GetDocument()->DecodeOriginalRange(
+							ReplacementRange),
+						FString(TEXT("false?")));
+					const FString ReplacedSource =
+						FString(UTF8_TO_TCHAR(*EmptySession.GetCurrentUtf8()));
+					TestTrue(
+						TEXT("Replacement changes the predicate in place"),
+						ReplacedSource.Contains(TEXT("if (false?) {}")));
+					TestFalse(
+						TEXT("Replacement removes the generated placeholder"),
+						ReplacedSource.Contains(TEXT("true?")));
+				}
 			}
 		}
 	}
