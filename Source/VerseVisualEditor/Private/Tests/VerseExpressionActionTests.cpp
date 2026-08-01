@@ -375,6 +375,54 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseNamedInputMaterializationTest,
+	"VerseVisualEditor.Expressions.Search.NamedDefaultMaterialization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseNamedInputMaterializationTest::RunTest(const FString& Parameters)
+{
+	FText Error;
+	TSharedPtr<FVerseDocument> Document = MakeDocument(
+		TEXT("WithDefault(Required : int, ?Optional : float = 1.0)<computes> : float = Optional\n")
+		TEXT("UseDefault()<computes> : float = WithDefault(1)\n"),
+		Error);
+	if (!TestTrue(TEXT("Named-default fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseFunctionNavigationItem* Caller = Functions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("UseDefault");
+		});
+	const FVerseVisualTile* Call = Caller != nullptr
+		? Caller->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::Call;
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("Call with omitted default is found"), Call))
+	{
+		return false;
+	}
+	FVerseExpressionAction Provider;
+	Provider.SourceForm = EVerseExpressionSourceForm::Literal;
+	Provider.SourceSpelling = TEXT("2.0");
+	TestTrue(*FString::Printf(TEXT("Named input materializes safely: %s"), *Error.ToString()),
+		TryMaterializeVerseNamedInput(
+			Session, Call->Range, TEXT("Optional"), Provider, Error));
+	TestTrue(TEXT("Materialized input uses Verse named-argument syntax"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(
+			TEXT("WithDefault(1, ?Optional := 2.0)")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVersePrimitiveDefinitionDefaultTest,
 	"VerseVisualEditor.Expressions.Literals.PrimitiveDefinitionDefaults",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

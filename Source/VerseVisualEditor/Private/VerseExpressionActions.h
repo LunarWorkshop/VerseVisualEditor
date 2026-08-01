@@ -97,3 +97,11 @@ bool TryApplyVerseExpressionAction(
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
 	FText& OutError);
+
+/** Materializes an omitted named/default argument with a selected provider expression. */
+bool TryMaterializeVerseNamedInput(
+	FVerseDocumentSession& Session,
+	FVerseTextRange CallRange,
+	FStringView InputName,
+	const FVerseExpressionAction& Action,
+	FText& OutError);

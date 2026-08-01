@@ -1146,6 +1146,17 @@ bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
 				FVerseVisualTileBuilder::ValidateConnections(
 					DuplicateSocketIds, {}, &Diagnostic));
 		}
+
+		TArray<FVerseVisualTile> InvalidInsertionTarget = Graph;
+		FVerseVisualSocketInsertionTarget& MissingSocketTarget =
+			InvalidInsertionTarget[0].SocketInsertionTargets.AddDefaulted_GetRef();
+		MissingSocketTarget.Socket = {
+			EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::Value,
+			9999};
+		TestFalse(TEXT("Insertion targets cannot invent sockets"),
+			FVerseVisualTileBuilder::ValidateConnections(
+				InvalidInsertionTarget, {}, &Diagnostic));
 	}
 	return true;
 }

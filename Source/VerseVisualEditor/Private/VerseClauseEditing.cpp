@@ -117,6 +117,32 @@ namespace
 		return nullptr;
 	}
 
+	const FVerseVisualTile* FindIfWithElse(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		int32 OpeningByte)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Range.BeginByte == OpeningByte
+				&& Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.ControlKind == EVerseControlKind::If
+				&& Tile.ControlRegions.ContainsByPredicate(
+					[](const auto& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Else
+							&& Region.Items.Num() == 1;
+					}))
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Nested = FindIfWithElse(Tile.Children, OpeningByte))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
 	FString TileKindName(EVerseVisualTileKind Kind)
 	{
 		const UEnum* Enum = StaticEnum<EVerseVisualTileKind>();
@@ -334,7 +360,8 @@ bool FVerseClauseEditing::InsertExpression(
 	int32 InsertIndex,
 	const FVerseExpressionAction& Action,
 	FText& OutError,
-	FVerseTextRange* OutInsertedRange)
+	FVerseTextRange* OutInsertedRange,
+	FStringView BoundExpressionSource)
 {
 	if (Clause.InteriorRange.Revision != Session.GetRevision()
 		|| InsertIndex < 0 || InsertIndex > Clause.Items.Num())
@@ -343,7 +370,7 @@ bool FVerseClauseEditing::InsertExpression(
 		return false;
 	}
 	FString ExpressionSource;
-	if (!BuildVerseExpressionActionSource(Action, FStringView(), ExpressionSource, OutError))
+	if (!BuildVerseExpressionActionSource(Action, BoundExpressionSource, ExpressionSource, OutError))
 	{
 		return false;
 	}
@@ -454,6 +481,89 @@ bool FVerseClauseEditing::ReplaceExpression(
 		*OutReplacementRange = FVerseTextRange(
 			Session.GetRevision(),
 			FVerseByteRange(ReplacedRange.BeginByte, ExpressionUtf8.Length()));
+	}
+	return true;
+}
+
+bool FVerseClauseEditing::AddElseExpression(
+	FVerseDocumentSession& Session,
+	FVerseTextRange IfExpressionRange,
+	EVerseClausePunctuationStyle BodyStyle,
+	const FVerseExpressionAction& Action,
+	FText& OutError,
+	FVerseTextRange* OutInsertedRange,
+	FStringView BoundExpressionSource)
+{
+	if (IfExpressionRange.Revision != Session.GetRevision()
+		|| !IfExpressionRange.IsSet())
+	{
+		OutError = LOCTEXT("InvalidMissingElseInsertion", "The if expression is no longer valid.");
+		return false;
+	}
+	FString ExpressionSource;
+	if (!BuildVerseExpressionActionSource(
+		Action, BoundExpressionSource, ExpressionSource, OutError))
+	{
+		return false;
+	}
+
+	const FUtf8StringView Source(*Session.GetCurrentUtf8(), Session.GetCurrentUtf8().Len());
+	const FString LineEnding = DetectLineEnding(Source);
+	const FString Indentation = IndentationAt(Source, IfExpressionRange.BeginByte);
+	const bool bBraces = BodyStyle == EVerseClausePunctuationStyle::Braces;
+	const FString Replacement = bBraces
+		? FString::Printf(TEXT(" else { %s }"), *ExpressionSource)
+		: LineEnding + Indentation + TEXT("else:") + LineEnding
+			+ Indentation + TEXT("    ") + ExpressionSource;
+	const int32 ExpressionOffsetCharacters = bBraces
+		? FString(TEXT(" else { ")).Len()
+		: Replacement.Len() - ExpressionSource.Len();
+	const FVerseDocumentEdit Edit = MakeEdit(
+		Session.GetRevision(),
+		FVerseByteRange(IfExpressionRange.EndByte(), 0),
+		Replacement);
+	const FUtf8String Candidate = BuildCandidate(Session, MakeArrayView(&Edit, 1), OutError);
+	if (Candidate.IsEmpty() && Session.GetCurrentUtf8().Len() != 0)
+	{
+		return false;
+	}
+	const TConstArrayView<uint8> Bytes(
+		reinterpret_cast<const uint8*>(*Candidate), Candidate.Len());
+	const TSharedPtr<const FVerseDocument> Document =
+		FVerseDocument::CreateFromBytes(Bytes, OutError);
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	const TArray<FVerseVisualTile> FileTiles = FVerseVisualTileBuilder::Build(Snapshot);
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(FileTiles, Snapshot);
+	const bool bFound = Functions.ContainsByPredicate(
+		[OpeningByte = IfExpressionRange.BeginByte](const FVerseFunctionNavigationItem& Function)
+		{
+			return FindIfWithElse(Function.GraphTiles, OpeningByte) != nullptr;
+		});
+	if (!bFound)
+	{
+		OutError = LOCTEXT(
+			"MissingElseRejected",
+			"The edit was rejected because it did not produce a valid else clause.");
+		return false;
+	}
+	if (!Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+	{
+		return false;
+	}
+	if (OutInsertedRange != nullptr)
+	{
+		const FTCHARToUTF8 PrefixUtf8(*Replacement, ExpressionOffsetCharacters);
+		const FTCHARToUTF8 ExpressionUtf8(*ExpressionSource);
+		*OutInsertedRange = FVerseTextRange(
+			Session.GetRevision(),
+			FVerseByteRange(
+				IfExpressionRange.EndByte() + PrefixUtf8.Length(),
+				ExpressionUtf8.Length()));
 	}
 	return true;
 }

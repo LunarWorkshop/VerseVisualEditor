@@ -697,6 +697,54 @@ bool BuildVerseExpressionActionSource(
 	}
 }
 
+namespace
+{
+	bool TryReplaceExpressionSource(
+		FVerseDocumentSession& Session,
+		FVerseTextRange ExpressionRange,
+		FStringView Replacement,
+		EVerseExpressionKind RequiredKind,
+		FText& OutError)
+	{
+		FUtf8String ReplacementUtf8(Replacement);
+		const FUtf8String& Current = Session.GetCurrentUtf8();
+		FUtf8String Candidate;
+		Candidate.Append(FUtf8StringView(*Current, ExpressionRange.BeginByte));
+		Candidate.Append(ReplacementUtf8);
+		Candidate.Append(FUtf8StringView(
+			*Current + ExpressionRange.EndByte(),
+			Current.Len() - ExpressionRange.EndByte()));
+		const TConstArrayView<uint8> CandidateBytes(
+			reinterpret_cast<const uint8*>(*Candidate), Candidate.Len());
+		TSharedPtr<const FVerseDocument> CandidateDocument =
+			FVerseDocument::CreateFromBytes(CandidateBytes, OutError);
+		if (!CandidateDocument.IsValid())
+		{
+			return false;
+		}
+		const FVerseParseSnapshot CandidateSnapshot =
+			FVerseParseSnapshotBuilder::Build(CandidateDocument.ToSharedRef());
+		const TArray<FVerseVisualTile> CandidateTiles =
+			FVerseVisualTileBuilder::Build(CandidateSnapshot);
+		const TArray<FVerseFunctionNavigationItem> Functions =
+			FVerseFunctionNavigationBuilder::Build(CandidateTiles, CandidateSnapshot);
+		const bool bRecognizedAtReplacement = Functions.ContainsByPredicate(
+			[&](const FVerseFunctionNavigationItem& Function)
+			{
+				return ContainsExpressionAt(
+					Function.GraphTiles, ExpressionRange.BeginByte, RequiredKind);
+			});
+		if (!bRecognizedAtReplacement)
+		{
+			OutError = LOCTEXT(
+				"ExpressionRejected",
+				"The expression would not produce a valid supported Verse structure.");
+			return false;
+		}
+		return Session.Replace(ExpressionRange, ReplacementUtf8, OutError);
+	}
+}
+
 bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
@@ -729,36 +777,66 @@ bool TryApplyVerseExpressionAction(
 	default: break;
 	}
 
-	FUtf8String ReplacementUtf8(Replacement);
-	const FUtf8String& Current = Session.GetCurrentUtf8();
-	FUtf8String Candidate;
-	Candidate.Append(FUtf8StringView(*Current, ExpressionRange.BeginByte));
-	Candidate.Append(ReplacementUtf8);
-	Candidate.Append(FUtf8StringView(
-		*Current + ExpressionRange.EndByte(),
-		Current.Len() - ExpressionRange.EndByte()));
-	const TConstArrayView<uint8> CandidateBytes(
-		reinterpret_cast<const uint8*>(*Candidate), Candidate.Len());
-	TSharedPtr<const FVerseDocument> CandidateDocument = FVerseDocument::CreateFromBytes(CandidateBytes, OutError);
-	if (!CandidateDocument.IsValid())
+	return TryReplaceExpressionSource(
+		Session, ExpressionRange, Replacement, RequiredKind, OutError);
+}
+
+bool TryMaterializeVerseNamedInput(
+	FVerseDocumentSession& Session,
+	FVerseTextRange CallRange,
+	FStringView InputName,
+	const FVerseExpressionAction& Action,
+	FText& OutError)
+{
+	if (CallRange.Revision != Session.GetRevision()
+		|| InputName.TrimStartAndEnd().IsEmpty())
+	{
+		OutError = LOCTEXT(
+			"InvalidNamedInputMaterialization",
+			"The omitted named input is no longer valid.");
+		return false;
+	}
+	FString ProviderSource;
+	if (!BuildVerseExpressionActionSource(
+		Action, FStringView(), ProviderSource, OutError))
 	{
 		return false;
 	}
-	const FVerseParseSnapshot CandidateSnapshot = FVerseParseSnapshotBuilder::Build(CandidateDocument.ToSharedRef());
-	const TArray<FVerseVisualTile> CandidateTiles = FVerseVisualTileBuilder::Build(CandidateSnapshot);
-	const TArray<FVerseFunctionNavigationItem> Functions = FVerseFunctionNavigationBuilder::Build(
-		CandidateTiles, CandidateSnapshot);
-	const bool bRecognizedAtReplacement = Functions.ContainsByPredicate(
-		[&](const FVerseFunctionNavigationItem& Function)
-		{
-			return ContainsExpressionAt(Function.GraphTiles, ExpressionRange.BeginByte, RequiredKind);
-		});
-	if (!bRecognizedAtReplacement)
+	const TSharedRef<const FVerseDocument> Document =
+		Session.GetParseSnapshot().GetDocument();
+	FString CallSource = Document->DecodeOriginalRange(CallRange).TrimStartAndEnd();
+	int32 ClosingIndex = CallSource.Len() - 1;
+	while (ClosingIndex >= 0 && FChar::IsWhitespace(CallSource[ClosingIndex]))
 	{
-		OutError = LOCTEXT("ExpressionRejected", "The expression would not produce a valid supported Verse structure.");
+		--ClosingIndex;
+	}
+	if (ClosingIndex < 0
+		|| (CallSource[ClosingIndex] != TEXT(')')
+			&& CallSource[ClosingIndex] != TEXT(']')))
+	{
+		OutError = LOCTEXT(
+			"MissingCallDelimiterForNamedInput",
+			"The call's closing delimiter could not be found.");
 		return false;
 	}
-	return Session.Replace(ExpressionRange, ReplacementUtf8, OutError);
+	const int32 OpeningIndex = CallSource.Find(
+		CallSource[ClosingIndex] == TEXT(')') ? TEXT("(") : TEXT("["));
+	const bool bHasArguments = OpeningIndex != INDEX_NONE
+		&& !CallSource.Mid(OpeningIndex + 1, ClosingIndex - OpeningIndex - 1)
+			.TrimStartAndEnd().IsEmpty();
+	const FString Argument = FString::Printf(
+		TEXT("?%s := %s"),
+		*FString(InputName).TrimStartAndEnd(),
+		*ProviderSource);
+	CallSource.InsertAt(
+		ClosingIndex,
+		(bHasArguments ? TEXT(", ") : TEXT("")) + Argument);
+	return TryReplaceExpressionSource(
+		Session,
+		CallRange,
+		CallSource,
+		EVerseExpressionKind::Call,
+		OutError);
 }
 
 #undef LOCTEXT_NAMESPACE

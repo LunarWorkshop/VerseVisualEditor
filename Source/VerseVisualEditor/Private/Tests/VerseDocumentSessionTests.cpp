@@ -521,6 +521,157 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseSocketSourceEditingTest,
+	"VerseVisualEditor.Prototype.Functions.SocketSourceEditing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseSocketSourceEditingTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	auto FindFunctionGraph = [](FVerseDocumentSession& Session)
+	{
+		const FVerseVisualTile* Function = Session.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		return Function != nullptr
+			? FVerseVisualTileBuilder::BuildFunctionGraph(
+				*Function, Session.GetParseSnapshot())
+			: TArray<FVerseVisualTile>();
+	};
+
+	const TSharedPtr<FVerseDocument> BranchDocument = MakeDocument(*this, UTF8TEXTVIEW(
+		"Branch(Input : int)<computes> : void =\n"
+		"    if (Input > 0):\n"
+		"        Input\n"));
+	if (!BranchDocument.IsValid())
+	{
+		return false;
+	}
+	FVerseDocumentSession BranchSession(BranchDocument.ToSharedRef());
+	TArray<FVerseVisualTile> BranchGraph = FindFunctionGraph(BranchSession);
+	const FVerseVisualTile* IfTile = BranchGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	const FVerseVisualSocketId TrueSocket{
+		EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution, 1};
+	const FVerseVisualSocketId FalseSocket{
+		EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Execution, 2};
+	if (!TestNotNull(TEXT("If without else is represented"), IfTile))
+	{
+		return false;
+	}
+	TestTrue(TEXT("True branch home plate owns its body insertion target"),
+		IfTile->FindSocketInsertionTarget(TrueSocket) != nullptr
+		&& IfTile->FindSocketInsertionTarget(TrueSocket)->Kind
+			== EVerseVisualSocketInsertionKind::Clause);
+	const FVerseVisualSocketInsertionTarget* MissingElse =
+		IfTile->FindSocketInsertionTarget(FalseSocket);
+	if (!TestTrue(TEXT("False branch home plate can create a missing else clause"),
+		MissingElse != nullptr
+		&& MissingElse->Kind == EVerseVisualSocketInsertionKind::MissingElseClause))
+	{
+		return false;
+	}
+	FVerseExpressionAction ElseAction;
+	ElseAction.SourceForm = EVerseExpressionSourceForm::Literal;
+	ElseAction.SourceSpelling = TEXT("0");
+	FText Error;
+	TestTrue(*FString::Printf(TEXT("False branch insertion succeeds: %s"), *Error.ToString()),
+		FVerseClauseEditing::AddElseExpression(
+			BranchSession,
+			MissingElse->OwnerExpressionRange,
+			MissingElse->Clause.PunctuationStyle,
+			ElseAction,
+			Error));
+	TestTrue(TEXT("False branch insertion writes an else body"),
+		FString(UTF8_TO_TCHAR(*BranchSession.GetCurrentUtf8())).Contains(
+			TEXT("else:\n        0")));
+	BranchGraph = FindFunctionGraph(BranchSession);
+	IfTile = BranchGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	TestTrue(TEXT("Reparsed false home plate targets the real else clause"),
+		IfTile != nullptr
+		&& IfTile->FindSocketInsertionTarget(FalseSocket) != nullptr
+		&& IfTile->FindSocketInsertionTarget(FalseSocket)->Kind
+			== EVerseVisualSocketInsertionKind::Clause);
+
+	const TSharedPtr<FVerseDocument> PredicateDocument = MakeDocument(*this, UTF8TEXTVIEW(
+		"Predicate(Maybe : ?int)<decides><computes> : void =\n"
+		"    if (Value := Maybe?):\n"
+		"        false?\n"));
+	if (!PredicateDocument.IsValid())
+	{
+		return false;
+	}
+	FVerseDocumentSession PredicateSession(PredicateDocument.ToSharedRef());
+	TArray<FVerseVisualTile> PredicateGraph = FindFunctionGraph(PredicateSession);
+	const FVerseVisualTile* PredicateIf = PredicateGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	const FVerseVisualTile* Failable = PredicateIf != nullptr
+		? PredicateIf->Children.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == EVerseVisualTileKind::FailableBlock;
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("Predicate exposes its failable context"), Failable)
+		|| !TestTrue(TEXT("Predicate starts with one definition"),
+			Failable->Children.Num() == 1))
+	{
+		return false;
+	}
+	const FVerseVisualTile& Definition = Failable->Children[0];
+	if (!TestTrue(TEXT("Definition binding output owns an after-definition insertion target"),
+		!Definition.GetValueOutputs().IsEmpty()
+		&& Definition.FindSocketInsertionTarget(Definition.GetValueOutputs()[0].Id) != nullptr))
+	{
+		return false;
+	}
+	const FVerseVisualSocketInsertionTarget* AfterDefinition =
+		Definition.FindSocketInsertionTarget(Definition.GetValueOutputs()[0].Id);
+	FVerseExpressionAction Consumer;
+	Consumer.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+	Consumer.SourceSpelling = TEXT("=");
+	Consumer.InputDefaultSources = {TEXT("0"), TEXT("0")};
+	Consumer.BoundInputIndex = 0;
+	TestTrue(*FString::Printf(TEXT("Binding-output insertion succeeds: %s"), *Error.ToString()),
+		FVerseClauseEditing::InsertExpression(
+			PredicateSession,
+			AfterDefinition->Clause,
+			AfterDefinition->InsertIndex,
+			Consumer,
+			Error,
+			nullptr,
+			TEXT("Value")));
+	PredicateGraph = FindFunctionGraph(PredicateSession);
+	PredicateIf = PredicateGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	Failable = PredicateIf != nullptr
+		? PredicateIf->Children.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == EVerseVisualTileKind::FailableBlock;
+			})
+		: nullptr;
+	TestTrue(TEXT("The failable context expands around the inserted consumer"),
+		Failable != nullptr && Failable->Children.Num() == 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseDocumentSessionSaveTest,
 	"VerseVisualEditor.Foundation.DocumentSession.Save",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -16,7 +16,18 @@ public:
 		int32 InsertIndex,
 		const FVerseExpressionAction& Action,
 		FText& OutError,
-		FVerseTextRange* OutInsertedRange = nullptr);
+		FVerseTextRange* OutInsertedRange = nullptr,
+		FStringView BoundExpressionSource = {});
+
+	/** Adds an else clause containing one expression to an if which has none. */
+	static bool AddElseExpression(
+		FVerseDocumentSession& Session,
+		FVerseTextRange IfExpressionRange,
+		EVerseClausePunctuationStyle BodyStyle,
+		const FVerseExpressionAction& Action,
+		FText& OutError,
+		FVerseTextRange* OutInsertedRange = nullptr,
+		FStringView BoundExpressionSource = {});
 
 	static bool ReplaceExpression(
 		FVerseDocumentSession& Session,

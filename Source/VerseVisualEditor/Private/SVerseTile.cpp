@@ -424,6 +424,20 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			0};
 		if (Tile.FindSocket(ClauseInsertionId) != nullptr)
 		{
+			const FVerseVisualSocketInsertionTarget* InsertionTarget =
+				Tile.FindSocketInsertionTarget(ClauseInsertionId);
+			TOptional<FVerseVisualClauseDescriptor> InsertionClause;
+			EVerseVisualSocketInsertionKind InsertionKind =
+				EVerseVisualSocketInsertionKind::Clause;
+			FVerseTextRange InsertionOwnerRange;
+			int32 InsertionIndex = INDEX_NONE;
+			if (InsertionTarget != nullptr)
+			{
+				InsertionClause = InsertionTarget->Clause;
+				InsertionKind = InsertionTarget->Kind;
+				InsertionOwnerRange = InsertionTarget->OwnerExpressionRange;
+				InsertionIndex = InsertionTarget->InsertIndex;
+			}
 			const TSharedRef<SVerseTileExecutionPin> EntryPin =
 				SNew(SVerseTileExecutionPin)
 				.Input(false)
@@ -445,7 +459,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					TSharedPtr<SWidget>(EntryPin),
 					GetVerseExecutionPinAnchorCoordinate(false, true),
 					ClauseInsertionId,
-					0)
+					InsertionClause,
+					InsertionKind,
+					InsertionOwnerRange,
+					InsertionIndex)
 				[
 					EntryPin
 				]
@@ -694,19 +711,26 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		TSharedRef<SHorizontalBox> OutputRow = SNew(SHorizontalBox);
 		for (int32 OutputIndex = 0; OutputIndex < OutputCount; ++OutputIndex)
 		{
-			int32 ClauseInsertionIndex = INDEX_NONE;
-			if (OutputIndex == 0 && Tile.EditableClause.IsSet())
-			{
-				ClauseInsertionIndex = Tile.ClauseItemIndex == INDEX_NONE
-					? 0
-					: Tile.ClauseItemIndex + 1;
-			}
 			const float OutputColumnWidth = OutputIndex == 0 ? 72.0f : 64.0f;
 			const FVerseVisualSocketId OutputId{
 				EVerseVisualSocketDirection::Output,
 				EVerseVisualSocketRole::Execution,
 				OutputIndex};
 			const bool bConnected = ConnectedSockets.Contains(OutputId);
+			const FVerseVisualSocketInsertionTarget* InsertionTarget =
+				Tile.FindSocketInsertionTarget(OutputId);
+			TOptional<FVerseVisualClauseDescriptor> InsertionClause;
+			EVerseVisualSocketInsertionKind InsertionKind =
+				EVerseVisualSocketInsertionKind::Clause;
+			FVerseTextRange InsertionOwnerRange;
+			int32 InsertionIndex = INDEX_NONE;
+			if (InsertionTarget != nullptr)
+			{
+				InsertionClause = InsertionTarget->Clause;
+				InsertionKind = InsertionTarget->Kind;
+				InsertionOwnerRange = InsertionTarget->OwnerExpressionRange;
+				InsertionIndex = InsertionTarget->InsertIndex;
+			}
 			const TSharedRef<SVerseTileExecutionPin> OutputAnchor =
 				SNew(SVerseTileExecutionPin)
 				.Input(false)
@@ -749,7 +773,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 								false,
 								bCompactExecutionSpacing),
 							OutputId,
-							ClauseInsertionIndex)
+							InsertionClause,
+							InsertionKind,
+							InsertionOwnerRange,
+							InsertionIndex)
 						[
 							OutputAnchor
 						]
@@ -1086,12 +1113,7 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	bool bOutput,
 	int32 SocketIndex)
 {
-	const bool bDraggableStatementOutput = bOutput
-		&& Tile.Kind == EVerseVisualTileKind::Expression
-		&& Tile.FindSocket({EVerseVisualSocketDirection::Input,
-			EVerseVisualSocketRole::Execution, 0}) != nullptr;
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
-		|| !bDraggableStatementOutput
 		|| !OnSocketDragStarted.IsBound())
 	{
 		return FReply::Unhandled();
@@ -1101,6 +1123,43 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	DragStart.Endpoint = {Tile.Id, Socket.Id};
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.TileRange = Tile.Range;
+	if (!bOutput)
+	{
+		if (Socket.InlineLiteralRange.IsSet())
+		{
+			DragStart.TileRange = Socket.InlineLiteralRange;
+		}
+		else if (Tile.Children.IsValidIndex(SocketIndex))
+		{
+			DragStart.TileRange = Tile.Children[SocketIndex].Range;
+		}
+		else if (Socket.bUsesDeclaredDefault && Socket.bNamedParameter)
+		{
+			DragStart.MaterializedInputName = Socket.SemanticName;
+		}
+	}
+	else
+	{
+		if ((Tile.Kind == EVerseVisualTileKind::Definition
+				|| Tile.Kind == EVerseVisualTileKind::FunctionEntry
+				|| Socket.Id.Role == EVerseVisualSocketRole::BoundaryBinding)
+			&& Socket.NameRange.IsSet())
+		{
+			DragStart.BoundSourceRange = Socket.NameRange;
+		}
+		else
+		{
+			DragStart.BoundSourceRange = Tile.Range;
+		}
+		if (const FVerseVisualSocketInsertionTarget* Target =
+			Tile.FindSocketInsertionTarget(Socket.Id))
+		{
+			DragStart.Clause = Target->Clause;
+			DragStart.InsertionKind = Target->Kind;
+			DragStart.InsertionOwnerRange = Target->OwnerExpressionRange;
+			DragStart.ClauseInsertionIndex = Target->InsertIndex;
+		}
+	}
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = GetVerseTilePinColor(!Socket.SemanticTypeName.IsEmpty()
 		? Socket.SemanticTypeName
@@ -1129,10 +1188,13 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	TSharedPtr<SWidget> Anchor,
 	FVector2D AnchorCoordinate,
 	FVerseVisualSocketId SocketId,
+	TOptional<FVerseVisualClauseDescriptor> Clause,
+	EVerseVisualSocketInsertionKind InsertionKind,
+	FVerseTextRange InsertionOwnerRange,
 	int32 InsertIndex)
 {
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
-		|| !Tile.EditableClause.IsSet()
+		|| !Clause.IsSet()
 		|| InsertIndex == INDEX_NONE
 		|| !OnSocketDragStarted.IsBound())
 	{
@@ -1145,7 +1207,9 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	DragStart.AnchorCoordinate = AnchorCoordinate;
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.TileRange = Tile.Range;
-	DragStart.Clause = Tile.EditableClause;
+	DragStart.Clause = MoveTemp(Clause);
+	DragStart.InsertionKind = InsertionKind;
+	DragStart.InsertionOwnerRange = InsertionOwnerRange;
 	DragStart.ClauseInsertionIndex = InsertIndex;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = FLinearColor::White;

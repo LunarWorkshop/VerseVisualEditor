@@ -3018,12 +3018,22 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 	if (bClauseInsertion && SocketDrag->Clause.IsSet())
 	{
 		const FVerseVisualClauseDescriptor& Clause = SocketDrag->Clause.GetValue();
-		SearchScopeRange = !Clause.Items.IsEmpty()
-			? Clause.Items[FMath::Clamp(
+		if (SocketDrag->InsertionKind
+			== EVerseVisualSocketInsertionKind::MissingElseClause)
+		{
+			SearchScopeRange = SocketDrag->InsertionOwnerRange;
+		}
+		else if (!Clause.Items.IsEmpty())
+		{
+			SearchScopeRange = Clause.Items[FMath::Clamp(
 				SocketDrag->ClauseInsertionIndex,
 				0,
-				Clause.Items.Num() - 1)].Expression.Range
-			: Clause.InteriorRange;
+				Clause.Items.Num() - 1)].Expression.Range;
+		}
+		else
+		{
+			SearchScopeRange = Clause.InteriorRange;
+		}
 	}
 	const FVerseVisualTile* SourceTile = bClauseInsertion
 		? nullptr
@@ -3119,6 +3129,10 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	const bool bClauseInsertion = SocketDrag->Purpose
 		== FVerseSocketDragStart::EPurpose::ClauseInsertion
 		&& SocketDrag->Clause.IsSet();
+	const bool bValueInsertion = SocketDrag->Purpose
+		== FVerseSocketDragStart::EPurpose::ValueConnection
+		&& SocketDrag->bOutput
+		&& SocketDrag->Clause.IsSet();
 	const bool bReplaceProvisional = bClauseInsertion
 		&& SocketDrag->ProvisionalReplacementRange.IsSet()
 		&& SocketDrag->Clause->Items.IsValidIndex(SocketDrag->ClauseInsertionIndex)
@@ -3126,7 +3140,26 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 			== SocketDrag->ProvisionalReplacementRange.GetValue();
 	FVerseTextRange AppliedExpressionRange;
 	bool bApplied = false;
-	if (bReplaceProvisional)
+	FString BoundExpressionSource;
+	if (SocketDrag->BoundSourceRange.IsSet())
+	{
+		BoundExpressionSource = ActiveDocument->Session->GetParseSnapshot().GetDocument()
+			->DecodeOriginalRange(SocketDrag->BoundSourceRange).TrimStartAndEnd();
+	}
+	if (bClauseInsertion
+		&& SocketDrag->InsertionKind
+			== EVerseVisualSocketInsertionKind::MissingElseClause)
+	{
+		bApplied = FVerseClauseEditing::AddElseExpression(
+			*ActiveDocument->Session,
+			SocketDrag->InsertionOwnerRange,
+			SocketDrag->Clause->PunctuationStyle,
+			*Action,
+			Error,
+			&AppliedExpressionRange,
+			BoundExpressionSource);
+	}
+	else if (bReplaceProvisional)
 	{
 		bApplied = FVerseClauseEditing::ReplaceExpression(
 			*ActiveDocument->Session,
@@ -3144,7 +3177,29 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 			SocketDrag->ClauseInsertionIndex,
 			*Action,
 			Error,
-			&AppliedExpressionRange);
+			&AppliedExpressionRange,
+			BoundExpressionSource);
+	}
+	else if (bValueInsertion)
+	{
+		bApplied = FVerseClauseEditing::InsertExpression(
+			*ActiveDocument->Session,
+			SocketDrag->Clause.GetValue(),
+			SocketDrag->ClauseInsertionIndex,
+			*Action,
+			Error,
+			&AppliedExpressionRange,
+			BoundExpressionSource);
+	}
+	else if (!SocketDrag->bOutput
+		&& !SocketDrag->MaterializedInputName.IsEmpty())
+	{
+		bApplied = TryMaterializeVerseNamedInput(
+			*ActiveDocument->Session,
+			SocketDrag->TileRange,
+			SocketDrag->MaterializedInputName,
+			*Action,
+			Error);
 	}
 	else
 	{

@@ -471,6 +471,54 @@ public:
 	}
 
 private:
+	static FVerseVisualClauseDescriptor MakeClause(
+		const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+	{
+		FVerseVisualClauseDescriptor Clause;
+		Clause.InteriorRange = Region.InteriorRange;
+		Clause.OpeningPunctuationRange = Region.OpeningPunctuationRange;
+		Clause.ClosingPunctuationRange = Region.ClosingPunctuationRange;
+		Clause.PunctuationStyle = Region.PunctuationStyle;
+		Clause.EmptyBodyInsertionAnchor = Region.EmptyBodyInsertionAnchor;
+		for (const auto& Item : Region.Items)
+		{
+			FVerseVisualClauseItemDescriptor& ClauseItem =
+				Clause.Items.AddDefaulted_GetRef();
+			ClauseItem.Expression.Range = Item.ExpressionRange;
+			ClauseItem.LeadingTriviaRange = Item.LeadingTriviaRange;
+			ClauseItem.TrailingTriviaRange = Item.TrailingTriviaRange;
+			ClauseItem.Separator = Item.Separator;
+		}
+		return Clause;
+	}
+
+	static void AddInsertionTarget(
+		FVerseVisualTile& Tile,
+		FVerseVisualSocketId Socket,
+		const FVerseVisualClauseDescriptor& Clause,
+		int32 InsertIndex)
+	{
+		FVerseVisualSocketInsertionTarget& Target =
+			Tile.SocketInsertionTargets.AddDefaulted_GetRef();
+		Target.Socket = Socket;
+		Target.Clause = Clause;
+		Target.InsertIndex = InsertIndex;
+	}
+
+	static void AddMissingElseTarget(
+		FVerseVisualTile& Tile,
+		FVerseVisualSocketId Socket,
+		const FVerseVisualClauseDescriptor& BodyClause)
+	{
+		FVerseVisualSocketInsertionTarget& Target =
+			Tile.SocketInsertionTargets.AddDefaulted_GetRef();
+		Target.Socket = Socket;
+		Target.Kind = EVerseVisualSocketInsertionKind::MissingElseClause;
+		Target.Clause = BodyClause;
+		Target.OwnerExpressionRange = Tile.Range;
+		Target.InsertIndex = 0;
+	}
+
 	static FVerseVisualSocket MakeSocket(
 		EVerseVisualSocketDirection Direction,
 		EVerseVisualSocketRole Role,
@@ -556,6 +604,7 @@ private:
 		Tile.SocketTopology.ValueOutputs.Reset();
 		Tile.SocketTopology.OtherInputs.Reset();
 		Tile.SocketTopology.OtherOutputs.Reset();
+		Tile.SocketInsertionTargets.Reset();
 		for (FVerseVisualTile& Child : Tile.Children)
 		{
 			const bool bChildIsInlineLiteral =
@@ -571,12 +620,28 @@ private:
 
 		if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 		{
-			AddOther(Tile, EVerseVisualSocketDirection::Output,
-				EVerseVisualSocketRole::Execution, 0);
-			for (const FVerseVisualFunctionParameter& Parameter : Tile.FunctionParameters)
+			const FVerseVisualSocketId ExecutionOutput{
+				EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::Execution, 0};
+			AddOther(Tile, ExecutionOutput.Direction, ExecutionOutput.Role, ExecutionOutput.Index);
+			if (Tile.EditableClause.IsSet())
 			{
+				AddInsertionTarget(Tile, ExecutionOutput, Tile.EditableClause.GetValue(), 0);
+			}
+			for (int32 Index = 0; Index < Tile.FunctionParameters.Num(); ++Index)
+			{
+				const FVerseVisualFunctionParameter& Parameter = Tile.FunctionParameters[Index];
 				AddValueOutput(Tile, Parameter.TypeRange, NAME_None,
 					EVerseVisualSocketRole::Value, Parameter.NameRange);
+				if (Tile.EditableClause.IsSet())
+				{
+					AddInsertionTarget(
+						Tile,
+						{EVerseVisualSocketDirection::Output,
+							EVerseVisualSocketRole::Value, Index},
+						Tile.EditableClause.GetValue(),
+						0);
+				}
 			}
 			return;
 		}
@@ -590,8 +655,11 @@ private:
 		}
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
-			AddOther(Tile, EVerseVisualSocketDirection::Output,
-				EVerseVisualSocketRole::ClauseInsertion, 0);
+			const FVerseVisualSocketId ClauseInsertion{
+				EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::ClauseInsertion, 0};
+			AddOther(Tile, ClauseInsertion.Direction, ClauseInsertion.Role, ClauseInsertion.Index);
+			AddInsertionTarget(Tile, ClauseInsertion, Tile.BodyClause, 0);
 			AddOther(Tile, EVerseVisualSocketDirection::Output,
 				EVerseVisualSocketRole::FailureContext, 0);
 			if (Tile.bProducesValue)
@@ -614,6 +682,13 @@ private:
 				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
 				Binding.LegalConsumerScopes = Child.LegalConsumerScopes;
 				Binding.SemanticSnapshot = Child.SemanticSnapshot;
+				AddInsertionTarget(
+					Tile,
+					Binding.Id,
+					Tile.BodyClause,
+					Child.ClauseItemIndex == INDEX_NONE
+						? Tile.BodyClause.Items.Num()
+						: Child.ClauseItemIndex + 1);
 			}
 			return;
 		}
@@ -629,12 +704,60 @@ private:
 				AddOther(Tile, EVerseVisualSocketDirection::Output,
 					EVerseVisualSocketRole::Execution, Index);
 			}
+			if (Tile.EditableClause.IsSet())
+			{
+				AddInsertionTarget(
+					Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 0},
+					Tile.EditableClause.GetValue(),
+					Tile.ClauseItemIndex == INDEX_NONE ? 0 : Tile.ClauseItemIndex + 1);
+			}
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
 			AddOther(Tile, EVerseVisualSocketDirection::Input,
 				EVerseVisualSocketRole::FailureContext, 0);
+			const auto* Body = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (Body != nullptr)
+			{
+				AddInsertionTarget(
+					Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 1},
+					MakeClause(*Body),
+					0);
+			}
+			const auto* Else = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Else;
+				});
+			if (Else != nullptr)
+			{
+				AddInsertionTarget(
+					Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 2},
+					MakeClause(*Else),
+					0);
+			}
+			else
+			{
+				if (Body != nullptr)
+				{
+					AddMissingElseTarget(
+						Tile,
+						{EVerseVisualSocketDirection::Output,
+							EVerseVisualSocketRole::Execution, 2},
+						MakeClause(*Body));
+				}
+			}
 		}
 
 		if (IsVerseOperatorExpression(Tile.ExpressionKind)
@@ -704,6 +827,17 @@ private:
 			Output.SemanticDataDefinition = Tile.SemanticDataDefinition;
 			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
 			Output.SemanticSnapshot = Tile.SemanticSnapshot;
+			if (Tile.Kind == EVerseVisualTileKind::Definition
+				&& Tile.EditableClause.IsSet())
+			{
+				AddInsertionTarget(
+					Tile,
+					Output.Id,
+					Tile.EditableClause.GetValue(),
+					Tile.ClauseItemIndex == INDEX_NONE
+						? Tile.EditableClause->Items.Num()
+						: Tile.ClauseItemIndex + 1);
+			}
 		}
 	}
 };
@@ -1062,6 +1196,26 @@ bool FVerseVisualTileBuilder::ValidateConnections(
 					}
 					SocketIds.Add(Socket.Id);
 				}
+			}
+			TSet<FVerseVisualSocketId> InsertionSockets;
+			for (const FVerseVisualSocketInsertionTarget& Target :
+				Tile.SocketInsertionTargets)
+			{
+				const FVerseVisualSocket* Socket = Tile.FindSocket(Target.Socket);
+				if (Socket == nullptr
+					|| Socket->Id.Direction != EVerseVisualSocketDirection::Output)
+				{
+					return Fail(FString::Printf(
+						TEXT("Tile %d has an insertion target for a missing or non-output socket."),
+						Tile.Id.Value));
+				}
+				if (InsertionSockets.Contains(Target.Socket))
+				{
+					return Fail(FString::Printf(
+						TEXT("Tile %d has duplicate insertion targets for one socket."),
+						Tile.Id.Value));
+				}
+				InsertionSockets.Add(Target.Socket);
 			}
 			for (const FVerseVisualTile& Child : Tile.Children)
 			{

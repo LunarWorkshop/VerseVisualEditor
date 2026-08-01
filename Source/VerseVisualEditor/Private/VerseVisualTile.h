@@ -230,6 +230,22 @@ struct FVerseVisualClauseDescriptor
 	TArray<FVerseVisualClauseItemDescriptor> Items;
 };
 
+enum class EVerseVisualSocketInsertionKind : uint8
+{
+	Clause,
+	MissingElseClause,
+};
+
+/** Source insertion destination owned by one already-declared socket. */
+struct FVerseVisualSocketInsertionTarget
+{
+	FVerseVisualSocketId Socket;
+	EVerseVisualSocketInsertionKind Kind = EVerseVisualSocketInsertionKind::Clause;
+	FVerseVisualClauseDescriptor Clause;
+	FVerseTextRange OwnerExpressionRange;
+	int32 InsertIndex = INDEX_NONE;
+};
+
 struct FVerseVisualFunctionParameter
 {
 	FVerseTextRange Range;
@@ -281,11 +297,21 @@ struct FVerseVisualTile
 	TArray<FVerseVisualExpressionDescriptor::FControlRegion> ControlRegions;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
 	FVerseVisualSocketTopology SocketTopology;
+	TArray<FVerseVisualSocketInsertionTarget> SocketInsertionTargets;
 	TConstArrayView<FVerseVisualSocket> GetValueInputs() const { return SocketTopology.GetValueInputs(); }
 	TConstArrayView<FVerseVisualSocket> GetValueOutputs() const { return SocketTopology.GetValueOutputs(); }
 	const FVerseVisualSocket* FindSocket(FVerseVisualSocketId SocketId) const
 	{
 		return SocketTopology.Find(SocketId);
+	}
+	const FVerseVisualSocketInsertionTarget* FindSocketInsertionTarget(
+		FVerseVisualSocketId SocketId) const
+	{
+		return SocketInsertionTargets.FindByPredicate(
+			[SocketId](const FVerseVisualSocketInsertionTarget& Target)
+			{
+				return Target.Socket == SocketId;
+			});
 	}
 	/** Ordered clause containing this statement-level tile, when directly editable. */
 	TOptional<FVerseVisualClauseDescriptor> EditableClause;

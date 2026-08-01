@@ -35,8 +35,15 @@ struct FVerseSocketDragStart
 	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVerseTextRange TileRange;
 	TOptional<FVerseVisualClauseDescriptor> Clause;
+	EVerseVisualSocketInsertionKind InsertionKind =
+		EVerseVisualSocketInsertionKind::Clause;
+	FVerseTextRange InsertionOwnerRange;
 	/** Existing provisional clause item replaced by this insertion gesture, if any. */
 	TOptional<FVerseTextRange> ProvisionalReplacementRange;
+	/** Value expression represented by an output binding or parameter socket. */
+	FVerseTextRange BoundSourceRange;
+	/** Omitted named/default input which must be materialized in its call. */
+	FString MaterializedInputName;
 	FVerseDesktopPoint DesktopPosition;
 	FLinearColor WireColor = FLinearColor::White;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
@@ -129,6 +136,9 @@ private:
 		TSharedPtr<SWidget> Anchor,
 		FVector2D AnchorCoordinate,
 		FVerseVisualSocketId SocketId,
+		TOptional<FVerseVisualClauseDescriptor> Clause,
+		EVerseVisualSocketInsertionKind InsertionKind,
+		FVerseTextRange InsertionOwnerRange,
 		int32 InsertIndex);
 	FText Decode(FVerseByteRange Range) const;
 	FText GetKindText() const;
