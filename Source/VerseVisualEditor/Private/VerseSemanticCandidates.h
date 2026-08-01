@@ -7,6 +7,7 @@
 class FVerseDocument;
 class FVerseSemanticSnapshot;
 struct FVerseVisualTile;
+struct FVerseVisualSocket;
 
 namespace uLang
 {
@@ -45,7 +46,8 @@ public:
 		const FString& FilePath,
 		int32 ExpressionBeginByte,
 		bool bDraggingFromOutput,
-		const FVerseDocument& Document);
+		const FVerseDocument& Document,
+		const FVerseVisualSocket* DraggedSocket = nullptr);
 	/** Returns every source-creatable expression visible at an untyped clause insertion point. */
 	static TArray<FVerseSemanticCandidate> BuildAll(
 		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,

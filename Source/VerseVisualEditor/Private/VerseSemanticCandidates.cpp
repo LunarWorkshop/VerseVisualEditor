@@ -310,6 +310,7 @@ namespace
 			{
 				Tile.SemanticDataDefinition = Definition->_DataMember.Get();
 				Tile.SemanticSnapshot = Snapshot;
+				Tile.SemanticType = GetDataValueType(*Tile.SemanticDataDefinition);
 				Tile.SemanticTypeName = GetUserFacingDataType(*Tile.SemanticDataDefinition);
 				Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
 			}
@@ -347,6 +348,8 @@ namespace
 		}
 		if (const uLang::CTypeBase* ResultType = Expression->GetResultType(Program))
 		{
+			Tile.SemanticType = ResultType;
+			Tile.SemanticSnapshot = Snapshot;
 			Tile.SemanticTypeName = ToFString(ResultType->AsCode());
 			Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
@@ -432,6 +435,7 @@ namespace
 				: nullptr;
 			Tile.SemanticInputNames.Reset();
 			Tile.SemanticInputTypeNames.Reset();
+			Tile.SemanticInputTypes.Reset();
 			Tile.SemanticInputNamed.Reset();
 			Tile.SemanticInputHasDefault.Reset();
 			for (int32 Index = 0; Index < Params.Num(); ++Index)
@@ -448,12 +452,15 @@ namespace
 					? ToFString(NameDefinition->AsNameStringView())
 					: FString());
 				Tile.SemanticInputTypeNames.Add(ToFString(Params[Index]->AsCode()));
+				Tile.SemanticInputTypes.Add(Params[Index]);
 				Tile.SemanticInputNamed.Add(Param != nullptr && Param->_bNamed);
 				Tile.SemanticInputHasDefault.Add(
 					Param != nullptr && Param->GetAstNode() != nullptr
 						&& Param->GetAstNode()->Value());
 			}
 			Tile.SemanticTypeName = ToFString(FunctionType->GetReturnType().AsCode());
+			Tile.SemanticType = &FunctionType->GetReturnType();
+			Tile.SemanticSnapshot = Snapshot;
 			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 			{
 				Tile.bProducesValue = false;
@@ -620,7 +627,11 @@ namespace
 
 		if (!bDraggingFromOutput)
 		{
-			if (!uLang::SemanticTypeUtils::IsSubtype(
+			// A provider search is overload resolution with the socket as the
+			// expected negative type. Matches constrains freshly instantiated
+			// generic return variables (for example operator'+' t -> t) while a
+			// plain subtype query rejects them before t can become float/int/etc.
+			if (!uLang::SemanticTypeUtils::Matches(
 				&FunctionType->GetReturnType(), &SocketType, UploadedVersion))
 			{
 				return;
@@ -687,7 +698,8 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 	const FString& FilePath,
 	int32 ExpressionBeginByte,
 	bool bDraggingFromOutput,
-	const FVerseDocument& Document)
+	const FVerseDocument& Document,
+	const FVerseVisualSocket* DraggedSocket)
 {
 	TArray<FVerseSemanticCandidate> Result;
 	TSet<FString> Seen;
@@ -705,7 +717,12 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 		}
 		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
 		const uLang::CScope* ActiveScope = FindActiveScope(*Node, Program);
-		const uLang::CTypeBase* SocketType = FindExpressionType(*Node, Program);
+		const bool bSocketBelongsToSnapshot = DraggedSocket != nullptr
+			&& DraggedSocket->SemanticType != nullptr
+			&& DraggedSocket->SemanticSnapshot.Get() == Snapshot.Get();
+		const uLang::CTypeBase* SocketType = bSocketBelongsToSnapshot
+			? DraggedSocket->SemanticType
+			: FindExpressionType(*Node, Program);
 		if (ActiveScope == nullptr || SocketType == nullptr)
 		{
 			continue;

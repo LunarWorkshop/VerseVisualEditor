@@ -247,6 +247,14 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"WithDefault(Required : int, ?Optional : float = 1.0)<computes> : float = Optional\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
 		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
+		"FloatInitializer()<computes> : float =\n"
+		"    Value : float = 0.0\n"
+		"    Value\n"
+		"FloatCondition(Input : float)<computes> : float =\n"
+		"    if (Threshold : float = 0.0; Input > Threshold):\n"
+		"        Input\n"
+		"    else:\n"
+		"        0.0\n"
 		"CallAcceptInt(Input : int)<computes> : int = AcceptInt(Input)\n"
 		"CallGenericInt(Input : int)<computes> : int = Identity(Input)\n"
 		"CallGenericFloat(Input : float)<computes> : float = Identity(Input)\n"
@@ -425,6 +433,93 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			DefaultCall->GetValueInputs().Num() == 2
 			&& DefaultCall->GetValueInputs()[1].bNamedParameter
 			&& DefaultCall->GetValueInputs()[1].bUsesDeclaredDefault);
+	}
+	FVerseVisualTile* FloatDefinition = BindNamedFunction(TEXT("FloatInitializer"));
+	if (TestNotNull(TEXT("Float initializer definition binds"), FloatDefinition)
+		&& TestTrue(TEXT("Float initializer has one declared input socket"),
+			FloatDefinition->ExpressionKind == EVerseExpressionKind::Definition
+			&& FloatDefinition->GetValueInputs().Num() == 1
+			&& FloatDefinition->Children.Num() == 1))
+	{
+		const FVerseVisualSocket& FloatInput = FloatDefinition->GetValueInputs()[0];
+		TestTrue(TEXT("Input socket retains the compiler-owned declared float type"),
+			FloatInput.SemanticType != nullptr
+			&& FloatInput.SemanticTypeName == TEXT("float")
+			&& FloatInput.SemanticSnapshot == Workspace.GetLastSuccessfulSnapshot());
+		const TArray<TSharedPtr<FVerseExpressionAction>> FloatProviders =
+			FVerseExpressionActionQuery::Build(
+				{},
+				FloatInput,
+				false,
+				*ParsedDocument,
+				FloatDefinition->Children[0].Range,
+				Document.FilePath,
+				CandidateSnapshots);
+		TestTrue(TEXT("Polymorphic Add is offered as an action providing float"),
+			FloatProviders.ContainsByPredicate(
+				[](const TSharedPtr<FVerseExpressionAction>& Action)
+				{
+					return Action.IsValid()
+						&& Action->SourceForm
+							== EVerseExpressionSourceForm::InfixOperator
+						&& Action->SourceSpelling == TEXT("+")
+						&& Action->ResultTypeName == TEXT("float");
+				}));
+	}
+	FVerseFunctionNavigationItem* FloatCondition = BoundFunctions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("FloatCondition");
+		});
+	if (TestNotNull(TEXT("Failable float-definition fixture binds"), FloatCondition))
+	{
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			FloatCondition->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		const FVerseVisualTile* IfTile = FloatCondition->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ControlKind == EVerseControlKind::If;
+			});
+		const FVerseVisualTile* Failable = IfTile != nullptr
+			? IfTile->Children.FindByPredicate(
+				[](const FVerseVisualTile& Tile)
+				{
+					return Tile.Kind == EVerseVisualTileKind::FailableBlock;
+				})
+			: nullptr;
+		const FVerseVisualTile* Threshold = Failable != nullptr
+			? Failable->Children.FindByPredicate(
+				[](const FVerseVisualTile& Tile)
+				{
+					return Tile.ExpressionKind == EVerseExpressionKind::Definition;
+				})
+			: nullptr;
+		if (TestNotNull(TEXT("Float definition is inside the failable context"), Threshold)
+			&& TestTrue(TEXT("Failable definition exposes its float initializer socket"),
+				Threshold->GetValueInputs().Num() == 1
+				&& Threshold->Children.Num() == 1))
+		{
+			const TArray<TSharedPtr<FVerseExpressionAction>> Providers =
+				FVerseExpressionActionQuery::Build(
+					{},
+					Threshold->GetValueInputs()[0],
+					false,
+					*ParsedDocument,
+					Threshold->Children[0].Range,
+					Document.FilePath,
+					CandidateSnapshots);
+			TestTrue(TEXT("Failable-context float input offers Add as a provider"),
+				Providers.ContainsByPredicate(
+					[](const TSharedPtr<FVerseExpressionAction>& Action)
+					{
+						return Action.IsValid()
+							&& Action->SourceSpelling == TEXT("+")
+							&& Action->ResultTypeName == TEXT("float");
+					}));
+		}
 	}
 	TestTrue(
 		TEXT("Compiler intrinsics contribute the polymorphic Add overload for int"),

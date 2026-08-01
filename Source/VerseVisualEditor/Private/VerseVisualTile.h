@@ -11,6 +11,7 @@ namespace uLang
 	class CDataDefinition;
 	class CFunction;
 	class CScope;
+	class CTypeBase;
 }
 
 UENUM()
@@ -120,6 +121,8 @@ struct FVerseVisualSocket
 	FName IntrinsicTypeName;
 	/** Compiler-authored type spelling when an exact semantic snapshot is available. */
 	FString SemanticTypeName;
+	/** Compiler-owned expected/result type, kept alive by SemanticSnapshot. */
+	const uLang::CTypeBase* SemanticType = nullptr;
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
 	/** An omitted fixed formal parameter currently uses its declared default. */
@@ -277,8 +280,10 @@ struct FVerseVisualTile
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
+	const uLang::CTypeBase* SemanticType = nullptr;
 	TArray<FString> SemanticInputNames;
 	TArray<FString> SemanticInputTypeNames;
+	TArray<const uLang::CTypeBase*> SemanticInputTypes;
 	TArray<bool> SemanticInputNamed;
 	TArray<bool> SemanticInputHasDefault;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;

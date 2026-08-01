@@ -536,7 +536,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 			FilePath,
 			ExpressionRange.BeginByte,
 			bDraggingFromOutput,
-			Document);
+			Document,
+			&DraggedSocket);
 	for (const FVerseSemanticCandidate& Candidate : SemanticCandidates)
 	{
 		TSharedPtr<FVerseExpressionAction> Action =

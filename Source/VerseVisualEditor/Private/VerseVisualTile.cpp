@@ -667,6 +667,8 @@ private:
 				FVerseVisualSocket& Result = AddValueOutput(
 					Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
 				Result.SemanticTypeName = Tile.SemanticTypeName;
+				Result.SemanticType = Tile.SemanticType;
+				Result.SemanticSnapshot = Tile.SemanticSnapshot;
 			}
 			for (const FVerseVisualTile& Child : Tile.Children)
 			{
@@ -679,6 +681,7 @@ private:
 					Tile, Child.TypeRange, NAME_None,
 					EVerseVisualSocketRole::BoundaryBinding, Child.NameRange);
 				Binding.SemanticTypeName = Child.SemanticTypeName;
+				Binding.SemanticType = Child.SemanticType;
 				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
 				Binding.LegalConsumerScopes = Child.LegalConsumerScopes;
 				Binding.SemanticSnapshot = Child.SemanticSnapshot;
@@ -782,6 +785,11 @@ private:
 				{
 					Input.SemanticTypeName = Tile.SemanticInputTypeNames[Index];
 				}
+				if (Tile.SemanticInputTypes.IsValidIndex(Index))
+				{
+					Input.SemanticType = Tile.SemanticInputTypes[Index];
+					Input.SemanticSnapshot = Tile.SemanticSnapshot;
+				}
 				Input.bNamedParameter = Tile.SemanticInputNamed.IsValidIndex(Index)
 					&& Tile.SemanticInputNamed[Index];
 				Input.bUsesDeclaredDefault = !Tile.Children.IsValidIndex(Index)
@@ -800,6 +808,9 @@ private:
 			const FVerseVisualTile& Initializer = Tile.Children[0];
 			FVerseVisualSocket& Input = AddValueInput(
 				Tile, Tile.TypeRange, Initializer.IntrinsicTypeName);
+			Input.SemanticTypeName = Tile.SemanticTypeName;
+			Input.SemanticType = Tile.SemanticType;
+			Input.SemanticSnapshot = Tile.SemanticSnapshot;
 			if (Initializer.LiteralKind != EVerseLiteralKind::None)
 			{
 				Input.InlineLiteralRange = Initializer.Range;
@@ -809,7 +820,11 @@ private:
 		else if (Tile.ExpressionKind == EVerseExpressionKind::Identifier
 			&& Tile.bStatementLevel)
 		{
-			AddValueInput(Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
+			FVerseVisualSocket& Input =
+				AddValueInput(Tile, Tile.TypeRange, Tile.IntrinsicTypeName);
+			Input.SemanticTypeName = Tile.SemanticTypeName;
+			Input.SemanticType = Tile.SemanticType;
+			Input.SemanticSnapshot = Tile.SemanticSnapshot;
 		}
 
 		const bool bNeedsOutput = (Tile.bProducesValue
@@ -824,6 +839,7 @@ private:
 			FVerseVisualSocket& Output = AddValueOutput(
 				Tile, Tile.TypeRange, Tile.IntrinsicTypeName, Role, Tile.NameRange);
 			Output.SemanticTypeName = Tile.SemanticTypeName;
+			Output.SemanticType = Tile.SemanticType;
 			Output.SemanticDataDefinition = Tile.SemanticDataDefinition;
 			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
 			Output.SemanticSnapshot = Tile.SemanticSnapshot;
