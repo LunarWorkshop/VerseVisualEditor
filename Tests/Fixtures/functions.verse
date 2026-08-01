@@ -110,3 +110,7 @@ LocalDefinitions(Input : int)<computes> : int =
     var Total : int = Input
     Offset : int = 1
     Total + Offset
+
+OperatorInitializer(Input : int)<computes> : int =
+    Difference : int = Input - 1
+    Difference

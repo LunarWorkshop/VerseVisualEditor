@@ -722,6 +722,26 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	const FVerseVisualTile* OperatorInitializer = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("OperatorInitializer"));
+	if (TestNotNull(TEXT("Operator-initializer visual fixture exists"), OperatorInitializer))
+	{
+		const TArray<FVerseVisualTile> OperatorInitializerGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*OperatorInitializer, Snapshot);
+		if (TestTrue(TEXT("Operator initializer becomes the definition's value child"),
+			OperatorInitializerGraph.Num() == 4
+				&& OperatorInitializerGraph[1].DefinitionKind == VerseSyntaxKind::Constant
+				&& OperatorInitializerGraph[1].Children.Num() == 1))
+		{
+			const FVerseVisualTile& Subtract = OperatorInitializerGraph[1].Children[0];
+			TestTrue(TEXT("Definition reuses the operator's sole connected output socket"),
+				Subtract.ExpressionKind == EVerseExpressionKind::BinaryOperator
+					&& Subtract.OperatorSpelling == TEXT("-")
+					&& Subtract.ValueOutputs.Num() == 1
+					&& Subtract.ValueOutputs[0].bConnected);
+		}
+	}
+
 	struct FExpectedBinaryTile
 	{
 		FUtf8StringView Function;

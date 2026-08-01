@@ -483,10 +483,18 @@ namespace
 			if (!Tile.Children.IsEmpty()
 				&& Value.LiteralKind == EVerseLiteralKind::None)
 			{
-				Tile.Children[0].ValueOutputs.Add(MakeSocket(
-					Value.TypeRange.IsSet() ? Value.TypeRange : Descriptor.DeclaredTypeRange,
-					Value.IntrinsicTypeName,
-					true));
+				FVerseVisualTile& Initializer = Tile.Children[0];
+				if (Initializer.ValueOutputs.IsEmpty())
+				{
+					Initializer.ValueOutputs.Add(MakeSocket(
+						Value.TypeRange.IsSet() ? Value.TypeRange : Descriptor.DeclaredTypeRange,
+						Value.IntrinsicTypeName,
+						true));
+				}
+				else
+				{
+					Initializer.ValueOutputs[0].bConnected = true;
+				}
 			}
 		}
 		else if (Descriptor.Kind == EVerseExpressionKind::Identifier && bStatementLevel)
