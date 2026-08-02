@@ -381,6 +381,7 @@ namespace
 					ConditionRegion->PunctuationStyle;
 				FailablePredicate.BodyClause.EmptyBodyInsertionAnchor =
 					ConditionRegion->EmptyBodyInsertionAnchor;
+				FailablePredicate.BodyClause.bRequiresFailablePlaceholder = true;
 				for (int32 Offset = 0; Offset < ConditionRegion->OperandCount; ++Offset)
 				{
 					FVerseVisualTile Child =

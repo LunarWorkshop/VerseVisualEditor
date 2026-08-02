@@ -572,13 +572,38 @@ bool FVerseClauseEditing::DeleteExpression(
 	FVerseDocumentSession& Session,
 	const FVerseVisualClauseDescriptor& Clause,
 	int32 ItemIndex,
-	FText& OutError)
+	FText& OutError,
+	FVerseTextRange* OutProvisionalReplacementRange)
 {
 	if (Clause.InteriorRange.Revision != Session.GetRevision()
 		|| !Clause.Items.IsValidIndex(ItemIndex))
 	{
 		OutError = LOCTEXT("InvalidClauseDeletion", "The selected expression is no longer in this clause.");
 		return false;
+	}
+	if (OutProvisionalReplacementRange != nullptr)
+	{
+		*OutProvisionalReplacementRange = {};
+	}
+	if (Clause.bRequiresFailablePlaceholder && Clause.Items.Num() == 1)
+	{
+		static constexpr FStringView Placeholder = TEXTVIEW("true?");
+		const FVerseByteRange ReplacedRange = Clause.Items[0].Expression.Range;
+		const FVerseDocumentEdit Edit = MakeEdit(
+			Session.GetRevision(), ReplacedRange, Placeholder);
+		if (!ValidateCandidate(Session, Clause, MakeArrayView(&Edit, 1), 1, OutError)
+			|| !Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+		{
+			return false;
+		}
+		if (OutProvisionalReplacementRange != nullptr)
+		{
+			const FTCHARToUTF8 PlaceholderUtf8(Placeholder.GetData(), Placeholder.Len());
+			*OutProvisionalReplacementRange = FVerseTextRange(
+				Session.GetRevision(),
+				FVerseByteRange(ReplacedRange.BeginByte, PlaceholderUtf8.Length()));
+		}
+		return true;
 	}
 	TArray<FVerseDocumentEdit> Edits;
 	Edits.Add(MakeEdit(Session.GetRevision(), Clause.Items[ItemIndex].Expression.Range, FStringView()));

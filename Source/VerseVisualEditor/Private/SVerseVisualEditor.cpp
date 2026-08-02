@@ -3066,15 +3066,24 @@ FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 			&& Selected.ClauseItemIndex != INDEX_NONE)
 		{
 			FText Error;
+			FVerseTextRange ProvisionalReplacementRange;
 			if (!FVerseClauseEditing::DeleteExpression(
 				*ActiveDocument->Session,
 				Selected.EditableClause.GetValue(),
 				Selected.ClauseItemIndex,
-				Error))
+				Error,
+				&ProvisionalReplacementRange))
 			{
 				ActiveDocument->LoadError = Error;
 				bLocalCompilePanelOpen = true;
 				return FReply::Handled();
+			}
+			if (ProvisionalReplacementRange.IsSet())
+			{
+				ActiveDocument->ProvisionalTiles.Add(
+					ProvisionalReplacementRange,
+					ActiveDocument->Session->GetParseSnapshot().GetDocument()
+						->GetOriginalUtf8View());
 			}
 			ActiveDocument->SelectedTile.Reset();
 			ActiveDocument->LoadError = FText::GetEmpty();

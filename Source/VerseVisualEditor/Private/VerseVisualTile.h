@@ -267,6 +267,8 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange ClosingPunctuationRange;
 	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
 	FVerseTextRange EmptyBodyInsertionAnchor;
+	/** This clause must retain one source-safe failable expression. */
+	bool bRequiresFailablePlaceholder = false;
 	TArray<FVerseVisualClauseItemDescriptor> Items;
 };
 

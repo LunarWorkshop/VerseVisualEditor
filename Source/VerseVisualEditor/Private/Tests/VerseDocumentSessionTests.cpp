@@ -399,6 +399,27 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 	Predicate = FindPredicate();
 	TestTrue(TEXT("Deletion rebuilds a two-expression clause"),
 		Predicate != nullptr && Predicate->BodyClause.Items.Num() == 2);
+	if (Predicate != nullptr)
+	{
+		TestTrue(TEXT("Deleting down to one failable expression succeeds"),
+			FVerseClauseEditing::DeleteExpression(
+				Session, Predicate->BodyClause, 1, Error));
+		Predicate = FindPredicate();
+	}
+	if (TestNotNull(TEXT("The one-item predicate reparses"), Predicate))
+	{
+		FVerseTextRange ProvisionalRange;
+		TestTrue(TEXT("Deleting the final condition installs a provisional placeholder"),
+			FVerseClauseEditing::DeleteExpression(
+				Session, Predicate->BodyClause, 0, Error, &ProvisionalRange));
+		Predicate = FindPredicate();
+		TestTrue(TEXT("A failable condition never persists as an empty clause"),
+			Predicate != nullptr
+			&& Predicate->BodyClause.Items.Num() == 1
+			&& ProvisionalRange.IsSet()
+			&& Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(
+				ProvisionalRange) == TEXT("true?"));
+	}
 	TestTrue(TEXT("Unowned comment bytes survive insertion, reorder, and delete"),
 		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(
 			TEXT("<# fixed comment #>")));

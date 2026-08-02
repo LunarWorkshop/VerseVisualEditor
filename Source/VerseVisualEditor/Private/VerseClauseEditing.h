@@ -41,7 +41,8 @@ public:
 		FVerseDocumentSession& Session,
 		const FVerseVisualClauseDescriptor& Clause,
 		int32 ItemIndex,
-		FText& OutError);
+		FText& OutError,
+		FVerseTextRange* OutProvisionalReplacementRange = nullptr);
 
 	static bool ReorderExpression(
 		FVerseDocumentSession& Session,
