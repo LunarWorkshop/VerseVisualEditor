@@ -28,6 +28,13 @@ FVector2D GetVerseExecutionPinAnchorCoordinate(
 	EVerseFunctionGraphPresentation Presentation =
 		EVerseFunctionGraphPresentation::VerticalExecution);
 
+/** Desired size used by the execution-pin widget for the same presentation. */
+FVector2D GetVerseExecutionPinDesiredSize(
+	bool bInput,
+	bool bCompact,
+	EVerseFunctionGraphPresentation Presentation =
+		EVerseFunctionGraphPresentation::VerticalExecution);
+
 struct FVerseSocketDragStart
 {
 	enum class EPurpose : uint8
@@ -109,6 +116,8 @@ public:
 		SLATE_EVENT(FOnVerseClauseReordered, OnClauseReordered)
 		SLATE_ARGUMENT(TSharedPtr<SVerseGraphRenderScope>, BodyRenderScope)
 		SLATE_ARGUMENT(TSharedPtr<SVerseGraphRenderScope>, OwningRenderScope)
+		/** Desired X center of a failable block's top insertion pin in body-local space. */
+		SLATE_ARGUMENT(TOptional<float>, ClauseInsertionBodySpineX)
 		SLATE_NAMED_SLOT(FArguments, BodyContent)
 	SLATE_END_ARGS()
 

@@ -106,6 +106,20 @@ FVector2D GetVerseExecutionPinAnchorCoordinate(
 	return FVector2D(0.5f, 8.0f / (bCompact ? 20.0f : 48.0f));
 }
 
+FVector2D GetVerseExecutionPinDesiredSize(
+	bool bInput,
+	bool bCompact,
+	EVerseFunctionGraphPresentation Presentation)
+{
+	if (Presentation != EVerseFunctionGraphPresentation::VerticalExecution)
+	{
+		return FVector2D(32.0f, 24.0f);
+	}
+	return bInput
+		? FVector2D(48.0f, 32.0f)
+		: FVector2D(24.0f, bCompact ? 20.0f : 48.0f);
+}
+
 namespace
 {
 	float GetVerseGraphMajorGridWidth()
@@ -166,13 +180,7 @@ namespace
 
 		virtual FVector2D ComputeDesiredSize(float) const override
 		{
-			if (Presentation != EVerseFunctionGraphPresentation::VerticalExecution)
-			{
-				return FVector2D(32.0f, 24.0f);
-			}
-			return bInput
-				? FVector2D(48.0f, 32.0f)
-				: FVector2D(24.0f, bCompact ? 20.0f : 48.0f);
+			return GetVerseExecutionPinDesiredSize(bInput, bCompact, Presentation);
 		}
 
 		virtual int32 OnPaint(
@@ -452,14 +460,39 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		}
 		else
 		{
+			BodyContent->SlatePrepass();
+			const float BodyWidth = BodyContent->GetDesiredSize().X;
+			const float FailureChainWidth = BodyWidth + 40.0f;
+			if (EntryPinButton.IsValid())
+			{
+				EntryPinButton->SlatePrepass();
+			}
+			const float EntryPinWidth = EntryPinButton.IsValid()
+				? EntryPinButton->GetDesiredSize().X : 0.0f;
+			const float EntryPinCenterX = InArgs._ClauseInsertionBodySpineX.IsSet()
+				? 20.0f + InArgs._ClauseInsertionBodySpineX.GetValue()
+				: FailureChainWidth * 0.5f;
 			FailureChain =
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)
 				.Padding(0.0f, 0.0f, 0.0f, 4.0f)
 				[
-					EntryPinButton.IsValid()
-						? EntryPinButton.ToSharedRef()
-						: SNullWidget::NullWidget
+					SNew(SBox)
+					.WidthOverride(FailureChainWidth)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							SNew(SBox).WidthOverride(FMath::Max(
+								0.0f, EntryPinCenterX - EntryPinWidth * 0.5f))
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							EntryPinButton.IsValid()
+								? EntryPinButton.ToSharedRef()
+								: SNullWidget::NullWidget
+						]
+					]
 				]
 				+ SVerticalBox::Slot().AutoHeight()
 				.Padding(FMargin(20.0f, 20.0f, 20.0f, 28.0f))

@@ -690,7 +690,8 @@ namespace
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
 		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
 		EVerseFunctionGraphPresentation Presentation =
-			EVerseFunctionGraphPresentation::VerticalExecution)
+			EVerseFunctionGraphPresentation::VerticalExecution,
+		TOptional<float> ClauseInsertionBodySpineX = {})
 	{
 		TSet<FVerseVisualSocketId> ConnectedSockets;
 		for (const FVerseVisualConnection& Connection : ModelConnections)
@@ -795,6 +796,7 @@ namespace
 			.OnClauseReordered(OnClauseReordered)
 			.BodyRenderScope(BodyRenderScope)
 			.OwningRenderScope(OwningRenderScope)
+			.ClauseInsertionBodySpineX(ClauseInsertionBodySpineX)
 			.BodyContent()
 			[
 				Body
@@ -1076,7 +1078,10 @@ namespace
 				ModelConnections,
 				WidgetRegistry,
 				OwningRenderScope,
-				Presentation);
+				Presentation,
+				AutomaticChain.IsValid()
+					? TOptional<float>(AutomaticChain->GetExecutionSpinePosition())
+					: TOptional<float>());
 			RenderScope->SetConnections(
 				WidgetRegistry != nullptr
 					? ResolveModelConnections(

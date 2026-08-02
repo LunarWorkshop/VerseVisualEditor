@@ -23,10 +23,11 @@ namespace
 
 	float GetVerticalExecutionSpineX(const SVerseTile&)
 	{
-		// Vertical execution home plates are deliberately left-docked. Both the
-		// incoming pin and output zero (the completed path for controls) share
-		// this center, so this is the spine that must be kept straight.
-		return 16.0f;
+		const FVector2D PinSize = GetVerseExecutionPinDesiredSize(
+			true, false, EVerseFunctionGraphPresentation::VerticalExecution);
+		const FVector2D Anchor = GetVerseExecutionPinAnchorCoordinate(
+			true, false, EVerseFunctionGraphPresentation::VerticalExecution);
+		return PinSize.X * Anchor.X;
 	}
 
 	float GetHorizontalExecutionSpineY(const SVerseTile& Tile)
@@ -199,6 +200,11 @@ FVector2D SVerseStatementLayoutPanel::GetStatementPosition(int32 StatementIndex)
 		: FVector2D::ZeroVector;
 }
 
+float SVerseStatementLayoutPanel::GetExecutionSpinePosition() const
+{
+	return ComputeLayout().ExecutionSpine;
+}
+
 SVerseStatementLayoutPanel::FComputedLayout
 SVerseStatementLayoutPanel::ComputeLayout() const
 {
@@ -228,6 +234,7 @@ SVerseStatementLayoutPanel::ComputeLayout() const
 			: RootPosition.Y + GetHorizontalExecutionSpineY(*Statements[Index].Root);
 		SharedSpine = FMath::Max(SharedSpine, LocalSpine);
 	}
+	Result.ExecutionSpine = SharedSpine;
 
 	float Cursor = 0.0f;
 	for (int32 Index = 0; Index < Statements.Num(); ++Index)

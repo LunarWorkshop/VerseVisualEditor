@@ -415,8 +415,8 @@ bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
 	const FVector2D FirstPosition = Statements->GetStatementPosition(0);
 	const FVector2D SecondPosition = Statements->GetStatementPosition(1);
 	TestEqual(TEXT("Completed execution spines align"),
-		FirstPosition.X + 280.0f + 16.0f,
-		SecondPosition.X + 80.0f + 16.0f);
+		FirstPosition.X + 280.0f + 24.0f,
+		SecondPosition.X + 80.0f + 24.0f);
 	TestTrue(TEXT("A statement reserves its entire subtree before the next one"),
 		SecondPosition.Y >= FirstPosition.Y + FirstBounds->GetDesiredSize().Y + 12.0f);
 	return true;

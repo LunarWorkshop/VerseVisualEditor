@@ -86,6 +86,8 @@ public:
 		TFunction<FVector2D()> RootPosition,
 		float LeadingSpace = 0.0f);
 	FVector2D GetStatementPosition(int32 StatementIndex) const;
+	/** Cross-axis coordinate shared by primary execution sockets. */
+	float GetExecutionSpinePosition() const;
 
 	virtual void OnArrangeChildren(
 		const FGeometry& AllottedGeometry,
@@ -109,6 +111,7 @@ private:
 	{
 		TArray<FVector2D> Positions;
 		FVector2D DesiredSize = FVector2D::ZeroVector;
+		float ExecutionSpine = 0.0f;
 	};
 
 	FComputedLayout ComputeLayout() const;
