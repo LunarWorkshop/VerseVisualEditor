@@ -346,11 +346,15 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 	}
 	const int32 InnerScopeBeginByte =
 		SourceView.Find(UTF8TEXTVIEW("        Inner\n    Outer"));
+	const int32 ConditionUseBeginByte =
+		SourceView.Find(UTF8TEXTVIEW("Inner > 0.0"));
 	const int32 OuterScopeBeginByte = InnerScopeBeginByte != INDEX_NONE
 		? InnerScopeBeginByte + UTF8TEXTVIEW("        Inner\n    ").Len()
 		: INDEX_NONE;
 	if (TestTrue(TEXT("Candidate test locates nested and enclosing statements"),
-		InnerScopeBeginByte != INDEX_NONE && OuterScopeBeginByte != INDEX_NONE))
+		InnerScopeBeginByte != INDEX_NONE
+			&& ConditionUseBeginByte != INDEX_NONE
+			&& OuterScopeBeginByte != INDEX_NONE))
 	{
 		auto HasIdentifier = [](TConstArrayView<FVerseSemanticCandidate> InCandidates,
 			uLang::CUTF8StringView Name)
@@ -367,12 +371,18 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			FVerseSemanticCandidateProvider::Build(
 				CandidateSnapshots, Document.FilePath, InnerScopeBeginByte,
 				false, *ParsedDocument);
+		const TArray<FVerseSemanticCandidate> ConditionUseCandidates =
+			FVerseSemanticCandidateProvider::Build(
+				CandidateSnapshots, Document.FilePath, ConditionUseBeginByte,
+				false, *ParsedDocument);
 		const TArray<FVerseSemanticCandidate> OuterScopeCandidates =
 			FVerseSemanticCandidateProvider::Build(
 				CandidateSnapshots, Document.FilePath, OuterScopeBeginByte,
 				false, *ParsedDocument);
 		TestTrue(TEXT("Nested statement sees identifiers introduced by its condition"),
 			HasIdentifier(InnerScopeCandidates, uLang::CUTF8StringView("Inner")));
+		TestTrue(TEXT("A later condition expression sees an earlier condition definition"),
+			HasIdentifier(ConditionUseCandidates, uLang::CUTF8StringView("Inner")));
 		TestFalse(TEXT("Condition-local identifiers do not leak past the control scope"),
 			HasIdentifier(OuterScopeCandidates, uLang::CUTF8StringView("Inner")));
 		TestTrue(TEXT("Both statements retain identifiers from their enclosing function"),
@@ -494,6 +504,28 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			BoundAdd.GetValueInputs().Num() == 2
 			&& BoundAdd.GetValueInputs()[0].SemanticTypeName == TEXT("int")
 			&& BoundAdd.GetValueInputs()[1].SemanticTypeName == TEXT("int"));
+		if (BoundAdd.GetValueInputs().Num() == 2
+			&& BoundAdd.Children.Num() == 2)
+		{
+			const TArray<TSharedPtr<FVerseExpressionAction>> IntProviders =
+				FVerseExpressionActionQuery::Build(
+					{},
+					BoundAdd.GetValueInputs()[1],
+					false,
+					*ParsedDocument,
+					BoundAdd.Children[1].Range,
+					Document.FilePath,
+					CandidateSnapshots);
+			TestTrue(TEXT("An integer literal operand can be replaced by an int identifier"),
+				IntProviders.ContainsByPredicate(
+					[](const TSharedPtr<FVerseExpressionAction>& Action)
+					{
+						return Action.IsValid()
+							&& Action->SourceForm
+								== EVerseExpressionSourceForm::IdentifierReference
+							&& Action->SourceSpelling == TEXT("Input");
+					}));
+		}
 		const TArray<FVerseOperatorSignature> AddSignatures =
 			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
 				CandidateSnapshots,
@@ -575,6 +607,28 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			ComparableFloat->GetValueInputs().Num() == 2
 			&& ComparableFloat->GetValueInputs()[0].SemanticTypeName == TEXT("float")
 			&& ComparableFloat->GetValueInputs()[1].SemanticTypeName == TEXT("float"));
+		if (ComparableFloat->GetValueInputs().Num() == 2
+			&& ComparableFloat->Children.Num() == 2)
+		{
+			const TArray<TSharedPtr<FVerseExpressionAction>> FloatProviders =
+				FVerseExpressionActionQuery::Build(
+					{},
+					ComparableFloat->GetValueInputs()[1],
+					false,
+					*ParsedDocument,
+					ComparableFloat->Children[1].Range,
+					Document.FilePath,
+					CandidateSnapshots);
+			TestTrue(TEXT("A float literal operand can be replaced by a float identifier"),
+				FloatProviders.ContainsByPredicate(
+					[](const TSharedPtr<FVerseExpressionAction>& Action)
+					{
+						return Action.IsValid()
+							&& Action->SourceForm
+								== EVerseExpressionSourceForm::IdentifierReference
+							&& Action->SourceSpelling == TEXT("Input");
+					}));
+		}
 		const TArray<FVerseOperatorSignature> Signatures =
 			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
 				CandidateSnapshots,
@@ -797,6 +851,62 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 						return Action.IsValid()
 							&& Action->SourceSpelling == TEXT("+")
 							&& Action->ResultTypeName == TEXT("float");
+					}));
+		}
+	}
+	FVerseFunctionNavigationItem* ScopedVisibility = BoundFunctions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("ScopedVisibility");
+		});
+	if (TestNotNull(TEXT("Scoped visibility fixture binds"), ScopedVisibility))
+	{
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			ScopedVisibility->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		const FVerseVisualTile* IfTile = ScopedVisibility->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ControlKind == EVerseControlKind::If;
+			});
+		const FVerseVisualTile* Failable = IfTile != nullptr
+			? IfTile->Children.FindByPredicate(
+				[](const FVerseVisualTile& Tile)
+				{
+					return Tile.Kind == EVerseVisualTileKind::FailableBlock;
+				})
+			: nullptr;
+		const FVerseVisualTile* Comparison = Failable != nullptr
+			? Failable->Children.FindByPredicate(
+				[](const FVerseVisualTile& Tile)
+				{
+					return Tile.OperatorSpelling == TEXT(">");
+				})
+			: nullptr;
+		if (TestNotNull(TEXT("Scoped comparison follows its local definition"), Comparison)
+			&& TestTrue(TEXT("Scoped comparison retains its literal operand socket"),
+				Comparison->GetValueInputs().Num() == 2
+				&& Comparison->Children.Num() == 2))
+		{
+			const TArray<TSharedPtr<FVerseExpressionAction>> Providers =
+				FVerseExpressionActionQuery::Build(
+					{},
+					Comparison->GetValueInputs()[1],
+					false,
+					*ParsedDocument,
+					Comparison->Children[1].Range,
+					Document.FilePath,
+					CandidateSnapshots);
+			TestTrue(TEXT("A comparison literal can be replaced by its condition-local float"),
+				Providers.ContainsByPredicate(
+					[](const TSharedPtr<FVerseExpressionAction>& Action)
+					{
+						return Action.IsValid()
+							&& Action->SourceForm
+								== EVerseExpressionSourceForm::IdentifierReference
+							&& Action->SourceSpelling == TEXT("Inner");
 					}));
 		}
 	}

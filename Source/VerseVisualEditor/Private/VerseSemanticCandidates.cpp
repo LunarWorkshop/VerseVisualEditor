@@ -145,19 +145,99 @@ namespace
 		const Verse::Vst::Node& Node,
 		const uLang::CSemanticProgram& Program)
 	{
+		const uLang::STextPosition TargetPosition = Node.Whence().GetBegin();
+		const uLang::CUTF8StringView TargetPath = Node.GetSnippetPath();
+		const uLang::CAstNode* SearchRoot = nullptr;
+		const uLang::CScope* VstScope = nullptr;
 		for (const Verse::Vst::Node* Current = &Node;
 			Current != nullptr;
 			Current = Current->GetParent())
 		{
 			if (const uLang::CAstNode* Ast = Current->GetMappedAstNode())
 			{
-				if (const uLang::CScope* Scope = ScopeFromAst(*Ast, Program))
+				if (VstScope == nullptr)
 				{
-					return Scope;
+					VstScope = ScopeFromAst(*Ast, Program);
+				}
+				SearchRoot = Ast;
+				if (Ast->GetNodeType() == uLang::EAstNodeType::Definition_Function)
+				{
+					break;
 				}
 			}
 		}
-		return nullptr;
+		if (VstScope != nullptr && VstScope->IsControlScope())
+		{
+			return VstScope;
+		}
+
+		// Synthetic Verse code blocks (notably an if's failable condition) own
+		// real compiler scopes but are mapped non-reciprocally: walking only VST
+		// parents skips them. Search the containing function AST and select the
+		// deepest scope whose children contain this source position.
+		if (SearchRoot != nullptr)
+		{
+			struct FScopeSearchResult
+			{
+				const uLang::CScope* Scope = nullptr;
+				int32 ScopeDepth = INDEX_NONE;
+				bool bContainsTarget = false;
+			};
+			TSet<const uLang::CAstNode*> Visited;
+			TFunction<FScopeSearchResult(const uLang::CAstNode&, int32)> Search;
+			Search = [&](const uLang::CAstNode& Ast, int32 Depth)
+			{
+				FScopeSearchResult Result;
+				if (Visited.Contains(&Ast))
+				{
+					return Result;
+				}
+				Visited.Add(&Ast);
+
+				Ast.VisitChildrenLambda(
+					[&](uLang::SAstVisitor&, uLang::CAstNode& Child)
+					{
+						const FScopeSearchResult ChildResult = Search(Child, Depth + 1);
+						Result.bContainsTarget |= ChildResult.bContainsTarget;
+						if (ChildResult.Scope != nullptr
+							&& ChildResult.ScopeDepth > Result.ScopeDepth)
+						{
+							Result.Scope = ChildResult.Scope;
+							Result.ScopeDepth = ChildResult.ScopeDepth;
+						}
+					});
+
+				// A code block's own non-reciprocal mapping can cover the whole macro,
+				// including sibling clauses. Its precise containment comes from its
+				// children; ordinary AST nodes may use their own source locus.
+				if (Ast.GetNodeType() != uLang::EAstNodeType::Flow_CodeBlock)
+				{
+					if (const Verse::Vst::Node* Mapped = Ast.GetMappedVstNode())
+					{
+						Result.bContainsTarget |= Mapped->GetSnippetPath() == TargetPath
+							&& Mapped->Whence().IsInRangeInclusive(TargetPosition);
+					}
+				}
+				if (Result.bContainsTarget)
+				{
+					if (const uLang::CScope* Scope = ScopeFromAst(Ast, Program);
+						Scope != nullptr && Depth > Result.ScopeDepth)
+					{
+						Result.Scope = Scope;
+						Result.ScopeDepth = Depth;
+					}
+				}
+				return Result;
+			};
+
+			const FScopeSearchResult AstResult = Search(*SearchRoot, 0);
+			if (AstResult.Scope != nullptr)
+			{
+				return AstResult.Scope;
+			}
+		}
+
+		return VstScope;
 	}
 
 	const uLang::CTypeBase* FindExpressionType(
@@ -802,6 +882,23 @@ TArray<FVerseSemanticCandidate> FVerseSemanticCandidateProvider::Build(
 		const uLang::CTypeBase* SocketType = bSocketBelongsToSnapshot
 			? DraggedSocket->SemanticType
 			: FindExpressionType(*Node, Program);
+		// A numeric literal expression has a singleton compiler result such as
+		// type{0.0}. When its parent input socket is being replaced, candidates
+		// must match the full primitive operand type rather than that one value.
+		if (DraggedSocket != nullptr)
+		{
+			switch (DraggedSocket->InlineLiteralKind)
+			{
+			case EVerseLiteralKind::Integer:
+				SocketType = Program._intType;
+				break;
+			case EVerseLiteralKind::Float:
+				SocketType = Program._floatType;
+				break;
+			default:
+				break;
+			}
+		}
 		if (ActiveScope == nullptr || SocketType == nullptr)
 		{
 			continue;

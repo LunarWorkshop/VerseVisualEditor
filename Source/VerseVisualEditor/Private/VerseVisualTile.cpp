@@ -1,5 +1,8 @@
 #include "VerseVisualTile.h"
 
+#include "VerseParseSnapshotBuilder.h"
+#include "uLang/Semantics/SemanticProgram.h"
+
 namespace
 {
 	bool IsWhitespace(FUtf8StringView Text)
@@ -76,6 +79,32 @@ namespace
 		case EVerseLiteralKind::Character: return TEXT("char");
 		case EVerseLiteralKind::Logic: return TEXT("logic");
 		default: return NAME_None;
+		}
+	}
+
+	const uLang::CTypeBase* GetReplaceableLiteralSocketType(
+		const FVerseVisualTile& Literal)
+	{
+		if (Literal.SemanticType == nullptr)
+		{
+			return nullptr;
+		}
+
+		// Verse assigns numeric literals singleton compiler types such as
+		// type{0.0}. That type describes the current child expression, but an
+		// input socket from which the child can be replaced accepts the owning
+		// operand's full primitive type.
+		uLang::CSemanticProgram& Program = Literal.SemanticType->GetProgram();
+		switch (Literal.LiteralKind)
+		{
+		case EVerseLiteralKind::Integer:
+			return Program._intType != nullptr
+				? Program._intType : Literal.SemanticType;
+		case EVerseLiteralKind::Float:
+			return Program._floatType != nullptr
+				? Program._floatType : Literal.SemanticType;
+		default:
+			return Literal.SemanticType;
 		}
 	}
 
@@ -787,10 +816,13 @@ private:
 				// connected expression's compiler-resolved result is the effective
 				// socket type used for color and interaction; the formal constraint
 				// remains available on the owning tile's SemanticInput* arrays.
+				// Numeric literals are the exception: their compiler result is a
+				// singleton such as type{0.0}, while this replaceable input accepts
+				// the full primitive operand type.
 				if (Child != nullptr && !Child->SemanticTypeName.IsEmpty())
 				{
 					Input.SemanticTypeName = Child->SemanticTypeName;
-					Input.SemanticType = Child->SemanticType;
+					Input.SemanticType = GetReplaceableLiteralSocketType(*Child);
 					Input.SemanticSnapshot = Child->SemanticSnapshot;
 				}
 				else if (Tile.SemanticInputTypeNames.IsValidIndex(Index))

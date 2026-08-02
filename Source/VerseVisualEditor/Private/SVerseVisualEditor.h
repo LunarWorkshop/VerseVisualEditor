@@ -7,6 +7,8 @@
 #include "VerseDocumentRevision.h"
 #include "VerseEditorFileTree.h"
 #include "VerseOutliner.h"
+#include "VerseSemanticCandidates.h"
+#include "VerseSemanticWorkspace.h"
 #include "VerseVisualEditorSettings.h"
 #include "SVerseTile.h"
 #include "VerseExpressionActions.h"
@@ -33,8 +35,6 @@ class SHorizontalBox;
 class SOverlay;
 class SSearchBox;
 class SVerticalBox;
-class FVerseSemanticWorkspace;
-
 class SVerseVisualEditor final : public SCompoundWidget
 {
 public:
@@ -218,7 +218,7 @@ private:
 	TSharedPtr<SVerticalBox> PropertyRows;
 	TArray<TSharedPtr<FString>> TypeOptions;
 	TArray<TSharedPtr<FString>> OperatorSignatureOptions;
-	TArray<struct FVerseOperatorSignature> OperatorSignatures;
+	TArray<FVerseOperatorSignature> OperatorSignatures;
 	FString PropertyFilterText;
 
 	FString WatchedDirectory;
