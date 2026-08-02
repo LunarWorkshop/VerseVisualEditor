@@ -46,6 +46,8 @@ struct FVerseIntrinsicPresentationDescriptor
 	FString UntypedDefaultSource;
 	/** Equivalent operands produce one canonical drag action rather than two. */
 	bool bSymmetricOperands = false;
+	/** The signature picker may omit a result that is not useful for choosing an overload. */
+	bool bOmitResultInSignaturePicker = false;
 	EVerseIntrinsicBlueprintLibrary BlueprintLibrary =
 		EVerseIntrinsicBlueprintLibrary::None;
 	FName BlueprintFunctionName;
@@ -76,3 +78,8 @@ FVerseResolvedExpressionPresentation ResolveVerseExpressionPresentation(
 
 /** Test-visible read-only access to validate that the private table is unambiguous. */
 TConstArrayView<FVerseIntrinsicPresentationDescriptor> GetVerseIntrinsicPresentationTable();
+
+/** Finds presentation policy using callable identity without requiring concrete types. */
+const FVerseIntrinsicPresentationDescriptor* FindVerseIntrinsicOperatorPresentation(
+	EVerseIntrinsicCallableForm Form,
+	FStringView Spelling);

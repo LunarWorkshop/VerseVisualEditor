@@ -494,6 +494,21 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			BoundAdd.GetValueInputs().Num() == 2
 			&& BoundAdd.GetValueInputs()[0].SemanticTypeName == TEXT("int")
 			&& BoundAdd.GetValueInputs()[1].SemanticTypeName == TEXT("int"));
+		const TArray<FVerseOperatorSignature> AddSignatures =
+			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+				CandidateSnapshots,
+				Document.FilePath,
+				BoundAdd.Range.BeginByte,
+				*ParsedDocument,
+				BoundAdd.OperatorSpelling,
+				2,
+				{},
+				{});
+		TestTrue(TEXT("Concrete arithmetic retains its result-bearing signature"),
+			AddSignatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("int x int -> int");
+			}));
 	}
 	FVerseFunctionNavigationItem* BoundCallFunction = BoundFunctions.FindByPredicate(
 		[](const FVerseFunctionNavigationItem& Function)
@@ -599,6 +614,39 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 					|| Signature.DisplayText.Contains(TEXT("false"))
 					|| Signature.DisplayText.Contains(TEXT("type{"));
 			}));
+		TestTrue(TEXT("Comparable presentation retains concrete results internally"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("float x float")
+					&& Signature.ResultTypeName == TEXT("float");
+			})
+			&& Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("int x int")
+					&& Signature.ResultTypeName == TEXT("int");
+			}));
+		TestFalse(TEXT("No compiler-internal type enters a resolved signature"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				auto IsInternal = [](const FString& TypeName)
+				{
+					return TypeName.Contains(TEXT("comparable"))
+						|| TypeName.Contains(TEXT("unknown"))
+						|| TypeName.Contains(TEXT("type{"));
+				};
+				return IsInternal(Signature.ResultTypeName)
+					|| Signature.OperandTypeNames.ContainsByPredicate(IsInternal);
+			}));
+		TSet<FString> ResolvedSignatureKeys;
+		for (const FVerseOperatorSignature& Signature : Signatures)
+		{
+			ResolvedSignatureKeys.Add(FString::Printf(
+				TEXT("%s -> %s"),
+				*FString::Join(Signature.OperandTypeNames, TEXT(" x ")),
+				*Signature.ResultTypeName));
+		}
+		TestEqual(TEXT("Resolved signatures are deduplicated semantically"),
+			ResolvedSignatureKeys.Num(), Signatures.Num());
 		if (TestTrue(TEXT("Comparable fixture exposes its connected left operand"),
 			ComparableFloat->Children.Num() == 2
 			&& ComparableFloat->Children[0].GetValueOutputs().Num() == 1))

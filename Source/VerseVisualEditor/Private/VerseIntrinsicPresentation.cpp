@@ -30,7 +30,8 @@ namespace
 		FText FallbackCategory,
 		std::initializer_list<int32> DefaultSourceTypeParameterIndices = {},
 		bool bSymmetricOperands = false,
-		const TCHAR* UntypedDefaultSource = nullptr)
+		const TCHAR* UntypedDefaultSource = nullptr,
+		bool bOmitResultInSignaturePicker = false)
 	{
 		FVerseIntrinsicPresentationDescriptor Result;
 		Result.Key.Form = Form;
@@ -46,6 +47,7 @@ namespace
 		Result.FallbackCategory = MoveTemp(FallbackCategory);
 		Result.DefaultSourceTypeParameterIndices = DefaultSourceTypeParameterIndices;
 		Result.bSymmetricOperands = bSymmetricOperands;
+		Result.bOmitResultInSignaturePicker = bOmitResultInSignaturePicker;
 		Result.UntypedDefaultSource = UntypedDefaultSource != nullptr
 			? UntypedDefaultSource
 			: TEXT("");
@@ -103,8 +105,8 @@ namespace
 			// operand's placeholder from its counterpart so both actions remain
 			// source-safe. The menu description and source-spelling keyword make
 			// Not Equal searchable by both `!=` and Verse's canonical `<>`.
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (!=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (!=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less (<)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal (<=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater (>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
@@ -230,6 +232,16 @@ FVerseResolvedExpressionPresentation ResolveVerseExpressionPresentation(
 TConstArrayView<FVerseIntrinsicPresentationDescriptor> GetVerseIntrinsicPresentationTable()
 {
 	return GetTable();
+}
+
+const FVerseIntrinsicPresentationDescriptor* FindVerseIntrinsicOperatorPresentation(
+	EVerseIntrinsicCallableForm Form,
+	FStringView Spelling)
+{
+	FVerseIntrinsicPresentationKey Key;
+	Key.Form = Form;
+	Key.Spelling = Spelling;
+	return FindVerseIntrinsicPresentation(Key);
 }
 
 #undef LOCTEXT_NAMESPACE

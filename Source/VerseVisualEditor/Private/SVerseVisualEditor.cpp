@@ -38,6 +38,7 @@
 #include "UnrealEdGlobals.h"
 #include "VerseDocument.h"
 #include "VerseClauseEditing.h"
+#include "VerseIntrinsicPresentation.h"
 #include "VerseDocumentSession.h"
 #include "VerseDefinitionIcon.h"
 #include "VerseExpressionActions.h"
@@ -214,11 +215,12 @@ namespace
 				? Socket.SemanticTypeName
 				: Socket.IntrinsicTypeName.ToString());
 		}
-		// Verse equality is a failable, value-producing generic operator. Its
-		// compiler return type may be a literal singleton such as type{0}, which
-		// is useful to the type checker but is not useful in the signature picker.
-		// Equality's selectable presentation is therefore just its operand types.
-		if (Tile.OperatorSpelling == TEXT("=") || Tile.OperatorSpelling == TEXT("<>"))
+		const EVerseIntrinsicCallableForm Form = Inputs.Num() == 1
+			? EVerseIntrinsicCallableForm::PrefixOperator
+			: EVerseIntrinsicCallableForm::InfixOperator;
+		const FVerseIntrinsicPresentationDescriptor* Presentation =
+			FindVerseIntrinsicOperatorPresentation(Form, Tile.OperatorSpelling);
+		if (Presentation != nullptr && Presentation->bOmitResultInSignaturePicker)
 		{
 			return FString::Join(Inputs, TEXT(" x "));
 		}

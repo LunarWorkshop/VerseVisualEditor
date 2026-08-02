@@ -2,6 +2,7 @@
 
 #include "VerseDocument.h"
 #include "VerseIdentifier.h"
+#include "VerseIntrinsicPresentation.h"
 #include "VerseSemanticWorkspace.h"
 #include "VerseVisualTile.h"
 #include "uLang/Semantics/DataDefinition.h"
@@ -18,6 +19,8 @@
 #include "uLang/Semantics/VisitSet.h"
 #include "uLang/SourceProject/UploadedAtFNVersion.h"
 #include "uLang/Syntax/VstNode.h"
+#include "Misc/ScopeLock.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -1041,7 +1044,199 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 	TConstArrayView<const FVerseVisualSocket*> OutputConsumers)
 {
 	TArray<FVerseOperatorSignature> Result;
-	TSet<FString> Seen;
+	TSet<FString> SeenSemanticSignatures;
+
+	struct FVisibleType
+	{
+		FString Name;
+		const uLang::CTypeBase* Type = nullptr;
+	};
+	struct FCachedSignatures
+	{
+		TWeakPtr<const FVerseSemanticSnapshot> Snapshot;
+		TArray<FVerseOperatorSignature> Signatures;
+	};
+	static FCriticalSection CacheMutex;
+	static TMap<FString, FCachedSignatures> Cache;
+
+	auto GetConcreteTypeName = [](
+		const uLang::CTypeBase& Type,
+		uint32 UploadedVersion) -> TOptional<FString>
+	{
+		TSet<const uLang::CTypeBase*> Visiting;
+		TFunction<TOptional<FString>(const uLang::CTypeBase&)> Format;
+		Format = [&Visiting, &Format, UploadedVersion](
+			const uLang::CTypeBase& Current) -> TOptional<FString>
+		{
+			if (Visiting.Contains(&Current))
+			{
+				return {};
+			}
+			if (const uLang::CFlowType* Flow = Current.AsFlowType())
+			{
+				const uLang::CTypeBase& Unwrapped =
+					uLang::SemanticTypeUtils::SkipIdentityFlowType(
+						Current, uLang::ETypePolarity::Positive, UploadedVersion);
+				if (&Unwrapped != &Current)
+				{
+					return Format(Unwrapped);
+				}
+
+				// AsPositive can retain a constraint-flow wrapper after inference. Its
+				// normal type is the materialized positive bound. Validate and format that
+				// bound recursively; unresolved comparable/variable/unknown bounds are
+				// rejected by the normal-type cases below.
+				return Format(Flow->GetNormalType());
+			}
+			Visiting.Add(&Current);
+			ON_SCOPE_EXIT { Visiting.Remove(&Current); };
+
+			// Preserve a source-spellable alias rather than exposing its implementation.
+			if (const uLang::CAliasType* Alias = Current.AsAliasType())
+			{
+				return Format(*Alias->GetAliasedType()).IsSet()
+					? TOptional<FString>(ToFString(Current.AsCode()))
+					: TOptional<FString>();
+			}
+			const uLang::CNormalType& Normal = Current.GetNormalType();
+			const uLang::CNormalType& Stripped =
+				uLang::SemanticTypeUtils::StripVariableAndConstraints(Normal);
+			if (&Stripped != &Normal)
+			{
+				return Format(Stripped);
+			}
+			switch (Normal.GetKind())
+			{
+			case uLang::ETypeKind::Int:
+				return FString(TEXT("int"));
+			case uLang::ETypeKind::Float:
+				return FString(TEXT("float"));
+			case uLang::ETypeKind::Array:
+			{
+				const TOptional<FString> Element = Format(
+					*Normal.AsChecked<uLang::CArrayType>().GetElementType());
+				return Element.IsSet()
+					? TOptional<FString>(TEXT("[]") + Element.GetValue())
+					: TOptional<FString>();
+			}
+			case uLang::ETypeKind::Option:
+			{
+				const TOptional<FString> Value = Format(
+					*Normal.AsChecked<uLang::COptionType>().GetValueType());
+				return Value.IsSet()
+					? TOptional<FString>(TEXT("?") + Value.GetValue())
+					: TOptional<FString>();
+			}
+			case uLang::ETypeKind::Map:
+			{
+				const uLang::CMapType& Map = Normal.AsChecked<uLang::CMapType>();
+				const TOptional<FString> Key = Format(*Map.GetKeyType());
+				const TOptional<FString> Value = Format(*Map.GetValueType());
+				return Key.IsSet() && Value.IsSet() && !Map.IsWeak()
+					? TOptional<FString>(FString::Printf(
+						TEXT("[%s]%s"), *Key.GetValue(), *Value.GetValue()))
+					: TOptional<FString>();
+			}
+			case uLang::ETypeKind::Tuple:
+			{
+				const uLang::CTupleType& Tuple = Normal.AsChecked<uLang::CTupleType>();
+				if (Tuple.GetFirstNamedIndex() != Tuple.Num())
+				{
+					return {};
+				}
+				TArray<FString> Elements;
+				for (const uLang::CTypeBase* ElementType : Tuple.GetElements())
+				{
+					const TOptional<FString> Element = ElementType
+						? Format(*ElementType) : TOptional<FString>();
+					if (!Element.IsSet())
+					{
+						return {};
+					}
+					Elements.Add(Element.GetValue());
+				}
+				return FString::Printf(TEXT("(%s)"), *FString::Join(Elements, TEXT(", ")));
+			}
+			case uLang::ETypeKind::Unknown:
+			case uLang::ETypeKind::False:
+			case uLang::ETypeKind::True:
+			case uLang::ETypeKind::Any:
+			case uLang::ETypeKind::Comparable:
+			case uLang::ETypeKind::Range:
+			case uLang::ETypeKind::Type:
+			case uLang::ETypeKind::Module:
+			case uLang::ETypeKind::Function:
+			case uLang::ETypeKind::Variable:
+			case uLang::ETypeKind::Persistable:
+			case uLang::ETypeKind::Castable:
+			case uLang::ETypeKind::Concrete:
+				return {};
+			default:
+				break;
+			}
+
+			bool bContainsInternalType = false;
+			uLang::SemanticTypeUtils::ForEachTypeRecursive(
+				&Current,
+				uLang::ETypePolarity::Positive,
+				[&bContainsInternalType](
+					const uLang::CTypeBase* Nested,
+					uLang::ETypePolarity)
+				{
+					if (Nested == nullptr || Nested->AsFlowType() != nullptr)
+					{
+						bContainsInternalType = true;
+						return;
+					}
+					switch (Nested->GetNormalType().GetKind())
+					{
+					case uLang::ETypeKind::Unknown:
+					case uLang::ETypeKind::False:
+					case uLang::ETypeKind::True:
+					case uLang::ETypeKind::Any:
+					case uLang::ETypeKind::Comparable:
+					case uLang::ETypeKind::Range:
+					case uLang::ETypeKind::Variable:
+						bContainsInternalType = true;
+						break;
+					default:
+						break;
+					}
+				});
+			return bContainsInternalType
+				? TOptional<FString>()
+				: TOptional<FString>(ToFString(Current.AsCode()));
+		};
+		return Format(Type);
+	};
+
+	const EVerseIntrinsicCallableForm PresentationForm = OperandCount == 1
+		? EVerseIntrinsicCallableForm::PrefixOperator
+		: EVerseIntrinsicCallableForm::InfixOperator;
+	const FVerseIntrinsicPresentationDescriptor* Presentation =
+		FindVerseIntrinsicOperatorPresentation(PresentationForm, OperatorSpelling);
+	const bool bSymmetricOperands = Presentation != nullptr
+		&& Presentation->bSymmetricOperands;
+	const bool bOmitResult = Presentation != nullptr
+		&& Presentation->bOmitResultInSignaturePicker;
+
+	auto MakeSemanticKey = [](const FVerseOperatorSignature& Signature)
+	{
+		return FString::Printf(
+			TEXT("%s -> %s"),
+			*FString::Join(Signature.OperandTypeNames, TEXT(" x ")),
+			*Signature.ResultTypeName);
+	};
+	auto AddResult = [&](FVerseOperatorSignature Signature)
+	{
+		const FString SemanticKey = MakeSemanticKey(Signature);
+		if (!SeenSemanticSignatures.Contains(SemanticKey))
+		{
+			SeenSemanticSignatures.Add(SemanticKey);
+			Result.Add(MoveTemp(Signature));
+		}
+	};
+
 	for (const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot : Snapshots)
 	{
 		if (!Snapshot.IsValid() || !Snapshot->GetProgram().IsValid())
@@ -1065,17 +1260,15 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 			? Package->_UploadedAtFNVersion
 			: VerseFN::UploadedAtFNVersion::Latest;
 
-		struct FVisibleType
-		{
-			FString Name;
-			const uLang::CTypeBase* Type = nullptr;
-		};
 		TArray<FVisibleType> VisibleTypes;
-		auto AddVisibleType = [&VisibleTypes](FString Name, const uLang::CTypeBase* Type)
+		auto AddVisibleType = [
+			&VisibleTypes,
+			&GetConcreteTypeName,
+			UploadedVersion](
+			FString Name,
+			const uLang::CTypeBase* Type)
 		{
-			if (Type == nullptr
-				|| Type->GetNormalType().GetComparability()
-					== uLang::EComparability::Incomparable
+			if (Type == nullptr || !GetConcreteTypeName(*Type, UploadedVersion).IsSet()
 				|| VisibleTypes.ContainsByPredicate(
 					[&Name](const FVisibleType& Existing) { return Existing.Name == Name; }))
 			{
@@ -1089,6 +1282,19 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 		AddVisibleType(TEXT("string"),
 			Program._stringAlias ? Program._stringAlias->GetType() : nullptr);
 		AddVisibleType(TEXT("char"), &Program._char32Type);
+		for (const FVerseVisualSocket* Source : ConnectedOperands)
+		{
+			if (Source != nullptr && Source->SemanticType != nullptr
+				&& Source->SemanticSnapshot.Get() == Snapshot.Get())
+			{
+				const TOptional<FString> Name = GetConcreteTypeName(
+					*Source->SemanticType, UploadedVersion);
+				if (Name.IsSet())
+				{
+					AddVisibleType(Name.GetValue(), Source->SemanticType);
+				}
+			}
+		}
 		for (const uLang::CDefinition* Definition :
 			CollectVisibleDefinitions(*ActiveScope, Program))
 		{
@@ -1119,209 +1325,259 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 			{
 				continue;
 			}
-			const bool bComparableEquality =
-				OperatorSpelling == TEXT("=") || OperatorSpelling == TEXT("<>");
 
-			// Equality and inequality are declared by Verse as a generic failable
-			// operator whose type variable has `false` and `comparable` bounds.
-			// Calling Matches() proves that a visible type satisfies those bounds,
-			// but it does not substitute that type into the function returned by
-			// Instantiate(). Formatting that partially constrained function leaked
-			// `comparable x comparable -> false` into the editor. Build the concrete
-			// source-selectable signature from each matching visible type instead.
-			if (bComparableEquality && OperandCount == 2)
+			FString CacheKey = FString::Printf(
+				TEXT("%p|%p|%p|%d|%d|%d"),
+				Snapshot.Get(), ActiveScope, Function, OperandCount,
+				bSymmetricOperands, bOmitResult);
+			for (const FVerseVisualSocket* Source : ConnectedOperands)
 			{
-				for (const FVisibleType& VisibleType : VisibleTypes)
+				CacheKey += TEXT("|in:") + (Source
+					? Source->SemanticTypeName : FString(TEXT("-")));
+			}
+			for (const FVerseVisualSocket* Consumer : OutputConsumers)
+			{
+				CacheKey += TEXT("|out:") + (Consumer
+					? Consumer->SemanticTypeName : FString(TEXT("-")));
+			}
+			{
+				FScopeLock Lock(&CacheMutex);
+				for (auto It = Cache.CreateIterator(); It; ++It)
 				{
-					const uLang::CFunctionType* FunctionType =
-						uLang::SemanticTypeUtils::Instantiate(
-							Function->_Signature.GetFunctionType(), UploadedVersion);
-					if (FunctionType == nullptr
-						|| FunctionType->GetParamTypes().Num() != OperandCount)
+					if (!It.Value().Snapshot.IsValid())
 					{
-						continue;
+						It.RemoveCurrent();
 					}
+				}
+				if (const FCachedSignatures* Cached = Cache.Find(CacheKey))
+				{
+					for (FVerseOperatorSignature Signature : Cached->Signatures)
+					{
+						Signature.Snapshot = Snapshot;
+						AddResult(MoveTemp(Signature));
+					}
+					continue;
+				}
+			}
 
-					bool bMatchesBounds = true;
-					for (const uLang::CTypeBase* Parameter : FunctionType->GetParamTypes())
+			TArray<FVerseOperatorSignature> FunctionSignatures;
+			auto AddFunctionSignature = [&](TArray<FString> OperandNames, FString ResultName)
+			{
+				FVerseOperatorSignature Signature;
+				Signature.OperandTypeNames = MoveTemp(OperandNames);
+				Signature.ResultTypeName = MoveTemp(ResultName);
+				Signature.DisplayText = FString::Join(
+					Signature.OperandTypeNames, TEXT(" x "));
+				if (!bOmitResult)
+				{
+					Signature.DisplayText += TEXT(" -> ") + Signature.ResultTypeName;
+				}
+				Signature.Snapshot = Snapshot;
+				const FString SemanticKey = MakeSemanticKey(Signature);
+				if (!FunctionSignatures.ContainsByPredicate(
+					[&SemanticKey, &MakeSemanticKey](const FVerseOperatorSignature& Existing)
 					{
-						if (!uLang::SemanticTypeUtils::Matches(
-							VisibleType.Type, Parameter, UploadedVersion))
-						{
-							bMatchesBounds = false;
-							break;
-						}
-					}
-					if (!bMatchesBounds)
-					{
-						continue;
-					}
+						return MakeSemanticKey(Existing) == SemanticKey;
+					}))
+				{
+					FunctionSignatures.Add(MoveTemp(Signature));
+				}
+			};
 
-					bool bCompatible = true;
-					for (const FVerseVisualSocket* Source : ConnectedOperands)
+			const uLang::CFunctionType* DeclaredType =
+				Function->_Signature.GetFunctionType();
+			if (DeclaredType->GetParamTypes().Num() != OperandCount)
+			{
+				continue;
+			}
+
+			if (DeclaredType->GetTypeVariables().IsEmpty())
+			{
+				const uLang::CFunctionType* Concrete =
+					uLang::SemanticTypeUtils::Instantiate(DeclaredType, UploadedVersion);
+				if (Concrete != nullptr)
+				{
+					TArray<FString> OperandNames;
+					bool bConcrete = true;
+					for (int32 Index = 0; Index < OperandCount; ++Index)
 					{
-						if (Source == nullptr || Source->SemanticTypeName.IsEmpty())
+						const uLang::CTypeBase* Parameter = Concrete->GetParamTypes()[Index];
+						const TOptional<FString> Name = Parameter
+							? GetConcreteTypeName(*Parameter, UploadedVersion)
+							: TOptional<FString>();
+						const FVerseVisualSocket* Source = ConnectedOperands.IsValidIndex(Index)
+							? ConnectedOperands[Index] : nullptr;
+						bConcrete &= Name.IsSet() && (Source == nullptr
+							|| Source->SemanticTypeName.IsEmpty()
+							|| (Source->SemanticType != nullptr
+								&& Source->SemanticSnapshot.Get() == Snapshot.Get()
+								? uLang::SemanticTypeUtils::IsSubtype(
+									Source->SemanticType, Parameter, UploadedVersion)
+								: Source->SemanticTypeName == Name.Get(FString())));
+						if (Name.IsSet())
 						{
-							continue;
-						}
-						bCompatible = Source->SemanticType != nullptr
-							&& Source->SemanticSnapshot.Get() == Snapshot.Get()
-							? uLang::SemanticTypeUtils::IsSubtype(
-								Source->SemanticType, VisibleType.Type, UploadedVersion)
-							: Source->SemanticTypeName == VisibleType.Name;
-						if (!bCompatible)
-						{
-							break;
+							OperandNames.Add(Name.GetValue());
 						}
 					}
+					const TOptional<FString> ResultName =
+						GetConcreteTypeName(Concrete->GetReturnType(), UploadedVersion);
 					for (const FVerseVisualSocket* Consumer : OutputConsumers)
 					{
-						if (!bCompatible || Consumer == nullptr
+						if (!bConcrete || Consumer == nullptr
 							|| Consumer->SemanticTypeName.IsEmpty())
 						{
 							continue;
 						}
-						bCompatible = Consumer->SemanticType != nullptr
+						bConcrete = Consumer->SemanticType != nullptr
 							&& Consumer->SemanticSnapshot.Get() == Snapshot.Get()
 							? uLang::SemanticTypeUtils::IsSubtype(
-								VisibleType.Type, Consumer->SemanticType, UploadedVersion)
-							: VisibleType.Name == Consumer->SemanticTypeName;
+								&Concrete->GetReturnType(), Consumer->SemanticType, UploadedVersion)
+							: ResultName.IsSet()
+								&& ResultName.GetValue() == Consumer->SemanticTypeName;
 					}
-					if (!bCompatible)
+					if (bConcrete && ResultName.IsSet())
 					{
-						continue;
+						AddFunctionSignature(MoveTemp(OperandNames), ResultName.GetValue());
+					}
+				}
+			}
+			else
+			{
+				TArray<const FVisibleType*> Tuple;
+				Tuple.Reserve(OperandCount);
+				TFunction<void(int32)> Enumerate = [&](int32 Index)
+				{
+					if (Index < OperandCount)
+					{
+						if (bSymmetricOperands && !Tuple.IsEmpty())
+						{
+							const FVisibleType* SymmetricType = Tuple[0];
+							Tuple.Add(SymmetricType);
+							Enumerate(Index + 1);
+							Tuple.Pop();
+							return;
+						}
+						for (const FVisibleType& Type : VisibleTypes)
+						{
+							const FVerseVisualSocket* Source =
+								ConnectedOperands.IsValidIndex(Index)
+									? ConnectedOperands[Index] : nullptr;
+							if (Source != nullptr && !Source->SemanticTypeName.IsEmpty())
+							{
+								const bool bCompatible = Source->SemanticType != nullptr
+									&& Source->SemanticSnapshot.Get() == Snapshot.Get()
+									? uLang::SemanticTypeUtils::IsSubtype(
+										Source->SemanticType, Type.Type, UploadedVersion)
+									: Source->SemanticTypeName == Type.Name;
+								if (!bCompatible)
+								{
+									continue;
+								}
+							}
+							Tuple.Add(&Type);
+							Enumerate(Index + 1);
+							Tuple.Pop();
+						}
+						return;
 					}
 
-					FVerseOperatorSignature Signature;
-					Signature.OperandTypeNames = {VisibleType.Name, VisibleType.Name};
-					Signature.ResultTypeName = VisibleType.Name;
-					Signature.DisplayText = FString::Join(
-						Signature.OperandTypeNames, TEXT(" x "));
-					Signature.Snapshot = Snapshot;
-					if (!Seen.Contains(Signature.DisplayText))
-					{
-						Seen.Add(Signature.DisplayText);
-						Result.Add(MoveTemp(Signature));
-					}
-				}
-				continue;
-			}
-			auto AddSignature = [&](const uLang::CFunctionType& FunctionType)
-			{
-				if (FunctionType.GetParamTypes().Num() != OperandCount)
-				{
-					return;
-				}
-				for (int32 Index = 0; Index < ConnectedOperands.Num(); ++Index)
-				{
-					const FVerseVisualSocket* Source = ConnectedOperands[Index];
-					if (Source == nullptr || Source->SemanticTypeName.IsEmpty())
-					{
-						continue;
-					}
-					const uLang::CTypeBase* Parameter =
-						Index < FunctionType.GetParamTypes().Num()
-							? FunctionType.GetParamTypes()[Index] : nullptr;
-					const bool bCompatible = Parameter != nullptr
-						&& Source->SemanticType != nullptr
-						&& Source->SemanticSnapshot.Get() == Snapshot.Get()
-						? uLang::SemanticTypeUtils::IsSubtype(
-							Source->SemanticType, Parameter, UploadedVersion)
-						: Parameter != nullptr
-							&& ToFString(Parameter->AsCode()) == Source->SemanticTypeName;
-					if (!bCompatible)
+					uLang::TArray<uLang::STypeVariableSubstitution> Substitutions;
+					const uLang::CFunctionType* Instantiated =
+						uLang::SemanticTypeUtils::Instantiate(
+							DeclaredType, UploadedVersion, Substitutions);
+					if (Instantiated == nullptr)
 					{
 						return;
 					}
-				}
-				const uLang::CTypeBase& ReturnType = FunctionType.GetReturnType();
-				for (const FVerseVisualSocket* Consumer : OutputConsumers)
-				{
-					if (Consumer == nullptr || Consumer->SemanticTypeName.IsEmpty())
+					uLang::CTupleType::ElementArray ArgumentTypes;
+					for (const FVisibleType* Type : Tuple)
 					{
-						continue;
+						ArgumentTypes.Add(Type->Type);
 					}
-					const bool bCompatible = Consumer->SemanticType != nullptr
-						&& Consumer->SemanticSnapshot.Get() == Snapshot.Get()
-						? uLang::SemanticTypeUtils::IsSubtype(
-							&ReturnType, Consumer->SemanticType, UploadedVersion)
-						: ToFString(ReturnType.AsCode()) == Consumer->SemanticTypeName;
-					if (!bCompatible)
+					const uLang::CTypeBase* ArgumentTuple =
+						uLang::CFunctionType::GetOrCreateParamType(
+							Instantiated->GetProgram(), MoveTemp(ArgumentTypes));
+					if (ArgumentTuple == nullptr
+						|| !uLang::SemanticTypeUtils::ConstrainCanonicalized(
+							ArgumentTuple,
+							&Instantiated->GetParamsType(),
+							UploadedVersion))
 					{
 						return;
 					}
-				}
-
-				FVerseOperatorSignature Signature;
-				for (const uLang::CTypeBase* Parameter : FunctionType.GetParamTypes())
-				{
-					Signature.OperandTypeNames.Add(ToFString(Parameter->AsCode()));
-				}
-				Signature.ResultTypeName = ToFString(ReturnType.AsCode());
-				Signature.DisplayText = FString::Printf(
-					TEXT("%s -> %s"),
-					*FString::Join(Signature.OperandTypeNames, TEXT(" x ")),
-					*Signature.ResultTypeName);
-				Signature.Snapshot = Snapshot;
-				if (!Seen.Contains(Signature.DisplayText))
-				{
-					Seen.Add(Signature.DisplayText);
-					Result.Add(MoveTemp(Signature));
-				}
-			};
-
-			// Concrete overloads may be heterogeneous: vector / float -> vector,
-			// date_time + time_span -> date_time, and string + diagnostic ->
-			// diagnostic are all real Verse signatures. Preserve the complete tuple.
-			const uLang::CFunctionType* ConcreteFunctionType =
-				uLang::SemanticTypeUtils::Instantiate(
-					Function->_Signature.GetFunctionType(), UploadedVersion);
-			if (ConcreteFunctionType != nullptr)
-			{
-				bool bHasUnresolvedTopLevelType =
-					ConcreteFunctionType->GetReturnType().GetNormalType().GetKind()
-						== uLang::ETypeKind::Variable;
-				for (const uLang::CTypeBase* Parameter :
-					ConcreteFunctionType->GetParamTypes())
-				{
-					bHasUnresolvedTopLevelType |= Parameter != nullptr
-						&& Parameter->GetNormalType().GetKind()
-							== uLang::ETypeKind::Variable;
-				}
-				if (!bHasUnresolvedTopLevelType)
-				{
-					AddSignature(*ConcreteFunctionType);
-				}
+					for (const FVerseVisualSocket* Consumer : OutputConsumers)
+					{
+						if (Consumer != nullptr && Consumer->SemanticType != nullptr
+							&& Consumer->SemanticSnapshot.Get() == Snapshot.Get()
+							&& !uLang::SemanticTypeUtils::ConstrainCanonicalized(
+								&Instantiated->GetReturnType(),
+								&Consumer->SemanticType->GetNormalType(),
+								UploadedVersion))
+						{
+							return;
+						}
+					}
+					const uLang::TArray<uLang::SInstantiatedTypeVariable> InstantiatedVariables =
+						uLang::SemanticTypeUtils::AsInstantiatedTypeVariables(Substitutions);
+					const uLang::CTypeBase& ResolvedResult =
+						uLang::SemanticTypeUtils::AsPositive(
+							Instantiated->GetReturnType(), InstantiatedVariables);
+					const TOptional<FString> ResultName =
+						GetConcreteTypeName(ResolvedResult, UploadedVersion);
+					if (!ResultName.IsSet())
+					{
+						return;
+					}
+					for (const FVerseVisualSocket* Consumer : OutputConsumers)
+					{
+						if (Consumer == nullptr || Consumer->SemanticTypeName.IsEmpty())
+						{
+							continue;
+						}
+						const bool bCompatible = Consumer->SemanticType != nullptr
+							&& Consumer->SemanticSnapshot.Get() == Snapshot.Get()
+							? uLang::SemanticTypeUtils::IsSubtype(
+								&ResolvedResult, Consumer->SemanticType, UploadedVersion)
+							: ResultName.GetValue() == Consumer->SemanticTypeName;
+						if (!bCompatible)
+						{
+							return;
+						}
+					}
+					TArray<FString> OperandNames;
+					// The complete argument tuple is the concrete source signature selected
+					// by inference. Some constrained declarations intentionally retain their
+					// abstract formal (for example, `comparable`) even after a concrete tuple
+					// has satisfied it, so displaying the formal would leak compiler bounds.
+					for (const FVisibleType* Type : Tuple)
+					{
+						const TOptional<FString> Name = GetConcreteTypeName(
+							*Type->Type, UploadedVersion);
+						if (!Name.IsSet())
+						{
+							return;
+						}
+						OperandNames.Add(Name.GetValue());
+					}
+					AddFunctionSignature(MoveTemp(OperandNames), ResultName.GetValue());
+				};
+				Enumerate(0);
 			}
 
-			// Instantiate homogeneous generic operators (notably comparable equality)
-			// once per comparable type visible at this exact lexical scope.
-			for (const FVisibleType& VisibleType : VisibleTypes)
 			{
-				const uLang::CFunctionType* FunctionType =
-					uLang::SemanticTypeUtils::Instantiate(
-						Function->_Signature.GetFunctionType(), UploadedVersion);
-				if (FunctionType == nullptr
-					|| FunctionType->GetParamTypes().Num() != OperandCount)
+				FScopeLock Lock(&CacheMutex);
+				FCachedSignatures Cached;
+				Cached.Snapshot = Snapshot;
+				Cached.Signatures = FunctionSignatures;
+				for (FVerseOperatorSignature& Signature : Cached.Signatures)
 				{
-					continue;
+					Signature.Snapshot.Reset();
 				}
-				bool bMatches = true;
-				for (const uLang::CTypeBase* Parameter : FunctionType->GetParamTypes())
-				{
-					if (!uLang::SemanticTypeUtils::Matches(
-						VisibleType.Type, Parameter, UploadedVersion))
-					{
-						bMatches = false;
-						break;
-					}
-				}
-				if (!bMatches)
-				{
-					continue;
-				}
-
-				AddSignature(*FunctionType);
+				Cache.Add(CacheKey, MoveTemp(Cached));
+			}
+			for (FVerseOperatorSignature& Signature : FunctionSignatures)
+			{
+				AddResult(MoveTemp(Signature));
 			}
 		}
 	}

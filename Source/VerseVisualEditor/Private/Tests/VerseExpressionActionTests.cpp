@@ -91,6 +91,8 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 			&& IntegerNotEqual->DefaultSourceTypeParameterIndices[1] == 0);
 		TestTrue(TEXT("Not Equal declares symmetric operands"),
 			IntegerNotEqual->bSymmetricOperands);
+		TestTrue(TEXT("Not Equal omits its result only as presentation policy"),
+			IntegerNotEqual->bOmitResultInSignaturePicker);
 		TestEqual(TEXT("Not Equal has a source-safe untyped placeholder"),
 			IntegerNotEqual->UntypedDefaultSource,
 			FString(TEXT("0")));
