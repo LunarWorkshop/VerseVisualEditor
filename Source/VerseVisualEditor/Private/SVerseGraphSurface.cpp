@@ -79,6 +79,46 @@ namespace
 			Anchor->GetPaintSpaceGeometry().GetAbsolutePositionAtCoordinates(NormalizedCoordinate));
 	}
 
+	FVersePaintPoint AnchorPoint(
+		const FGeometry& Geometry,
+		FVector2D NormalizedCoordinate)
+	{
+		return FVersePaintPoint(
+			Geometry.GetAbsolutePositionAtCoordinates(NormalizedCoordinate));
+	}
+
+	TSet<TSharedRef<SWidget>> CollectConnectionAnchors(
+		TConstArrayView<FVerseGraphConnection> Connections,
+		TSharedPtr<SWidget> AdditionalAnchor = nullptr)
+	{
+		TSet<TSharedRef<SWidget>> Anchors;
+		for (const FVerseGraphConnection& Connection : Connections)
+		{
+			if (!Connection.EndpointRegistry.IsValid())
+			{
+				continue;
+			}
+			for (const FVerseVisualSocketEndpoint Endpoint : {
+				Connection.Source, Connection.Target})
+			{
+				const FVerseGraphEndpointBinding* Binding =
+					Connection.EndpointRegistry->Find(Endpoint);
+				const TSharedPtr<SWidget> Anchor = Binding != nullptr
+					? Binding->Anchor.Pin()
+					: nullptr;
+				if (Anchor.IsValid())
+				{
+					Anchors.Add(Anchor.ToSharedRef());
+				}
+			}
+		}
+		if (AdditionalAnchor.IsValid())
+		{
+			Anchors.Add(AdditionalAnchor.ToSharedRef());
+		}
+		return Anchors;
+	}
+
 	FVector2D GetSplineTangent(
 		FVector2D Start,
 		FVector2D End,
@@ -144,7 +184,8 @@ namespace
 	void PaintConnectionRecord(
 		const FVerseGraphConnection& Connection,
 		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId)
+		int32 LayerId,
+		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints)
 	{
 		if (!Connection.EndpointRegistry.IsValid())
 		{
@@ -177,8 +218,16 @@ namespace
 		{
 			return;
 		}
-		const FGeometry& SourceGeometry = Source->GetPaintSpaceGeometry();
-		const FGeometry& TargetGeometry = Target->GetPaintSpaceGeometry();
+		const FArrangedWidget* SourceArrangement =
+			ArrangedEndpoints.Find(Source.ToSharedRef());
+		const FArrangedWidget* TargetArrangement =
+			ArrangedEndpoints.Find(Target.ToSharedRef());
+		if (SourceArrangement == nullptr || TargetArrangement == nullptr)
+		{
+			return;
+		}
+		const FGeometry& SourceGeometry = SourceArrangement->Geometry;
+		const FGeometry& TargetGeometry = TargetArrangement->Geometry;
 		if (!Source->GetVisibility().IsVisible()
 			|| !Target->GetVisibility().IsVisible()
 			|| SourceGeometry.GetLocalSize().GetMin() <= 0.0f
@@ -187,9 +236,9 @@ namespace
 			return;
 		}
 		const FVersePaintPoint Start = AnchorPoint(
-			Source, SourceBinding->AnchorCoordinate);
+			SourceGeometry, SourceBinding->AnchorCoordinate);
 		const FVersePaintPoint End = AnchorPoint(
-			Target, TargetBinding->AnchorCoordinate);
+			TargetGeometry, TargetBinding->AnchorCoordinate);
 		DrawSpline(
 			OutDrawElements, LayerId, Start, End,
 			Connection.Axis, Connection.Thickness, Connection.Color);
@@ -276,8 +325,20 @@ bool SVerseGraphRenderScope::WasPaintedRecently() const
 
 bool SVerseGraphRenderScope::CanSupplyVisibleEndpoints() const
 {
-	return GetVisibility().IsVisible()
-		&& (bVisibilityGuardOnly || WasPaintedThisFrame());
+	return GetVisibility().IsVisible();
+}
+
+FVerseGraphArrangedEndpointMap SVerseGraphRenderScope::ArrangeEndpointsForPaint(
+	const FGeometry& AllottedGeometry) const
+{
+	const TSet<TSharedRef<SWidget>> Anchors =
+		CollectConnectionAnchors(Connections);
+	FVerseGraphArrangedEndpointMap Result;
+	if (!Anchors.IsEmpty())
+	{
+		FindChildGeometries(AllottedGeometry, Anchors, Result);
+	}
+	return Result;
 }
 
 int32 SVerseGraphRenderScope::OnPaint(
@@ -324,9 +385,12 @@ int32 SVerseGraphRenderScope::OnPaint(
 	}
 
 	const int32 ConnectionLayer = BackgroundLayer + 1;
+	const FVerseGraphArrangedEndpointMap ArrangedEndpoints =
+		ArrangeEndpointsForPaint(AllottedGeometry);
 	for (const FVerseGraphConnection& Connection : Connections)
 	{
-		PaintConnectionRecord(Connection, OutDrawElements, ConnectionLayer);
+		PaintConnectionRecord(
+			Connection, OutDrawElements, ConnectionLayer, ArrangedEndpoints);
 	}
 	const int32 ContentLayer = SCompoundWidget::OnPaint(
 		Args,
@@ -487,7 +551,7 @@ void SVerseGraphSurface::Tick(
 	if (ConnectionDrag.IsSet() && ConnectionDrag->bScopedToNestedRenderScope)
 	{
 		const TSharedPtr<SVerseGraphRenderScope> Scope = ConnectionDrag->RenderScope.Pin();
-		if (!Scope.IsValid() || !Scope->WasPaintedRecently())
+		if (!Scope.IsValid() || !Scope->CanSupplyVisibleEndpoints())
 		{
 			ConnectionDrag.Reset();
 			bPreviewFrozen = false;
@@ -539,6 +603,20 @@ FVector2D SVerseGraphSurface::GetGraphOrigin() const
 		Padding.Top - (VerticalScrollBox.IsValid() ? VerticalScrollBox->GetScrollOffset() : 0.0f));
 }
 
+FVerseGraphArrangedEndpointMap SVerseGraphSurface::ArrangeEndpointsForPaint(
+	const FGeometry& AllottedGeometry,
+	TSharedPtr<SWidget> AdditionalAnchor) const
+{
+	const TSet<TSharedRef<SWidget>> Anchors =
+		CollectConnectionAnchors(Connections, MoveTemp(AdditionalAnchor));
+	FVerseGraphArrangedEndpointMap Result;
+	if (!Anchors.IsEmpty())
+	{
+		FindChildGeometries(AllottedGeometry, Anchors, Result);
+	}
+	return Result;
+}
+
 int32 SVerseGraphSurface::OnPaint(
 	const FPaintArgs& Args,
 	const FGeometry& AllottedGeometry,
@@ -560,8 +638,13 @@ int32 SVerseGraphSurface::OnPaint(
 		Args, AllottedGeometry, MyCullingRect, OutDrawElements,
 		LayerId + 3, InWidgetStyle, bParentEnabled);
 	OutDrawElements.PushClip(FSlateClippingZone(CanvasGeometry));
-	const int32 ConnectionLayer =
-		PaintConnections(OutDrawElements, LayerId + 2);
+	const TSharedPtr<SWidget> PreviewAnchor = ConnectionDrag.IsSet()
+		? ConnectionDrag->Anchor
+		: nullptr;
+	const FVerseGraphArrangedEndpointMap ArrangedEndpoints =
+		ArrangeEndpointsForPaint(AllottedGeometry, PreviewAnchor);
+	const int32 ConnectionLayer = PaintConnections(
+		OutDrawElements, LayerId + 2, ArrangedEndpoints);
 	OutDrawElements.PopClip();
 
 	int32 ResultLayer = FMath::Max(ContentLayer, ConnectionLayer);
@@ -571,7 +654,8 @@ int32 SVerseGraphSurface::OnPaint(
 		// dragged is direct manipulation feedback and must remain visible over
 		// nested panels such as an if's failable condition context.
 		OutDrawElements.PushClip(FSlateClippingZone(CanvasGeometry));
-		PaintPreviewConnection(OutDrawElements, ResultLayer + 1);
+		PaintPreviewConnection(
+			OutDrawElements, ResultLayer + 1, ArrangedEndpoints);
 		OutDrawElements.PopClip();
 		++ResultLayer;
 	}
@@ -595,11 +679,13 @@ int32 SVerseGraphSurface::OnPaint(
 
 int32 SVerseGraphSurface::PaintConnections(
 	FSlateWindowElementList& OutDrawElements,
-	int32 LayerId) const
+	int32 LayerId,
+	const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const
 {
 	for (const FVerseGraphConnection& Connection : Connections)
 	{
-		PaintConnection(Connection, OutDrawElements, LayerId);
+		PaintConnection(
+			Connection, OutDrawElements, LayerId, ArrangedEndpoints);
 	}
 	return LayerId;
 }
@@ -607,14 +693,17 @@ int32 SVerseGraphSurface::PaintConnections(
 void SVerseGraphSurface::PaintConnection(
 	const FVerseGraphConnection& Connection,
 	FSlateWindowElementList& OutDrawElements,
-	int32 LayerId) const
+	int32 LayerId,
+	const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const
 {
-	PaintConnectionRecord(Connection, OutDrawElements, LayerId);
+	PaintConnectionRecord(
+		Connection, OutDrawElements, LayerId, ArrangedEndpoints);
 }
 
 void SVerseGraphSurface::PaintPreviewConnection(
 	FSlateWindowElementList& OutDrawElements,
-	int32 LayerId) const
+	int32 LayerId,
+	const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const
 {
 	if (!ConnectionDrag.IsSet() || !ConnectionDrag->Anchor.IsValid())
 	{
@@ -623,14 +712,22 @@ void SVerseGraphSurface::PaintPreviewConnection(
 	if (ConnectionDrag->bScopedToNestedRenderScope)
 	{
 		const TSharedPtr<SVerseGraphRenderScope> Scope = ConnectionDrag->RenderScope.Pin();
-		if (!Scope.IsValid() || !Scope->WasPaintedThisFrame())
+		if (!Scope.IsValid() || !Scope->CanSupplyVisibleEndpoints())
 		{
 			return;
 		}
 	}
+	const TSharedPtr<SWidget> FixedAnchor = ConnectionDrag->Anchor;
+	const FArrangedWidget* FixedArrangement = FixedAnchor.IsValid()
+		? ArrangedEndpoints.Find(FixedAnchor.ToSharedRef())
+		: nullptr;
+	if (FixedArrangement == nullptr)
+	{
+		return;
+	}
 	const FVersePaintPoint Free = VerseCanvasToPaint(GetPaintSpaceGeometry(), PreviewEndpoint);
 	const FVersePaintPoint Fixed = AnchorPoint(
-		ConnectionDrag->Anchor,
+		FixedArrangement->Geometry,
 		ConnectionDrag->AnchorCoordinate);
 	const FVersePaintPoint Start = ConnectionDrag->bOutput ? Fixed : Free;
 	const FVersePaintPoint End = ConnectionDrag->bOutput ? Free : Fixed;

@@ -56,6 +56,9 @@ private:
 	TMap<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding> Bindings;
 };
 
+using FVerseGraphArrangedEndpointMap =
+	TMap<TSharedRef<SWidget>, FArrangedWidget>;
+
 /** Recursive graph region that owns its background, wires, clipping, and content. */
 class SVerseGraphRenderScope final : public SCompoundWidget
 {
@@ -78,6 +81,8 @@ public:
 	bool WasPaintedThisFrame() const;
 	bool WasPaintedRecently() const;
 	bool CanSupplyVisibleEndpoints() const;
+	FVerseGraphArrangedEndpointMap ArrangeEndpointsForPaint(
+		const FGeometry& AllottedGeometry) const;
 	virtual int32 OnPaint(
 		const FPaintArgs& Args,
 		const FGeometry& AllottedGeometry,
@@ -172,16 +177,22 @@ private:
 	FMargin GetPanPadding() const;
 	FVector2D GetCanvasSize() const;
 	FVector2D GetGraphOrigin() const;
+	FVerseGraphArrangedEndpointMap ArrangeEndpointsForPaint(
+		const FGeometry& AllottedGeometry,
+		TSharedPtr<SWidget> AdditionalAnchor = nullptr) const;
 	int32 PaintConnections(
 		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId) const;
+		int32 LayerId,
+		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const;
 	void PaintConnection(
 		const FVerseGraphConnection& Connection,
 		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId) const;
+		int32 LayerId,
+		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const;
 	void PaintPreviewConnection(
 		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId) const;
+		int32 LayerId,
+		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const;
 
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
 	TSharedPtr<SScrollBar> VerticalScrollbar;

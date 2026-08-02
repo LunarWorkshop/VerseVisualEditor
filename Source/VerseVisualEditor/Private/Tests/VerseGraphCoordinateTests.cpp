@@ -10,6 +10,7 @@
 #include "Misc/AutomationTest.h"
 #include "Styling/AppStyle.h"
 #include "Styling/SlateStyleRegistry.h"
+#include "Widgets/SCanvas.h"
 #include "Widgets/Layout/SBox.h"
 
 namespace
@@ -147,6 +148,75 @@ bool FVerseGraphWindowOriginTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("First desktop origin is removed once"), FirstPaint.Value, LocalPoint);
 	TestEqual(TEXT("Moving the window does not move the paint endpoint"), SecondPaint.Value, LocalPoint);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphOffscreenEndpointArrangementTest,
+	"VerseVisualEditor.Graph.Coordinates.OffscreenEndpoints",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphOffscreenEndpointArrangementTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<SBox> VisibleAnchor =
+		SNew(SBox).WidthOverride(10.0f).HeightOverride(10.0f);
+	const TSharedRef<SBox> OffscreenAnchor =
+		SNew(SBox).WidthOverride(12.0f).HeightOverride(12.0f);
+	const TSharedRef<SCanvas> Root =
+		SNew(SCanvas)
+		+ SCanvas::Slot()
+		.Position(FVector2D(20.0f, 30.0f))
+		.Size(FVector2D(10.0f, 10.0f))
+		[
+			VisibleAnchor
+		]
+		+ SCanvas::Slot()
+		.Position(FVector2D(1200.0f, 700.0f))
+		.Size(FVector2D(12.0f, 12.0f))
+		[
+			OffscreenAnchor
+		];
+
+	const FVerseVisualSocketEndpoint SourceEndpoint{
+		{1}, {EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Value, 0}};
+	const FVerseVisualSocketEndpoint TargetEndpoint{
+		{2}, {EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Value, 0}};
+	const TSharedRef<FVerseGraphEndpointRegistry> Registry =
+		MakeShared<FVerseGraphEndpointRegistry>();
+	Registry->Register(SourceEndpoint, {VisibleAnchor});
+	Registry->Register(TargetEndpoint, {OffscreenAnchor});
+	FVerseGraphConnection Connection;
+	Connection.Source = SourceEndpoint;
+	Connection.Target = TargetEndpoint;
+	Connection.EndpointRegistry = Registry;
+	const TArray<FVerseGraphConnection> Connections({Connection});
+	const FGeometry RootGeometry = FGeometry::MakeRoot(
+		FVector2D(200.0f, 100.0f),
+		FSlateLayoutTransform(1.0f, FVector2D(40.0f, 60.0f)));
+
+	const TSharedRef<SVerseGraphRenderScope> Scope =
+		SNew(SVerseGraphRenderScope)
+		.Connections(Connections)
+		[
+			Root
+		];
+	const FVerseGraphArrangedEndpointMap Arranged =
+		Scope->ArrangeEndpointsForPaint(RootGeometry);
+	const FArrangedWidget* Visible = Arranged.Find(VisibleAnchor);
+	const FArrangedWidget* Offscreen = Arranged.Find(OffscreenAnchor);
+	TestNotNull(TEXT("Visible endpoint is arranged"), Visible);
+	TestNotNull(TEXT("Culled endpoint is synthesized from current layout"), Offscreen);
+	if (Visible != nullptr && Offscreen != nullptr)
+	{
+		const FVector2f VisiblePosition =
+			Visible->Geometry.GetAbsolutePositionAtCoordinates(FVector2D(0.5f));
+		const FVector2f OffscreenPosition =
+			Offscreen->Geometry.GetAbsolutePositionAtCoordinates(FVector2D(0.5f));
+		TestTrue(TEXT("Visible endpoint uses current root transform"),
+			VisiblePosition.Equals(FVector2f(65.0f, 95.0f)));
+		TestTrue(TEXT("Offscreen endpoint retains its graph position"),
+			OffscreenPosition.Equals(FVector2f(1246.0f, 766.0f)));
+	}
 	return true;
 }
 
