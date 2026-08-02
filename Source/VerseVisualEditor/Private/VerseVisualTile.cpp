@@ -198,6 +198,36 @@ namespace
 		return Result;
 	}
 
+	FVerseVisualClauseDescriptor MakeVisualControlClauseDescriptor(
+		const FVerseVisualExpressionDescriptor& Expression,
+		const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+	{
+		FVerseVisualClauseDescriptor Result;
+		Result.InteriorRange = Region.InteriorRange;
+		Result.OpeningPunctuationRange = Region.OpeningPunctuationRange;
+		Result.ClosingPunctuationRange = Region.ClosingPunctuationRange;
+		Result.PunctuationStyle = Region.PunctuationStyle;
+		Result.EmptyBodyInsertionAnchor = Region.EmptyBodyInsertionAnchor;
+		for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+		{
+			const int32 OperandIndex = Region.FirstOperandIndex + Offset;
+			if (!Expression.Operands.IsValidIndex(OperandIndex))
+			{
+				continue;
+			}
+			FVerseVisualClauseItemDescriptor& Item = Result.Items.AddDefaulted_GetRef();
+			Item.Expression = Expression.Operands[OperandIndex];
+			Item.bIsFinalValuePosition = Offset + 1 == Region.OperandCount;
+			if (Region.Items.IsValidIndex(Offset))
+			{
+				Item.LeadingTriviaRange = Region.Items[Offset].LeadingTriviaRange;
+				Item.TrailingTriviaRange = Region.Items[Offset].TrailingTriviaRange;
+				Item.Separator = Region.Items[Offset].Separator;
+			}
+		}
+		return Result;
+	}
+
 	FVerseVisualFunctionParameter MakeVisualFunctionParameter(
 		const FVerseFunctionParameter& Parameter,
 		FVerseDocumentRevision Revision)
@@ -370,6 +400,25 @@ namespace
 				false,
 				true));
 		}
+		// A direct child of any control clause is a statement in that clause.
+		// Keep the owning descriptor on the child so Delete removes the clause
+		// item rather than treating the child as a nested operand and replacing
+		// it with a default literal.
+		for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
+			Descriptor.ControlRegions)
+		{
+			const FVerseVisualClauseDescriptor Clause =
+				MakeVisualControlClauseDescriptor(Descriptor, Region);
+			for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+			{
+				const int32 ChildIndex = Region.FirstOperandIndex + Offset;
+				if (Tile.Children.IsValidIndex(ChildIndex))
+				{
+					Tile.Children[ChildIndex].EditableClause = Clause;
+					Tile.Children[ChildIndex].ClauseItemIndex = Offset;
+				}
+			}
+		}
 		if (Descriptor.Kind == EVerseExpressionKind::Control
 			&& Descriptor.ControlKind == EVerseControlKind::If)
 		{
@@ -401,31 +450,13 @@ namespace
 				FailablePredicate.VstTag = Descriptor.VstTag;
 				FailablePredicate.ControlRegions.Add(*ConditionRegion);
 				FailablePredicate.ControlRegions[0].FirstOperandIndex = 0;
-				FailablePredicate.BodyClause.InteriorRange = ConditionRegion->InteriorRange;
-				FailablePredicate.BodyClause.OpeningPunctuationRange =
-					ConditionRegion->OpeningPunctuationRange;
-				FailablePredicate.BodyClause.ClosingPunctuationRange =
-					ConditionRegion->ClosingPunctuationRange;
-				FailablePredicate.BodyClause.PunctuationStyle =
-					ConditionRegion->PunctuationStyle;
-				FailablePredicate.BodyClause.EmptyBodyInsertionAnchor =
-					ConditionRegion->EmptyBodyInsertionAnchor;
+				FailablePredicate.BodyClause =
+					MakeVisualControlClauseDescriptor(Descriptor, *ConditionRegion);
 				FailablePredicate.BodyClause.bRequiresFailablePlaceholder = true;
 				for (int32 Offset = 0; Offset < ConditionRegion->OperandCount; ++Offset)
 				{
 					FVerseVisualTile Child =
 						MoveTemp(Tile.Children[FirstConditionIndex + Offset]);
-					FVerseVisualClauseItemDescriptor& ClauseItem =
-						FailablePredicate.BodyClause.Items.AddDefaulted_GetRef();
-					ClauseItem.Expression = Descriptor.Operands[
-						ConditionRegion->FirstOperandIndex + Offset];
-					if (ConditionRegion->Items.IsValidIndex(Offset))
-					{
-						const auto& RegionItem = ConditionRegion->Items[Offset];
-						ClauseItem.LeadingTriviaRange = RegionItem.LeadingTriviaRange;
-						ClauseItem.TrailingTriviaRange = RegionItem.TrailingTriviaRange;
-						ClauseItem.Separator = RegionItem.Separator;
-					}
 					Child.EditableClause = FailablePredicate.BodyClause;
 					Child.ClauseItemIndex = Offset;
 					FailablePredicate.Children.Add(MoveTemp(Child));

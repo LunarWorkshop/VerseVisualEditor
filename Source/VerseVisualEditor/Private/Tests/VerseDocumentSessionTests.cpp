@@ -542,6 +542,102 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseControlBranchDeletionTest,
+	"VerseVisualEditor.Prototype.Functions.ControlBranchDeletion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseControlBranchDeletionTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"DeleteBranch(Input : int)<computes> : int =\n"
+		"    if (Input > 0):\n"
+		"        Input\n"
+		"        0\n"
+		"    else:\n"
+		"        -1\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const FVerseVisualTile* Function = Session.GetTiles().FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.DefinitionKind == VerseSyntaxKind::Function;
+		});
+	if (!TestNotNull(TEXT("Control-branch deletion fixture parses"), Function))
+	{
+		return false;
+	}
+	const TArray<FVerseVisualTile> Graph =
+		FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Session.GetParseSnapshot());
+	const FVerseVisualTile* IfTile = Graph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	const FVerseVisualTile* BranchLiteral = IfTile != nullptr
+		? IfTile->Children.FindByPredicate(
+			[&Session](const FVerseVisualTile& Tile)
+			{
+				return Tile.bStatementLevel
+					&& Tile.LiteralKind == EVerseLiteralKind::Integer
+					&& Session.GetParseSnapshot().GetDocument()
+						->DecodeOriginalRange(Tile.Range) == TEXT("0");
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("True-branch integer literal is represented"), BranchLiteral))
+	{
+		return false;
+	}
+	if (!TestTrue(TEXT("Branch literal retains its owning ordered clause"),
+		BranchLiteral->EditableClause.IsSet()
+			&& BranchLiteral->ClauseItemIndex == 1))
+	{
+		return false;
+	}
+	FText Error;
+	const bool bDeleted = FVerseClauseEditing::DeleteExpression(
+		Session,
+		BranchLiteral->EditableClause.GetValue(),
+		BranchLiteral->ClauseItemIndex,
+		Error);
+	TestTrue(
+		*FString::Printf(TEXT("Deleting the selected branch literal succeeds: %s"),
+			*Error.ToString()),
+		bDeleted);
+	const FString Source(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+	TestFalse(TEXT("Deleting the branch item removes its source and separator"),
+		Source.Contains(TEXT("        Input\n        0")));
+	const FVerseVisualTile* RebuiltFunction = Session.GetTiles().FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.DefinitionKind == VerseSyntaxKind::Function;
+		});
+	const TArray<FVerseVisualTile> RebuiltGraph = RebuiltFunction != nullptr
+		? FVerseVisualTileBuilder::BuildFunctionGraph(
+			*RebuiltFunction, Session.GetParseSnapshot())
+		: TArray<FVerseVisualTile>();
+	const FVerseVisualTile* RebuiltIf = RebuiltGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	const FVerseVisualExpressionDescriptor::FControlRegion* RebuiltBody =
+		RebuiltIf != nullptr
+			? RebuiltIf->ControlRegions.FindByPredicate(
+				[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				})
+			: nullptr;
+	TestTrue(TEXT("The true branch reparses with only its preceding expression"),
+		RebuiltBody != nullptr && RebuiltBody->OperandCount == 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseSocketSourceEditingTest,
 	"VerseVisualEditor.Prototype.Functions.SocketSourceEditing",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
