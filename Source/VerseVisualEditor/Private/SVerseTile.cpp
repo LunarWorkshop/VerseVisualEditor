@@ -13,6 +13,7 @@
 #include "VerseDocument.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualEditorStyle.h"
+#include "VerseGraphMotion.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -34,15 +35,47 @@ namespace
 
 		FVerseVisualClauseDescriptor Clause;
 		int32 ItemIndex = INDEX_NONE;
+		TWeakPtr<SVerseGraphMotionWidget> MotionTarget;
+
+		virtual void OnDragged(const FDragDropEvent& DragDropEvent) override
+		{
+			if (const TSharedPtr<SVerseGraphMotionWidget> Target = MotionTarget.Pin())
+			{
+				Target->UpdateElasticDrag(DragDropEvent.GetScreenSpacePosition());
+			}
+		}
+
+		virtual void OnDrop(bool bDropWasHandled, const FPointerEvent& MouseEvent) override
+		{
+			if (const TSharedPtr<SVerseGraphMotionWidget> Target = MotionTarget.Pin())
+			{
+				Target->EndElasticDrag();
+			}
+		}
+
+		virtual TSharedPtr<SWidget> GetDefaultDecorator() const override
+		{
+			return SNullWidget::NullWidget;
+		}
 
 		static TSharedRef<FVerseClauseTileDragDropOp> New(
-			const FVerseVisualClauseDescriptor& InClause,
-			int32 InItemIndex)
+			const TOptional<FVerseVisualClauseDescriptor>& InClause,
+			int32 InItemIndex,
+			TSharedPtr<SVerseGraphMotionWidget> InMotionTarget,
+			FVector2D StartDesktopPosition)
 		{
 			TSharedRef<FVerseClauseTileDragDropOp> Operation =
 				MakeShared<FVerseClauseTileDragDropOp>();
-			Operation->Clause = InClause;
+			if (InClause.IsSet())
+			{
+				Operation->Clause = InClause.GetValue();
+			}
 			Operation->ItemIndex = InItemIndex;
+			Operation->MotionTarget = InMotionTarget;
+			if (InMotionTarget.IsValid())
+			{
+				InMotionTarget->BeginElasticDrag(StartDesktopPosition);
+			}
 			Operation->Construct();
 			return Operation;
 		}
@@ -1686,15 +1719,20 @@ FReply SVerseTile::OnDragDetected(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
-	if (!Tile.EditableClause.IsSet()
-		|| Tile.ClauseItemIndex == INDEX_NONE
-		|| !OnClauseReordered.IsBound())
+	const TSharedPtr<SVerseGraphMotionWidget> Target = MotionTarget.Pin();
+	const bool bCanReorder = Tile.EditableClause.IsSet()
+		&& Tile.ClauseItemIndex != INDEX_NONE
+		&& OnClauseReordered.IsBound();
+	if (!Target.IsValid() && !bCanReorder)
 	{
 		return FReply::Unhandled();
 	}
 	return FReply::Handled().BeginDragDrop(
 		FVerseClauseTileDragDropOp::New(
-			Tile.EditableClause.GetValue(), Tile.ClauseItemIndex));
+			Tile.EditableClause,
+			Tile.ClauseItemIndex,
+			Target,
+			MouseEvent.GetScreenSpacePosition()));
 }
 
 FReply SVerseTile::OnDrop(
@@ -1744,9 +1782,10 @@ FReply SVerseTile::HandleHeaderMouseButtonDown(
 		return FReply::Unhandled();
 	}
 	FReply Reply = OnSelected.Execute();
-	if (Tile.EditableClause.IsSet()
-		&& Tile.ClauseItemIndex != INDEX_NONE
-		&& OnClauseReordered.IsBound())
+	if (MotionTarget.IsValid()
+		|| (Tile.EditableClause.IsSet()
+			&& Tile.ClauseItemIndex != INDEX_NONE
+			&& OnClauseReordered.IsBound()))
 	{
 		Reply.DetectDrag(SharedThis(this), EKeys::LeftMouseButton);
 	}

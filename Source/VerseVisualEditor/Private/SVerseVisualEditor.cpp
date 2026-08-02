@@ -89,6 +89,7 @@ struct FOpenVerseFunctionTab
 	int32 LastDeclarationLine = INDEX_NONE;
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseFunctionCanvas> FunctionCanvas;
+	TSharedPtr<FVerseGraphMotionController> MotionController;
 	bool bHasViewState = false;
 };
 
@@ -911,11 +912,13 @@ namespace
 				SourceAnchor,
 				(*SourceWidget)->GetSocketAnchorCoordinate(Model.Source.Socket),
 				SourceScope,
+				(*SourceWidget)->GetMotionTarget(),
 				SourceScope.IsValid()});
 			Widgets.Endpoints->Register(Model.Target, {
 				TargetAnchor,
 				(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket),
 				TargetScope,
+				(*TargetWidget)->GetMotionTarget(),
 				TargetScope.IsValid()});
 			Connection.Outcome = Model.Outcome;
 		}
@@ -947,7 +950,9 @@ namespace
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
 		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
 		EVerseFunctionGraphPresentation Presentation =
-			EVerseFunctionGraphPresentation::VerticalExecution)
+			EVerseFunctionGraphPresentation::VerticalExecution,
+		TSharedPtr<FVerseGraphMotionController> MotionController = nullptr,
+		FString ParentMotionKey = FString())
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -956,6 +961,32 @@ namespace
 		const float OperandWireSpace = bCompactOperands
 			? CompactOperandWireSpace
 			: StandardOperandWireSpace;
+		const FString MotionKey = MotionController.IsValid()
+			? MotionController->AllocateKey(
+				BuildVerseGraphMotionKeyBase(Tile, *Document))
+			: FString();
+		auto FinishRow = [MotionController, MotionKey, ParentMotionKey, Presentation](
+			FBuiltFunctionGraphRow Row)
+		{
+			if (!MotionController.IsValid())
+			{
+				return Row;
+			}
+			TSharedRef<SVerseGraphMotionWidget> MotionWidget =
+				SNew(SVerseGraphMotionWidget)
+				.Controller(MotionController)
+				.MotionKey(MotionKey)
+				.ParentMotionKey(ParentMotionKey)
+				.Entrance(Presentation == EVerseFunctionGraphPresentation::VerticalExecution
+					? EVerseGraphMotionEntrance::FromRight
+					: EVerseGraphMotionEntrance::FromTop)
+				[
+					Row.Widget
+				];
+			Row.RootTile->SetMotionTarget(MotionWidget);
+			Row.Widget = MotionWidget;
+			return Row;
+		};
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
 			TSharedPtr<SHorizontalBox> HorizontalChain;
@@ -991,7 +1022,9 @@ namespace
 					ModelConnections,
 					WidgetRegistry,
 					RenderScope,
-					Presentation);
+					Presentation,
+					MotionController,
+					MotionKey);
 				if (AutomaticChain.IsValid())
 				{
 					AutomaticChain->AddStatement(
@@ -1042,10 +1075,10 @@ namespace
 			if (bCompactOperands
 				|| Presentation == EVerseFunctionGraphPresentation::Tracks)
 			{
-				return {BlockTile, BlockTile};
+				return FinishRow({BlockTile, BlockTile});
 			}
 			const float BlockOffset = OperandColumnWidth + OperandWireSpace;
-			return {
+			return FinishRow({
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
@@ -1056,7 +1089,7 @@ namespace
 					BlockTile
 				],
 				BlockTile,
-				[BlockOffset]() { return FVector2D(BlockOffset, 0.0f); }};
+				[BlockOffset]() { return FVector2D(BlockOffset, 0.0f); }});
 		}
 		if (Presentation != EVerseFunctionGraphPresentation::Tracks
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control
@@ -1085,7 +1118,9 @@ namespace
 					ModelConnections,
 					WidgetRegistry,
 					OwningRenderScope,
-					Presentation);
+					Presentation,
+					MotionController,
+					MotionKey);
 				PredicatePresentation = PredicateRow.Widget;
 			}
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
@@ -1136,7 +1171,9 @@ namespace
 							ModelConnections,
 							WidgetRegistry,
 							OwningRenderScope,
-							Presentation);
+							Presentation,
+							MotionController,
+							MotionKey);
 						Branch->AddStatement(
 							ChildRow.Widget,
 							ChildRow.RootTile,
@@ -1158,7 +1195,7 @@ namespace
 			const float ExecutionSpineOffset = PredicateColumnWidth + OperandWireSpace;
 			const float BranchLeftPadding =
 				ExecutionSpineOffset + RootTile->GetDesiredSize().X + 24.0f;
-			return {
+			return FinishRow({
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
 				[
@@ -1207,7 +1244,7 @@ namespace
 				[ExecutionSpineOffset]()
 				{
 					return FVector2D(ExecutionSpineOffset, 0.0f);
-				}};
+				}});
 		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile,
@@ -1227,7 +1264,7 @@ namespace
 		if (Presentation == EVerseFunctionGraphPresentation::Tracks
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
-			return {RootTile, RootTile};
+			return FinishRow({RootTile, RootTile});
 		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
@@ -1276,7 +1313,9 @@ namespace
 						ModelConnections,
 						WidgetRegistry,
 						OwningRenderScope,
-						Presentation);
+						Presentation,
+						MotionController,
+						MotionKey);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
@@ -1330,7 +1369,7 @@ namespace
 				[
 					RegionRow
 				];
-			return {
+			return FinishRow({
 				ControlPresentation,
 				RootTile,
 				[ControlPresentation, RootTile]()
@@ -1341,7 +1380,7 @@ namespace
 						(ControlPresentation->GetDesiredSize().X
 							- RootTile->GetDesiredSize().X) * 0.5f,
 						0.0f);
-				}};
+				}});
 		}
 		const bool bHasOperandLayout = IsVerseOperatorExpression(Tile.ExpressionKind)
 			|| Tile.ExpressionKind == EVerseExpressionKind::Call
@@ -1350,9 +1389,9 @@ namespace
 		{
 			if (bCompactOperands)
 			{
-				return {RootTile, RootTile};
+				return FinishRow({RootTile, RootTile});
 			}
-			return {
+			return FinishRow({
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
@@ -1366,7 +1405,7 @@ namespace
 				[RootOffset = OperandColumnWidth + OperandWireSpace]()
 				{
 					return FVector2D(RootOffset, 0.0f);
-				}};
+				}});
 		}
 
 		TSharedRef<SVerseExpressionLayoutPanel> ExpressionLayout =
@@ -1392,7 +1431,9 @@ namespace
 				ModelConnections,
 				WidgetRegistry,
 				OwningRenderScope,
-				Presentation);
+				Presentation,
+				MotionController,
+				MotionKey);
 			ExpressionLayout->AddOperand(
 				OperandRow.Widget,
 				OperandRow.RootTile,
@@ -1400,10 +1441,10 @@ namespace
 				Index);
 		}
 
-		return {
+		return FinishRow({
 			ExpressionLayout,
 			RootTile,
-			[ExpressionLayout]() { return ExpressionLayout->GetRootPosition(); }};
+			[ExpressionLayout]() { return ExpressionLayout->GetRootPosition(); }});
 	}
 
 	FText GetSourceControlStatus(const FString& FilePath)
@@ -4205,6 +4246,11 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	{
 		FOpenVerseFunctionTab& FunctionTab =
 			ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex];
+		if (!FunctionTab.MotionController.IsValid())
+		{
+			FunctionTab.MotionController = MakeShared<FVerseGraphMotionController>();
+		}
+		FunctionTab.MotionController->BeginBuild(FunctionTab.FunctionCanvas.IsValid());
 		ActiveDocument->FileCanvas.Reset();
 		TSharedPtr<SWidget> FunctionEntryAnchor;
 		const TSharedRef<const FVerseDocument> SourceDocument =
@@ -4325,7 +4371,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				ModelConnections,
 				&WidgetRegistry,
 				nullptr,
-				FunctionGraphPresentation);
+				FunctionGraphPresentation,
+				FunctionTab.MotionController);
 			const bool bPairWithImplicitReturn = Tile.bImplicitReturnValue
 				&& FunctionTab.GraphTiles.IsValidIndex(Index + 1)
 				&& FunctionTab.GraphTiles[Index + 1].Kind
@@ -4357,6 +4404,20 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					&WidgetRegistry,
 					nullptr,
 					FunctionGraphPresentation);
+				const FString ReturnMotionKey = FunctionTab.MotionController->AllocateKey(
+					BuildVerseGraphMotionKeyBase(ReturnDisplayTile, *SourceDocument));
+				const TSharedRef<SVerseGraphMotionWidget> ReturnMotion =
+					SNew(SVerseGraphMotionWidget)
+					.Controller(FunctionTab.MotionController)
+					.MotionKey(ReturnMotionKey)
+					.Entrance(FunctionGraphPresentation
+						== EVerseFunctionGraphPresentation::VerticalExecution
+						? EVerseGraphMotionEntrance::FromRight
+						: EVerseGraphMotionEntrance::FromTop)
+					[
+						ReturnRoot
+					];
+				ReturnRoot->SetMotionTarget(ReturnMotion);
 				GraphRow.RootTile->SlatePrepass();
 				ReturnRoot->SlatePrepass();
 				const float ReturnTopPadding =
@@ -4377,7 +4438,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 						SNew(SBox)
 						.Padding(FMargin(0.0f, ReturnTopPadding, 0.0f, 0.0f))
 						[
-							ReturnRoot
+							ReturnMotion
 						]
 					];
 				AddRootPresentation(
@@ -4475,7 +4536,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 							ModelConnections,
 							&WidgetRegistry,
 							TrackRenderScope,
-							FunctionGraphPresentation);
+							FunctionGraphPresentation,
+							FunctionTab.MotionController);
 						Track->AddSlot().AutoWidth().VAlign(VAlign_Top)
 						.Padding(Offset == 0 ? 0.0f : 72.0f, 0.0f, 0.0f, 0.0f)
 						[
@@ -4555,6 +4617,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				!FunctionTab.bHasViewState)
 				.InitialAnchor(FunctionEntryAnchor)
 				.Connections(GraphConnections)
+				.MotionController(FunctionTab.MotionController)
 				.OnConnectionDropped(FOnVerseGraphConnectionDropped::CreateSP(
 					this, &SVerseVisualEditor::HandleConnectionDropped))
 				.OnConnectionCancelled(FSimpleDelegate::CreateSP(

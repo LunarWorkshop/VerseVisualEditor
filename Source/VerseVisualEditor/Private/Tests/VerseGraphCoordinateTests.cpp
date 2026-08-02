@@ -4,6 +4,7 @@
 #include "SVerseFunctionGraphLayout.h"
 #include "SVerseTile.h"
 #include "VerseGraphCoordinates.h"
+#include "VerseGraphMotion.h"
 #include "VerseVisualEditorStyle.h"
 
 #include "GraphEditorSettings.h"
@@ -22,6 +23,43 @@ namespace
 		FVerseVisualTileBuilder::FinalizeSocketTopology(Tiles);
 		return MoveTemp(Tiles[0]);
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphMotionMathTest,
+	"VerseVisualEditor.Graph.Motion.ResistanceAndEaseOut",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphMotionMathTest::RunTest(const FString& Parameters)
+{
+	auto RadiusAfterResistance = [](float Radius, FVector2D Direction)
+	{
+		return ApplyVerseGraphDragResistance(Direction.GetSafeNormal() * Radius).Size();
+	};
+	TestEqual(TEXT("Zero displacement stays zero"),
+		ApplyVerseGraphDragResistance(FVector2D::ZeroVector), FVector2D::ZeroVector);
+	TestTrue(TEXT("The first 100 pixels are one-to-one"),
+		FMath::IsNearlyEqual(RadiusAfterResistance(100.0f, FVector2D(1.0f, 0.0f)), 100.0f));
+	TestTrue(TEXT("Two hundred pixels resist to approximately 170"),
+		FMath::IsNearlyEqual(RadiusAfterResistance(200.0f, FVector2D(0.0f, 1.0f)), 170.5f, 0.6f));
+	TestTrue(TEXT("One thousand pixels approach the 300-pixel limit"),
+		FMath::IsNearlyEqual(RadiusAfterResistance(1000.0f, FVector2D(1.0f, 1.0f)), 296.0f, 0.6f));
+	TestTrue(TEXT("Resistance is continuous at 100 pixels"),
+		FMath::Abs(RadiusAfterResistance(100.01f, FVector2D(1.0f, 0.0f))
+			- RadiusAfterResistance(99.99f, FVector2D(1.0f, 0.0f))) < 0.05f);
+	float Previous = 0.0f;
+	for (float Radius = 0.0f; Radius <= 2000.0f; Radius += 10.0f)
+	{
+		const float Current = RadiusAfterResistance(Radius, FVector2D(0.6f, 0.8f));
+		TestTrue(TEXT("Resistance remains radial and monotonic"), Current >= Previous);
+		TestTrue(TEXT("Resistance never exceeds its asymptotic limit"), Current <= 300.0f);
+		Previous = Current;
+	}
+	TestEqual(TEXT("Ease begins at zero"), EvaluateVerseGraphEaseOut(0.0f), 0.0f);
+	TestEqual(TEXT("Ease finishes at one"), EvaluateVerseGraphEaseOut(1.0f), 1.0f);
+	TestTrue(TEXT("Cubic ease-out advances faster than linear in the middle"),
+		EvaluateVerseGraphEaseOut(0.5f) > 0.5f);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

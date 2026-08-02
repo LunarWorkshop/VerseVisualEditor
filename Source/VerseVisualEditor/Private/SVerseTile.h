@@ -7,6 +7,7 @@
 
 class FVerseDocument;
 class SVerseGraphRenderScope;
+class SVerseGraphMotionWidget;
 
 struct FVerseFailablePatternSegment
 {
@@ -137,6 +138,11 @@ public:
 	}
 	const FVerseVisualTile& GetTile() const { return Tile; }
 	bool IsExpanded() const { return !bCollapsible || bExpanded; }
+	void SetMotionTarget(TSharedPtr<SVerseGraphMotionWidget> InMotionTarget)
+	{
+		MotionTarget = MoveTemp(InMotionTarget);
+	}
+	TWeakPtr<SVerseGraphMotionWidget> GetMotionTarget() const { return MotionTarget; }
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
 
@@ -208,6 +214,7 @@ private:
 	TArray<TSharedPtr<SWidget>> ValueOutputRows;
 	TWeakPtr<SVerseGraphRenderScope> OwningRenderScope;
 	TWeakPtr<SVerseGraphRenderScope> BodyRenderScope;
+	TWeakPtr<SVerseGraphMotionWidget> MotionTarget;
 	bool bExpanded = true;
 	bool bShowBody = true;
 	bool bCollapsible = true;

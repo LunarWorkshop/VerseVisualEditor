@@ -11,6 +11,7 @@ void SVerseFunctionCanvas::Construct(
 		.UseEdgePanPadding(true)
 		.InitialAnchor(InArgs._InitialAnchor)
 		.Connections(InArgs._Connections)
+		.MotionController(InArgs._MotionController)
 		.OnConnectionDropped(InArgs._OnConnectionDropped)
 		.OnConnectionCancelled(InArgs._OnConnectionCancelled)
 		.OnBackgroundClicked(InArgs._OnBackgroundClicked)

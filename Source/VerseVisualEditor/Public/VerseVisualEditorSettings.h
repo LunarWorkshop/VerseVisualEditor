@@ -43,4 +43,10 @@ public:
 	EVerseFunctionGraphPresentation FunctionGraphPresentation =
 		EVerseFunctionGraphPresentation::VerticalExecution;
 
+	UPROPERTY(config, EditAnywhere, Category = Animation,
+		meta = (DisplayName = "Graph Motion Duration", ClampMin = "0.0", UIMin = "0.0",
+			UIMax = "1.0", Units = "s",
+			ToolTip = "Duration of tile reflow, entrance, and elastic-return animations. Zero disables animation."))
+	float GraphMotionDurationSeconds = 0.25f;
+
 };

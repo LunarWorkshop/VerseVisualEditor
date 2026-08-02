@@ -15,6 +15,20 @@ struct FVerseDocumentEdit
 	FUtf8String Replacement;
 };
 
+struct FVerseDocumentTransitionEdit
+{
+	FVerseTextRange PreviousRange;
+	FVerseTextRange CurrentRange;
+};
+
+/** Last successful localized source transaction, used to reconcile revision-local views. */
+struct FVerseDocumentSourceTransition
+{
+	FVerseDocumentRevision PreviousRevision;
+	FVerseDocumentRevision CurrentRevision;
+	TArray<FVerseDocumentTransitionEdit> Edits;
+};
+
 /** Coordinates authoritative editable source and all revision-specific derived representations. */
 class FVerseDocumentSession
 {
@@ -40,6 +54,10 @@ public:
 	const FVerseParseSnapshot& GetParseSnapshot() const { return ParseSnapshot.GetValue(); }
 	const TArray<FVerseVisualTile>& GetTiles() const { return Tiles; }
 	uint32 GetMaterializationCount() const { return MaterializationCount; }
+	const TOptional<FVerseDocumentSourceTransition>& GetLastSourceTransition() const
+	{
+		return LastSourceTransition;
+	}
 
 private:
 	void RebuildDerivedRepresentations();
@@ -54,4 +72,5 @@ private:
 	TSharedPtr<const FVerseDocument> CurrentSourceDocument;
 	TOptional<FVerseParseSnapshot> ParseSnapshot;
 	TArray<FVerseVisualTile> Tiles;
+	TOptional<FVerseDocumentSourceTransition> LastSourceTransition;
 };

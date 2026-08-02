@@ -158,7 +158,8 @@ namespace
 		int32 Layer,
 		FVersePaintPoint StartPoint,
 		FVersePaintPoint EndPoint,
-		EVerseGraphConnectionAxis Axis)
+		EVerseGraphConnectionAxis Axis,
+		float Opacity = 1.0f)
 	{
 		const FVector2D Start = StartPoint.Value;
 		const FVector2D End = EndPoint.Value;
@@ -177,7 +178,7 @@ namespace
 				PI * 0.25f,
 				MarkerSize * 0.5f,
 				FSlateDrawElement::RelativeToElement,
-				GetVerseFailureDecorationColor());
+				GetVerseFailureDecorationColor().CopyWithNewOpacity(Opacity));
 		}
 	}
 
@@ -239,14 +240,23 @@ namespace
 			SourceGeometry, SourceBinding->AnchorCoordinate);
 		const FVersePaintPoint End = AnchorPoint(
 			TargetGeometry, TargetBinding->AnchorCoordinate);
+		const TSharedPtr<SVerseGraphMotionWidget> SourceMotion =
+			SourceBinding->MotionOwner.Pin();
+		const TSharedPtr<SVerseGraphMotionWidget> TargetMotion =
+			TargetBinding->MotionOwner.Pin();
+		const float WireOpacity = FMath::Min(
+			SourceMotion.IsValid() ? SourceMotion->GetCurrentOpacity() : 1.0f,
+			TargetMotion.IsValid() ? TargetMotion->GetCurrentOpacity() : 1.0f);
+		FLinearColor WireColor = Connection.Color;
+		WireColor.A *= WireOpacity;
 		DrawSpline(
 			OutDrawElements, LayerId, Start, End,
-			Connection.Axis, Connection.Thickness, Connection.Color);
+			Connection.Axis, Connection.Thickness, WireColor);
 		if (Connection.Outcome == EVerseExpressionOutcome::FailableValue
 			|| Connection.Outcome == EVerseExpressionOutcome::FailureOnly)
 		{
 			DrawFailureMarkers(
-				OutDrawElements, LayerId, Start, End, Connection.Axis);
+				OutDrawElements, LayerId, Start, End, Connection.Axis, WireOpacity);
 		}
 		for (int32 Index = 0;
 			Index < Connection.ExtraBlankLineMarkers;
@@ -265,7 +275,7 @@ namespace
 				FPaintGeometry(),
 				MoveTemp(Points),
 				ESlateDrawEffect::None,
-				Connection.Color,
+				WireColor,
 				true,
 				Connection.Thickness);
 		}
@@ -413,6 +423,9 @@ void SVerseGraphSurface::Construct(
 	bPendingInitialCenter = bCenterInitially;
 	InitialAnchor = InArgs._InitialAnchor;
 	Connections = InArgs._Connections;
+	MotionController = InArgs._MotionController.IsValid()
+		? InArgs._MotionController
+		: MakeShared<FVerseGraphMotionController>();
 	OnConnectionDropped = InArgs._OnConnectionDropped;
 	OnConnectionCancelled = InArgs._OnConnectionCancelled;
 	OnBackgroundClicked = InArgs._OnBackgroundClicked;
@@ -548,6 +561,11 @@ void SVerseGraphSurface::Tick(
 	float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (MotionController.IsValid() && ContentHost.IsValid())
+	{
+		MotionController->SetSurfaceGeometry(
+			ContentHost->GetTickSpaceGeometry(), Zoom);
+	}
 	if (ConnectionDrag.IsSet() && ConnectionDrag->bScopedToNestedRenderScope)
 	{
 		const TSharedPtr<SVerseGraphRenderScope> Scope = ConnectionDrag->RenderScope.Pin();

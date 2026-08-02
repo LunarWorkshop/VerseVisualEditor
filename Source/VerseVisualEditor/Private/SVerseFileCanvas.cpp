@@ -6,6 +6,7 @@
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "VerseVisualEditorStyle.h"
+#include "VerseGraphMotion.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -117,6 +118,8 @@ void SVerseFileCanvas::Construct(
 	OnTileSelected = MoveTemp(InOnTileSelected);
 	OnFunctionOpened = InArgs._OnFunctionOpened;
 	OnSelectionCleared = MoveTemp(InOnSelectionCleared);
+	MotionController = MakeShared<FVerseGraphMotionController>();
+	MotionController->BeginBuild(false);
 	if (InitialSelectedRange.IsSet())
 	{
 		Selection.Select(InitialSelectedRange.GetValue());
@@ -125,6 +128,7 @@ void SVerseFileCanvas::Construct(
 	[
 		SAssignNew(GraphSurface, SVerseGraphSurface, InitialViewState, false)
 		.UseEdgePanPadding(true)
+		.MotionController(MotionController)
 		.OnBackgroundClicked(FSimpleDelegate::CreateSP(this, &SVerseFileCanvas::ClearTileSelection))
 		[
 			BuildTileRow()
@@ -153,6 +157,7 @@ void SVerseFileCanvas::RefreshContent(
 	}
 	if (GraphSurface.IsValid())
 	{
+		MotionController->BeginBuild(true);
 		GraphSurface->SetContent(BuildTileRow());
 	}
 }
@@ -260,14 +265,34 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildTileSequence(
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
+	const FString ParentMotionKey = MotionParentKeys.IsEmpty()
+		? FString()
+		: MotionParentKeys.Last();
+	const FString MotionKey = MotionController->AllocateKey(
+		BuildVerseGraphMotionKeyBase(Tile, *Snapshot->GetDocument()));
+	MotionParentKeys.Add(MotionKey);
 	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
 		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
 			|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias);
 	TSharedRef<SWidget> Widget = bCompactDefinition
 		? BuildCompactTile(Tile, TileIndex)
 		: BuildStructuralTile(Tile, TileIndex);
-	TileWidgets.Add({Tile.Range, Widget});
-	return Widget;
+	MotionParentKeys.Pop(EAllowShrinking::No);
+	TSharedRef<SVerseGraphMotionWidget> MotionWidget =
+		SNew(SVerseGraphMotionWidget)
+		.Controller(MotionController)
+		.MotionKey(MotionKey)
+		.ParentMotionKey(ParentMotionKey)
+		.Entrance(EVerseGraphMotionEntrance::FromTop)
+		[
+			Widget
+		];
+	if (LastBuiltRootTile.IsValid())
+	{
+		LastBuiltRootTile->SetMotionTarget(MotionWidget);
+	}
+	TileWidgets.Add({Tile.Range, MotionWidget});
+	return MotionWidget;
 }
 
 TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
@@ -301,7 +326,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 	return SNew(SBox)
 		.MaxDesiredWidth(bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module ? 2400.0f : 720.0f)
 		[
-			SNew(SVerseTile)
+			SAssignNew(LastBuiltRootTile, SVerseTile)
 			.Tile(Tile)
 			.Document(Snapshot->GetDocument())
 			.DiagnosticText(bHasDiagnostic ? FormatDiagnosticMessages(TileIndex) : FText::GetEmpty())
@@ -428,7 +453,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 	return SNew(SBox)
 		.MinDesiredWidth(420.0f)
 		[
-		SNew(SVerseTile)
+		SAssignNew(LastBuiltRootTile, SVerseTile)
 		.Tile(Tile)
 		.Document(Snapshot->GetDocument())
 		.Compact(true)

@@ -37,21 +37,8 @@ bool FVerseDocumentSession::Replace(
 	FUtf8StringView Replacement,
 	FText& OutError)
 {
-	if (Range.Revision != Revision)
-	{
-		OutError = LOCTEXT("StaleRange", "The edit range belongs to an obsolete document revision.");
-		return false;
-	}
-	if (!EditBuffer.Replace(Range, Replacement, OutError))
-	{
-		return false;
-	}
-
-	++Revision.Value;
-	++ContentStateId.Value;
-	MaterializedSource.Reset();
-	RebuildDerivedRepresentations();
-	return true;
+	const FVerseDocumentEdit Edit{Range, FUtf8String(Replacement)};
+	return ReplaceMany(MakeArrayView(&Edit, 1), OutError);
 }
 
 bool FVerseDocumentSession::ReplaceMany(
@@ -93,8 +80,31 @@ bool FVerseDocumentSession::ReplaceMany(
 		}
 	}
 
+	TArray<FVerseDocumentEdit> Ascending(Edits);
+	Ascending.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
+	{
+		return Left.Range.BeginByte < Right.Range.BeginByte;
+	});
+	FVerseDocumentSourceTransition Transition;
+	Transition.PreviousRevision = Revision;
+	int32 AccumulatedDelta = 0;
+	for (const FVerseDocumentEdit& Edit : Ascending)
+	{
+		FVerseDocumentTransitionEdit& TransitionEdit =
+			Transition.Edits.AddDefaulted_GetRef();
+		TransitionEdit.PreviousRange = Edit.Range;
+		TransitionEdit.CurrentRange = FVerseTextRange(
+			FVerseDocumentRevision{Revision.Value + 1},
+			FVerseByteRange{
+				Edit.Range.BeginByte + AccumulatedDelta,
+				Edit.Replacement.Len()});
+		AccumulatedDelta += Edit.Replacement.Len() - Edit.Range.NumBytes;
+	}
+
 	EditBuffer = MoveTemp(Candidate);
 	++Revision.Value;
+	Transition.CurrentRevision = Revision;
+	LastSourceTransition = MoveTemp(Transition);
 	++ContentStateId.Value;
 	MaterializedSource.Reset();
 	RebuildDerivedRepresentations();
@@ -113,6 +123,7 @@ void FVerseDocumentSession::Reload(TSharedRef<const FVerseDocument> InDocument)
 	CurrentSourceDocument = OriginalDocument;
 	ParseSnapshot.Emplace(FVerseParseSnapshotBuilder::Build(CurrentSourceDocument.ToSharedRef()));
 	Tiles = FVerseVisualTileBuilder::Build(ParseSnapshot.GetValue(), Revision);
+	LastSourceTransition.Reset();
 }
 
 bool FVerseDocumentSession::SaveToFile(const FString& FilePath, FText& OutError)

@@ -68,6 +68,9 @@ private:
 	TArray<FTileWidgetEntry> TileWidgets;
 	TArray<FVerseCompilationDiagnostic> Diagnostics;
 	TSharedPtr<SVerseGraphSurface> GraphSurface;
+	TSharedPtr<FVerseGraphMotionController> MotionController;
+	TSharedPtr<SVerseTile> LastBuiltRootTile;
+	TArray<FString> MotionParentKeys;
 	FVerseTileSelection Selection;
 	FOnVerseTileSelected OnTileSelected;
 	FOnVerseFunctionOpened OnFunctionOpened;

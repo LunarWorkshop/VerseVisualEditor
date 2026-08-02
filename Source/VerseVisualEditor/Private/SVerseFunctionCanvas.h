@@ -10,6 +10,7 @@ public:
 	SLATE_BEGIN_ARGS(SVerseFunctionCanvas) {}
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
+		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
 		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
 		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
 		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
@@ -24,6 +25,10 @@ public:
 		TSharedPtr<SWidget> InInitialAnchor);
 	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
 	void EndConnectionPreview();
+	TSharedRef<FVerseGraphMotionController> GetMotionController() const
+	{
+		return Surface->GetMotionController();
+	}
 
 private:
 	TSharedPtr<SVerseGraphSurface> Surface;

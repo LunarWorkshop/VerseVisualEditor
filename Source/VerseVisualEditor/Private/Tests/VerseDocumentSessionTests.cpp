@@ -152,6 +152,19 @@ bool FVerseDocumentSessionRangeValidationTest::RunTest(const FString& Parameters
 		Session.GetRevision().Value, uint64(2));
 	TestEqual(TEXT("Both atomic replacements are visible"),
 		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("AβB"));
+	TestTrue(TEXT("The successful transaction records a source transition"),
+		Session.GetLastSourceTransition().IsSet());
+	if (Session.GetLastSourceTransition().IsSet())
+	{
+		const FVerseDocumentSourceTransition& Transition =
+			Session.GetLastSourceTransition().GetValue();
+		TestEqual(TEXT("Transition records the prior revision"),
+			Transition.PreviousRevision.Value, uint64(1));
+		TestEqual(TEXT("Transition records the current revision"),
+			Transition.CurrentRevision.Value, uint64(2));
+		TestEqual(TEXT("Transition records every atomic edit"),
+			Transition.Edits.Num(), 2);
+	}
 	return true;
 }
 
@@ -179,6 +192,13 @@ bool FVerseDocumentSessionReparseTest::RunTest(const FString& Parameters)
 	FText Error;
 	TestTrue(TEXT("Renaming source through a localized replacement succeeds"),
 		Session.Replace(FVerseTextRange(Session.GetRevision(), {0, 5}), UTF8TEXTVIEW("Renamed"), Error));
+	if (Session.GetLastSourceTransition().IsSet())
+	{
+		const FVerseDocumentTransitionEdit& Edit =
+			Session.GetLastSourceTransition()->Edits[0];
+		TestEqual(TEXT("Transition retains the old byte span"), Edit.PreviousRange.NumBytes, 5);
+		TestEqual(TEXT("Transition computes the replacement byte span"), Edit.CurrentRange.NumBytes, 7);
+	}
 	TestEqual(TEXT("Reparsing materializes the new revision once"), Session.GetMaterializationCount(), uint32(2));
 	TestEqual(TEXT("Current source contains the localized replacement"),
 		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("Renamed := class {}\n"));

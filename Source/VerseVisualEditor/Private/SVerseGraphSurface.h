@@ -5,6 +5,7 @@
 #include "SVerseTile.h"
 #include "VerseCanvasViewState.h"
 #include "VerseGraphCoordinates.h"
+#include "VerseGraphMotion.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SLeafWidget.h"
 
@@ -42,6 +43,7 @@ struct FVerseGraphEndpointBinding
 	TWeakPtr<SWidget> Anchor;
 	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
 	TWeakPtr<class SVerseGraphRenderScope> RenderScope;
+	TWeakPtr<SVerseGraphMotionWidget> MotionOwner;
 	bool bScopedToNestedRenderScope = false;
 };
 
@@ -122,6 +124,7 @@ public:
 		SLATE_ARGUMENT(bool, UseEdgePanPadding)
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
+		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
 		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
 		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
 		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
@@ -140,6 +143,10 @@ public:
 	void SetContent(TSharedRef<SWidget> InContent);
 	void SetInitialAnchor(TSharedPtr<SWidget> InAnchor);
 	void SetConnections(TArray<FVerseGraphConnection> InConnections);
+	TSharedRef<FVerseGraphMotionController> GetMotionController() const
+	{
+		return MotionController.ToSharedRef();
+	}
 
 	virtual void Tick(
 		const FGeometry& AllottedGeometry,
@@ -203,6 +210,7 @@ private:
 	TWeakPtr<SWidget> InitialAnchor;
 	TArray<FVerseGraphConnection> Connections;
 	TOptional<FVerseSocketDragStart> ConnectionDrag;
+	TSharedPtr<FVerseGraphMotionController> MotionController;
 	FVerseCanvasPoint PreviewEndpoint;
 	FOnVerseGraphConnectionDropped OnConnectionDropped;
 	FSimpleDelegate OnConnectionCancelled;
