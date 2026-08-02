@@ -14,6 +14,7 @@ namespace uLang
 	class CDataDefinition;
 	class CFunction;
 	class CFunctionType;
+	class CTypeBase;
 }
 
 enum class EVerseSemanticCandidateKind : uint8
@@ -33,8 +34,19 @@ struct FVerseSemanticCandidate
 	const uLang::CFunction* Function = nullptr;
 	/** The instantiated overload selected while matching the dragged socket. */
 	const uLang::CFunctionType* InstantiatedFunctionType = nullptr;
+	/** Concrete compiler type at the socket which authorized this typed match. */
+	const uLang::CTypeBase* MatchedSocketType = nullptr;
 	int32 BoundInputIndex = INDEX_NONE;
 	/** Owns the compiler program containing the pointers above. */
+	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
+};
+
+/** One concrete, source-selectable overload of an operator visible at a tile. */
+struct FVerseOperatorSignature
+{
+	FString DisplayText;
+	TArray<FString> OperandTypeNames;
+	FString ResultTypeName;
 	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
 };
 
@@ -60,6 +72,16 @@ public:
 		const FString& FilePath,
 		int32 ExpressionBeginByte,
 		const FVerseDocument& Document);
+	/** Builds concrete overloads and generic instantiations for an existing operator. */
+	static TArray<FVerseOperatorSignature> BuildOperatorSignatures(
+		TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
+		const FString& FilePath,
+		int32 ExpressionBeginByte,
+		const FVerseDocument& Document,
+		FStringView OperatorSpelling,
+		int32 OperandCount,
+		TConstArrayView<const FVerseVisualSocket*> ConnectedOperands,
+		TConstArrayView<const FVerseVisualSocket*> OutputConsumers);
 
 	/** Bind existing expression tiles to the exact compiler-owned syntax/semantic graph. */
 	static void BindFunctionGraph(

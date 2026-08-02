@@ -264,6 +264,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"CallGenericInt(Input : int)<computes> : int = Identity(Input)\n"
 		"CallGenericFloat(Input : float)<computes> : float = Identity(Input)\n"
 		"CallDefault(Input : int)<computes> : float = WithDefault(Input)\n"
+		"CompareFloat(Input : float)<computes><decides> : float = Input <> 0.0\n"
 		"QueryLogic(Input : logic)<computes><decides> : logic = Input?\n"));
 	Document.Revision.Value = 91;
 
@@ -548,6 +549,98 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		TestTrue(TEXT("Generic inference changes type metadata, not topology"),
 			GenericInt->GetValueInputs()[0].SemanticTypeName == TEXT("int")
 			&& GenericFloat->GetValueInputs()[0].SemanticTypeName == TEXT("float"));
+	}
+	FVerseVisualTile* ComparableFloat = BindNamedFunction(TEXT("CompareFloat"));
+	if (TestNotNull(TEXT("Comparable float invocation binds"), ComparableFloat))
+	{
+		TestEqual(TEXT("Comparable invocation retains its concrete result type"),
+			ComparableFloat->SemanticTypeName,
+			FString(TEXT("float")));
+		TestTrue(TEXT("Connected comparable operands use their resolved expression types"),
+			ComparableFloat->GetValueInputs().Num() == 2
+			&& ComparableFloat->GetValueInputs()[0].SemanticTypeName == TEXT("float")
+			&& ComparableFloat->GetValueInputs()[1].SemanticTypeName == TEXT("float"));
+		const TArray<FVerseOperatorSignature> Signatures =
+			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+				CandidateSnapshots,
+				Document.FilePath,
+				ComparableFloat->Range.BeginByte,
+				*ParsedDocument,
+				ComparableFloat->OperatorSpelling,
+				2,
+				{},
+				{});
+		TestTrue(TEXT("Comparable operator signatures include concrete float operands"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.OperandTypeNames.Num() == 2
+					&& Signature.OperandTypeNames[0] == TEXT("float")
+					&& Signature.OperandTypeNames[1] == TEXT("float");
+			}));
+		TestTrue(TEXT("Comparable operator signatures include concrete integer operands"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.OperandTypeNames.Num() == 2
+					&& Signature.OperandTypeNames[0] == TEXT("int")
+					&& Signature.OperandTypeNames[1] == TEXT("int");
+			}));
+		if (TestTrue(TEXT("Comparable fixture exposes its connected left operand"),
+			ComparableFloat->Children.Num() == 2
+			&& ComparableFloat->Children[0].GetValueOutputs().Num() == 1))
+		{
+			const TArray<const FVerseVisualSocket*> ConnectedOperands = {
+				&ComparableFloat->Children[0].GetValueOutputs()[0], nullptr};
+			const TArray<FVerseOperatorSignature> InputCompatibleSignatures =
+				FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+					CandidateSnapshots,
+					Document.FilePath,
+					ComparableFloat->Range.BeginByte,
+					*ParsedDocument,
+					ComparableFloat->OperatorSpelling,
+					2,
+					ConnectedOperands,
+					{});
+			TestTrue(TEXT("One connected operand constrains its signature position"),
+				!InputCompatibleSignatures.IsEmpty()
+				&& InputCompatibleSignatures.ContainsByPredicate(
+					[](const FVerseOperatorSignature& Signature)
+					{
+						return Signature.OperandTypeNames[0] == TEXT("float");
+					})
+				&& !InputCompatibleSignatures.ContainsByPredicate(
+					[](const FVerseOperatorSignature& Signature)
+					{
+						return Signature.OperandTypeNames[0] == TEXT("int");
+					}));
+		}
+
+		FVerseVisualSocket FloatConsumer;
+		FloatConsumer.SemanticTypeName = TEXT("float");
+		FloatConsumer.SemanticType = ComparableFloat->SemanticType;
+		FloatConsumer.SemanticSnapshot = ComparableFloat->SemanticSnapshot;
+		const TArray<const FVerseVisualSocket*> Consumers = {&FloatConsumer};
+		const TArray<FVerseOperatorSignature> OutputCompatibleSignatures =
+			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+				CandidateSnapshots,
+				Document.FilePath,
+				ComparableFloat->Range.BeginByte,
+				*ParsedDocument,
+				ComparableFloat->OperatorSpelling,
+				2,
+				{},
+				Consumers);
+		TestTrue(TEXT("An output consumer removes incompatible operator results"),
+			!OutputCompatibleSignatures.IsEmpty()
+			&& OutputCompatibleSignatures.ContainsByPredicate(
+				[](const FVerseOperatorSignature& Signature)
+				{
+					return Signature.ResultTypeName == TEXT("float");
+				})
+			&& !OutputCompatibleSignatures.ContainsByPredicate(
+				[](const FVerseOperatorSignature& Signature)
+				{
+					return Signature.ResultTypeName == TEXT("int");
+				}));
 	}
 	FVerseVisualTile* DefaultCall = BindNamedFunction(TEXT("CallDefault"));
 	if (TestNotNull(TEXT("Default-parameter invocation binds"), DefaultCall))

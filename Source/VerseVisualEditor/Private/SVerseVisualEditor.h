@@ -131,6 +131,11 @@ private:
 		ESelectInfo::Type SelectInfo,
 		TSharedPtr<FOpenVerseDocument> OpenDocument,
 		FVerseVisualTile DefinitionTile);
+	void HandleOperatorSignatureSelected(
+		TSharedPtr<FString> NewSignature,
+		ESelectInfo::Type SelectInfo,
+		TSharedPtr<FOpenVerseDocument> OpenDocument,
+		FVerseVisualTile OperatorTile);
 	void HandleSpecifiersCommitted(
 		const FText& NewText,
 		ETextCommit::Type CommitType,
@@ -212,6 +217,8 @@ private:
 	TSharedPtr<SSearchBox> PropertyFilter;
 	TSharedPtr<SVerticalBox> PropertyRows;
 	TArray<TSharedPtr<FString>> TypeOptions;
+	TArray<TSharedPtr<FString>> OperatorSignatureOptions;
+	TArray<struct FVerseOperatorSignature> OperatorSignatures;
 	FString PropertyFilterText;
 
 	FString WatchedDirectory;

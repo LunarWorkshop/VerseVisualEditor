@@ -264,13 +264,19 @@ namespace
 			{
 				const int32 TypeSourceIndex =
 					IntrinsicPresentation->DefaultSourceTypeParameterIndices[Index];
-				if (TypeSourceIndex >= 0 && TypeSourceIndex < Params.Num())
+				if (Candidate.MatchedSocketType != nullptr
+					&& (Candidate.BoundInputIndex == INDEX_NONE
+						|| TypeSourceIndex == Candidate.BoundInputIndex))
+				{
+					Default = DefaultSourceForType(*Candidate.MatchedSocketType);
+				}
+				else if (TypeSourceIndex >= 0 && TypeSourceIndex < Params.Num())
 				{
 					Default = DefaultSourceForType(*Params[TypeSourceIndex]);
 				}
 			}
 			if (Default.IsEmpty()
-				&& Candidate.BoundInputIndex == INDEX_NONE
+				&& Candidate.MatchedSocketType == nullptr
 				&& IntrinsicPresentation != nullptr)
 			{
 				Default = IntrinsicPresentation->UntypedDefaultSource;

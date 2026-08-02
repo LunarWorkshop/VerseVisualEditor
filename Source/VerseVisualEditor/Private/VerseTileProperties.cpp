@@ -143,6 +143,24 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 			Tile.LiteralKind,
 			Tile.Range});
 	}
+	else if (IsVerseOperatorExpression(Tile.ExpressionKind))
+	{
+		TArray<FString> Inputs;
+		for (const FVerseVisualSocket& Socket : Tile.GetValueInputs())
+		{
+			Inputs.Add(!Socket.SemanticTypeName.IsEmpty()
+				? Socket.SemanticTypeName
+				: Socket.IntrinsicTypeName.ToString());
+		}
+		const FString Result = !Tile.SemanticTypeName.IsEmpty()
+			? Tile.SemanticTypeName
+			: Tile.IntrinsicTypeName.ToString();
+		Properties.Add({
+			TEXT("Signature"),
+			FString::Printf(TEXT("%s -> %s"), *FString::Join(Inputs, TEXT(" x ")), *Result),
+			true,
+			EVerseTilePropertyEditKind::OperatorSignature});
+	}
 
 	Properties.Add({TEXT("Lines"), GetSourceLines(Tile)});
 	return Properties;

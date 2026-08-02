@@ -6,6 +6,7 @@
 #include "SVerseFileCanvas.h"
 #include "SVerseTile.h"
 
+#include "Algo/AllOf.h"
 #include "Async/Async.h"
 #include "DirectoryWatcherModule.h"
 #include "DesktopPlatformModule.h"
@@ -111,6 +112,10 @@ struct FOpenVerseDocument
 	FText PropertyValidationMessage;
 	TOptional<FString> PendingRenameText;
 	TOptional<FString> PendingSpecifierText;
+	/** Retains an explicit overload choice while a semantically invalid fallback operand exists. */
+	TOptional<FString> PendingOperatorSignatureText;
+	FString PendingOperatorSpelling;
+	int32 PendingOperatorSignatureBeginByte = INDEX_NONE;
 	bool bIsTemporary = false;
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseFileCanvas> FileCanvas;
@@ -156,6 +161,64 @@ namespace
 	DECLARE_DELEGATE_RetVal_OneParam(
 		bool, FIsVerseFunctionGraphTileSelected, FVerseTextRange);
 	constexpr TCHAR SessionSection[] = TEXT("VerseVisualEditor.Session");
+
+	const FVerseVisualTile* FindVisualTileById(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseVisualTileId Id)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Id == Id)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Child = FindVisualTileById(Tile.Children, Id))
+			{
+				return Child;
+			}
+		}
+		return nullptr;
+	}
+
+	bool FindVisualTileParent(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseVisualTileId ChildId,
+		const FVerseVisualTile*& OutParent,
+		int32& OutChildIndex)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
+			{
+				if (Tile.Children[Index].Id == ChildId)
+				{
+					OutParent = &Tile;
+					OutChildIndex = Index;
+					return true;
+				}
+			}
+			if (FindVisualTileParent(Tile.Children, ChildId, OutParent, OutChildIndex))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FString FormatOperatorSignature(const FVerseVisualTile& Tile)
+	{
+		TArray<FString> Inputs;
+		for (const FVerseVisualSocket& Socket : Tile.GetValueInputs())
+		{
+			Inputs.Add(!Socket.SemanticTypeName.IsEmpty()
+				? Socket.SemanticTypeName
+				: Socket.IntrinsicTypeName.ToString());
+		}
+		const FString Result = !Tile.SemanticTypeName.IsEmpty()
+			? Tile.SemanticTypeName : Tile.IntrinsicTypeName.ToString();
+		return FString::Printf(
+			TEXT("%s -> %s"), *FString::Join(Inputs, TEXT(" x ")), *Result);
+	}
 
 	void ReportRetainedSnapshot(
 		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
@@ -3029,6 +3092,75 @@ FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 			RefreshActiveDocument();
 			return FReply::Handled();
 		}
+
+		// A nested value expression cannot be removed as raw text without making
+		// its parent syntactically incomplete. Delete replaces that one operand
+		// with a source-safe default; the compiler may still report a semantic
+		// mismatch for types which have no literal default.
+		const FVerseVisualTile* Parent = nullptr;
+		int32 ChildIndex = INDEX_NONE;
+		for (const FOpenVerseFunctionTab& Tab : ActiveDocument->FunctionTabs)
+		{
+			if (FindVisualTileParent(Tab.GraphTiles, Selected.Id, Parent, ChildIndex))
+			{
+				break;
+			}
+		}
+		if (Parent != nullptr
+			&& ChildIndex != INDEX_NONE
+			&& Selected.Range.IsSet())
+		{
+			const FVerseVisualSocket* ParentInput = Parent->FindSocket({
+				EVerseVisualSocketDirection::Input,
+				EVerseVisualSocketRole::Value,
+				ChildIndex});
+			FString ExpectedType;
+			if (Parent->Kind == EVerseVisualTileKind::Definition
+				&& Parent->TypeRange.IsSet())
+			{
+				ExpectedType = ActiveDocument->Session->GetParseSnapshot()
+					.GetDocument()->DecodeOriginalRange(Parent->TypeRange);
+			}
+			else if (ParentInput != nullptr)
+			{
+				ExpectedType = !ParentInput->SemanticTypeName.IsEmpty()
+					? ParentInput->SemanticTypeName
+					: ParentInput->TypeRange.IsSet()
+						? ActiveDocument->Session->GetParseSnapshot().GetDocument()
+							->DecodeOriginalRange(ParentInput->TypeRange)
+						: ParentInput->IntrinsicTypeName.ToString();
+			}
+			const FString Replacement =
+				GetDefaultVerseLiteralSourceForType(ExpectedType).Get(TEXT("0"));
+			const FTCHARToUTF8 ReplacementUtf8(*Replacement);
+			FText Error;
+			if (!ActiveDocument->Session->Replace(
+				Selected.Range,
+				FUtf8StringView(
+					reinterpret_cast<const UTF8CHAR*>(ReplacementUtf8.Get()),
+					ReplacementUtf8.Length()),
+				Error))
+			{
+				ActiveDocument->LoadError = Error;
+				bLocalCompilePanelOpen = true;
+				return FReply::Handled();
+			}
+			ActiveDocument->SelectedTile.Reset();
+			ActiveDocument->LoadError = FText::GetEmpty();
+			ActiveDocument->bIsTemporary = false;
+			QueueSemanticAnalysis(true);
+			InvalidateCompilationResult(ActiveDocument);
+			if (CompilationMode == EVerseCompilationMode::Continuous)
+			{
+				QueueCompilation(ActiveDocument, true);
+			}
+			ReconcileFunctionTabs(
+				*ActiveDocument,
+				FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+			RebuildDocumentTabs();
+			RefreshActiveDocument();
+			return FReply::Handled();
+		}
 	}
 	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::S)
 	{
@@ -4674,6 +4806,9 @@ void SVerseVisualEditor::HandleTypeSelected(
 	FText EditError;
 	TArray<FVerseDocumentEdit> Edits;
 	Edits.Add({DefinitionTile.TypeRange, FUtf8String(*NewType)});
+	TOptional<FString> AutomaticallySelectedOperatorSignature;
+	FString AutomaticallySelectedOperatorSpelling;
+	int32 AutomaticallySelectedOperatorBeginByte = INDEX_NONE;
 
 	// An inline literal is part of the definition's editable value. Keep its
 	// syntax in lockstep with a primitive annotation change so the rebuilt tile
@@ -4689,6 +4824,67 @@ void SVerseVisualEditor::HandleTypeSelected(
 				FUtf8String(DefaultSource.GetValue())});
 		}
 	}
+	else if (DefinitionTile.Children.Num() == 1
+		&& IsVerseOperatorExpression(DefinitionTile.Children[0].ExpressionKind))
+	{
+		const FVerseVisualTile& Operator = DefinitionTile.Children[0];
+		const bool bEveryOperandIsInline = !Operator.GetValueInputs().IsEmpty()
+			&& Algo::AllOf(
+				Operator.GetValueInputs(),
+				[](const FVerseVisualSocket& Input)
+				{
+					return Input.InlineLiteralRange.IsSet();
+				});
+		if (bEveryOperandIsInline)
+		{
+			FVerseVisualSocket ProspectiveConsumer;
+			ProspectiveConsumer.SemanticTypeName = *NewType;
+			const TArray<const FVerseVisualSocket*> OutputConsumers = {
+				&ProspectiveConsumer};
+			const TArray<FVerseOperatorSignature> CompatibleSignatures =
+				FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+					SemanticWorkspace
+						? SemanticWorkspace->GetCandidateSnapshots()
+						: TArray<TSharedPtr<const FVerseSemanticSnapshot>>(),
+					OpenDocument->FilePath,
+					Operator.Range.BeginByte,
+					*OpenDocument->Session->GetParseSnapshot().GetDocument(),
+					Operator.OperatorSpelling,
+					Operator.GetValueInputs().Num(),
+					{},
+					OutputConsumers);
+			const FString CurrentSignature = FormatOperatorSignature(Operator);
+			const FVerseOperatorSignature* SelectedSignature =
+				CompatibleSignatures.FindByPredicate(
+					[&CurrentSignature](const FVerseOperatorSignature& Signature)
+					{
+						return Signature.DisplayText == CurrentSignature;
+					});
+			if (SelectedSignature == nullptr && !CompatibleSignatures.IsEmpty())
+			{
+				SelectedSignature = &CompatibleSignatures[0];
+			}
+			if (SelectedSignature != nullptr
+				&& SelectedSignature->DisplayText != CurrentSignature
+				&& SelectedSignature->OperandTypeNames.Num()
+					== Operator.GetValueInputs().Num())
+			{
+				for (int32 Index = 0; Index < Operator.GetValueInputs().Num(); ++Index)
+				{
+					const TOptional<FString> Default = GetDefaultVerseLiteralSourceForType(
+						SelectedSignature->OperandTypeNames[Index]);
+					Edits.Add({
+						Operator.GetValueInputs()[Index].InlineLiteralRange,
+						FUtf8String(Default.Get(TEXT("0"))) });
+				}
+				AutomaticallySelectedOperatorSignature = SelectedSignature->DisplayText;
+				AutomaticallySelectedOperatorSpelling = Operator.OperatorSpelling;
+				const FTCHARToUTF8 NewTypeUtf8(**NewType);
+				AutomaticallySelectedOperatorBeginByte = Operator.Range.BeginByte
+					+ NewTypeUtf8.Length() - DefinitionTile.TypeRange.NumBytes;
+			}
+		}
+	}
 
 	if (!OpenDocument->Session->ReplaceMany(Edits, EditError))
 	{
@@ -4698,6 +4894,14 @@ void SVerseVisualEditor::HandleTypeSelected(
 			RebuildProperties();
 		}
 		return;
+	}
+	if (AutomaticallySelectedOperatorSignature.IsSet())
+	{
+		OpenDocument->PendingOperatorSignatureText =
+			AutomaticallySelectedOperatorSignature.GetValue();
+		OpenDocument->PendingOperatorSpelling = AutomaticallySelectedOperatorSpelling;
+		OpenDocument->PendingOperatorSignatureBeginByte =
+			AutomaticallySelectedOperatorBeginByte;
 	}
 	OpenDocument->ProvisionalTiles.AdoptContaining(DefinitionTile.Range);
 
@@ -4731,6 +4935,94 @@ void SVerseVisualEditor::HandleTypeSelected(
 					OpenDocument->SelectedTile = *FunctionGraphReplacement;
 					break;
 				}
+			}
+		}
+	}
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
+void SVerseVisualEditor::HandleOperatorSignatureSelected(
+	TSharedPtr<FString> NewSignature,
+	ESelectInfo::Type SelectInfo,
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	FVerseVisualTile OperatorTile)
+{
+	if (!NewSignature.IsValid()
+		|| SelectInfo == ESelectInfo::Direct
+		|| !OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+	const FVerseOperatorSignature* Signature = OperatorSignatures.FindByPredicate(
+		[&NewSignature](const FVerseOperatorSignature& Candidate)
+		{
+			return Candidate.DisplayText == *NewSignature;
+		});
+	if (Signature == nullptr
+		|| Signature->OperandTypeNames.Num() != OperatorTile.GetValueInputs().Num())
+	{
+		return;
+	}
+
+	TArray<FVerseDocumentEdit> Edits;
+	for (int32 Index = 0; Index < OperatorTile.GetValueInputs().Num(); ++Index)
+	{
+		const FVerseVisualSocket& Input = OperatorTile.GetValueInputs()[Index];
+		if (!Input.InlineLiteralRange.IsSet())
+		{
+			// A connected operand constrains the selected signature and retains its
+			// source. Only the remaining inline defaults are rewritten.
+			continue;
+		}
+		const TOptional<FString> TypedDefault =
+			GetDefaultVerseLiteralSourceForType(Signature->OperandTypeNames[Index]);
+		Edits.Add({
+			Input.InlineLiteralRange,
+			FUtf8String(TypedDefault.Get(TEXT("0"))) });
+	}
+	if (Edits.IsEmpty())
+	{
+		return;
+	}
+
+	const TOptional<FVerseVisualTile> PreviousSelection = OpenDocument->SelectedTile;
+	FText EditError;
+	if (!OpenDocument->Session->ReplaceMany(Edits, EditError))
+	{
+		OpenDocument->PropertyValidationMessage = EditError;
+		RebuildProperties();
+		return;
+	}
+	OpenDocument->PendingOperatorSignatureText = Signature->DisplayText;
+	OpenDocument->PendingOperatorSpelling = OperatorTile.OperatorSpelling;
+	OpenDocument->PendingOperatorSignatureBeginByte = OperatorTile.Range.BeginByte;
+	OpenDocument->ProvisionalTiles.AdoptContaining(OperatorTile.Range);
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
+	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
+	OpenDocument->SelectedTile.Reset();
+	if (PreviousSelection.IsSet())
+	{
+		ReconcileFunctionTabs(
+			*OpenDocument,
+			FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument));
+		for (const FOpenVerseFunctionTab& Tab : OpenDocument->FunctionTabs)
+		{
+			if (const FVerseVisualTile* Replacement = FindReplacementTile(
+				Tab.GraphTiles, PreviousSelection.GetValue()))
+			{
+				OpenDocument->SelectedTile = *Replacement;
+				break;
 			}
 		}
 	}
@@ -4943,6 +5235,8 @@ void SVerseVisualEditor::RebuildProperties()
 		ActiveDocument->SelectedTile.GetValue(),
 		ActiveDocument->Session->GetParseSnapshot());
 	TypeOptions.Reset();
+	OperatorSignatureOptions.Reset();
+	OperatorSignatures.Reset();
 	int32 VisiblePropertyCount = 0;
 	for (const FVerseTileProperty& Property : Properties)
 	{
@@ -4996,6 +5290,143 @@ void SVerseVisualEditor::RebuildProperties()
 						ActiveDocument->SelectedTile.GetValue())
 					[
 						SNew(STextBlock).Text(FText::FromString(Property.Value))
+					];
+			}
+			else if (Property.EditKind == EVerseTilePropertyEditKind::OperatorSignature)
+			{
+				const FVerseVisualTile& SelectedTile =
+					ActiveDocument->SelectedTile.GetValue();
+				TArray<const FVerseVisualSocket*> OutputConsumers;
+				TArray<TSharedPtr<FVerseVisualSocket>> OutputConsumerStorage;
+				TArray<const FVerseVisualSocket*> ConnectedOperands;
+				ConnectedOperands.SetNumZeroed(SelectedTile.GetValueInputs().Num());
+				for (const FOpenVerseFunctionTab& Tab : ActiveDocument->FunctionTabs)
+				{
+					if (FindVisualTileById(Tab.GraphTiles, SelectedTile.Id) == nullptr)
+					{
+						continue;
+					}
+					const TArray<FVerseVisualConnection> Connections =
+						FVerseVisualTileBuilder::BuildConnections(Tab.GraphTiles);
+					for (const FVerseVisualConnection& Connection : Connections)
+					{
+						if (Connection.Target.Tile == SelectedTile.Id
+							&& Connection.Target.Socket.Role == EVerseVisualSocketRole::Value)
+						{
+							if (ConnectedOperands.IsValidIndex(Connection.Target.Socket.Index))
+							{
+								if (const FVerseVisualTile* SourceTile =
+									FindVisualTileById(Tab.GraphTiles, Connection.Source.Tile))
+								{
+									ConnectedOperands[Connection.Target.Socket.Index] =
+										SourceTile->FindSocket(Connection.Source.Socket);
+								}
+							}
+						}
+						if (Connection.Source.Tile == SelectedTile.Id
+							&& Connection.Source.Socket.Role == EVerseVisualSocketRole::Value)
+						{
+							if (const FVerseVisualTile* ConsumerTile =
+								FindVisualTileById(Tab.GraphTiles, Connection.Target.Tile))
+							{
+								if (const FVerseVisualSocket* Consumer =
+									ConsumerTile->FindSocket(Connection.Target.Socket))
+								{
+									TSharedPtr<FVerseVisualSocket> CurrentConsumer =
+										MakeShared<FVerseVisualSocket>(*Consumer);
+									// The source annotation is authoritative immediately after
+									// a Details edit; the semantic snapshot may still describe
+									// the preceding revision for one analysis cycle.
+									if (ConsumerTile->Kind == EVerseVisualTileKind::Definition
+										&& ConsumerTile->TypeRange.IsSet())
+									{
+										const FString DeclaredType = ActiveDocument->Session
+											->GetParseSnapshot().GetDocument()
+											->DecodeOriginalRange(ConsumerTile->TypeRange);
+										if (!DeclaredType.IsEmpty()
+											&& DeclaredType != CurrentConsumer->SemanticTypeName)
+										{
+											CurrentConsumer->SemanticTypeName = DeclaredType;
+											CurrentConsumer->SemanticType = nullptr;
+											CurrentConsumer->SemanticSnapshot.Reset();
+										}
+									}
+									OutputConsumers.Add(CurrentConsumer.Get());
+									OutputConsumerStorage.Add(MoveTemp(CurrentConsumer));
+								}
+							}
+						}
+					}
+					break;
+				}
+				int32 ConnectedOperandCount = 0;
+				for (const FVerseVisualSocket* Socket : ConnectedOperands)
+				{
+					ConnectedOperandCount += Socket != nullptr ? 1 : 0;
+				}
+				OperatorSignatures =
+					FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+						SemanticWorkspace
+							? SemanticWorkspace->GetCandidateSnapshots()
+							: TArray<TSharedPtr<const FVerseSemanticSnapshot>>(),
+						ActiveDocument->FilePath,
+						SelectedTile.Range.BeginByte,
+						*ActiveDocument->Session->GetParseSnapshot().GetDocument(),
+						SelectedTile.OperatorSpelling,
+						SelectedTile.GetValueInputs().Num(),
+						ConnectedOperands,
+						OutputConsumers);
+				for (const FVerseOperatorSignature& Signature : OperatorSignatures)
+				{
+					OperatorSignatureOptions.Add(
+						MakeShared<FString>(Signature.DisplayText));
+				}
+				const FString InferredSignature = FormatOperatorSignature(SelectedTile);
+				if (ActiveDocument->PendingOperatorSignatureText.IsSet()
+					&& ActiveDocument->PendingOperatorSpelling == SelectedTile.OperatorSpelling
+					&& ActiveDocument->PendingOperatorSignatureBeginByte
+						== SelectedTile.Range.BeginByte
+					&& ActiveDocument->PendingOperatorSignatureText.GetValue()
+						== InferredSignature)
+				{
+					ActiveDocument->PendingOperatorSignatureText.Reset();
+				}
+				const FString CurrentSignature =
+					ActiveDocument->PendingOperatorSignatureText.IsSet()
+					&& ActiveDocument->PendingOperatorSpelling == SelectedTile.OperatorSpelling
+					&& ActiveDocument->PendingOperatorSignatureBeginByte
+						== SelectedTile.Range.BeginByte
+						? ActiveDocument->PendingOperatorSignatureText.GetValue()
+						: InferredSignature;
+				const TSharedPtr<FString>* SelectedOption =
+					OperatorSignatureOptions.FindByPredicate(
+						[&CurrentSignature](const TSharedPtr<FString>& Option)
+						{
+							return Option.IsValid()
+								&& *Option == CurrentSignature;
+						});
+				const bool bHasAlternativeSignature =
+					OperatorSignatureOptions.Num() > 1
+					|| (OperatorSignatureOptions.Num() == 1
+						&& OperatorSignatureOptions[0].IsValid()
+						&& *OperatorSignatureOptions[0] != CurrentSignature);
+				ValueWidget = SNew(SSearchableComboBox)
+					.IsEnabled(bHasAlternativeSignature
+						&& ConnectedOperandCount < ConnectedOperands.Num())
+					.OptionsSource(&OperatorSignatureOptions)
+					.InitiallySelectedItem(SelectedOption ? *SelectedOption : nullptr)
+					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Option)
+					{
+						return SNew(STextBlock).Text(Option.IsValid()
+							? FText::FromString(*Option) : FText::GetEmpty());
+					})
+					.OnSelectionChanged(
+						this,
+						&SVerseVisualEditor::HandleOperatorSignatureSelected,
+						ActiveDocument,
+						SelectedTile)
+					[
+						SNew(STextBlock).Text(FText::FromString(CurrentSignature))
 					];
 			}
 			else if (Property.EditKind == EVerseTilePropertyEditKind::Literal)

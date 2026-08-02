@@ -781,14 +781,25 @@ private:
 				{
 					Input.SemanticName = Tile.SemanticInputNames[Index];
 				}
-				if (Tile.SemanticInputTypeNames.IsValidIndex(Index))
+				// The resolved callee signature retains abstract constraints such as
+				// `comparable` even after an invocation has concrete operands. A
+				// connected expression's compiler-resolved result is the effective
+				// socket type used for color and interaction; the formal constraint
+				// remains available on the owning tile's SemanticInput* arrays.
+				if (Child != nullptr && !Child->SemanticTypeName.IsEmpty())
+				{
+					Input.SemanticTypeName = Child->SemanticTypeName;
+					Input.SemanticType = Child->SemanticType;
+					Input.SemanticSnapshot = Child->SemanticSnapshot;
+				}
+				else if (Tile.SemanticInputTypeNames.IsValidIndex(Index))
 				{
 					Input.SemanticTypeName = Tile.SemanticInputTypeNames[Index];
-				}
-				if (Tile.SemanticInputTypes.IsValidIndex(Index))
-				{
-					Input.SemanticType = Tile.SemanticInputTypes[Index];
-					Input.SemanticSnapshot = Tile.SemanticSnapshot;
+					if (Tile.SemanticInputTypes.IsValidIndex(Index))
+					{
+						Input.SemanticType = Tile.SemanticInputTypes[Index];
+						Input.SemanticSnapshot = Tile.SemanticSnapshot;
+					}
 				}
 				Input.bNamedParameter = Tile.SemanticInputNamed.IsValidIndex(Index)
 					&& Tile.SemanticInputNamed[Index];
