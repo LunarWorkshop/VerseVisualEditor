@@ -43,6 +43,7 @@
 #include "VerseExternalChange.h"
 #include "VerseFunctionNavigation.h"
 #include "VerseIdentifier.h"
+#include "VerseProvisionalState.h"
 #include "VerseSemanticCandidates.h"
 #include "VerseSemanticWorkspace.h"
 #include "VerseSpecifier.h"
@@ -115,7 +116,7 @@ struct FOpenVerseDocument
 	TSharedPtr<SVerseFileCanvas> FileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
 	/** Revision-specific, editor-only tile state. Deliberately absent from session persistence. */
-	TArray<FVerseTextRange> ProvisionalTileRanges;
+	FVerseProvisionalState ProvisionalTiles;
 	TArray<FOpenVerseFunctionTab> FunctionTabs;
 	int32 ActiveFunctionTabIndex = INDEX_NONE;
 	FVerseCompilationResult CompilationResult;
@@ -210,12 +211,12 @@ namespace
 
 	void ApplyProvisionalState(
 		TArray<FVerseVisualTile>& Tiles,
-		TConstArrayView<FVerseTextRange> ProvisionalRanges)
+		const FVerseProvisionalState& ProvisionalTiles)
 	{
 		for (FVerseVisualTile& Tile : Tiles)
 		{
-			Tile.bIsProvisional = ProvisionalRanges.Contains(Tile.Range);
-			ApplyProvisionalState(Tile.Children, ProvisionalRanges);
+			Tile.bIsProvisional = ProvisionalTiles.Contains(Tile.Range);
+			ApplyProvisionalState(Tile.Children, ProvisionalTiles);
 		}
 	}
 
@@ -260,7 +261,9 @@ namespace
 				return false;
 			}
 			const FVerseTextRange PredicateRange = Condition->Children[0].Range;
-			Document.ProvisionalTileRanges.AddUnique(PredicateRange);
+			Document.ProvisionalTiles.Add(
+				PredicateRange,
+				Document.Session->GetParseSnapshot().GetDocument()->GetOriginalUtf8View());
 			Condition->Children[0].bIsProvisional = true;
 			return true;
 		}
@@ -271,7 +274,7 @@ namespace
 		FOpenVerseDocument& Document,
 		FVerseTextRange Range)
 	{
-		Document.ProvisionalTileRanges.Remove(Range);
+		Document.ProvisionalTiles.Adopt(Range);
 	}
 
 	DECLARE_DELEGATE_OneParam(FOnVerseExpressionChosen, TSharedPtr<FVerseExpressionAction>);
@@ -1534,6 +1537,9 @@ namespace
 			Document.ActiveFunctionTabIndex = INDEX_NONE;
 			return;
 		}
+		Document.ProvisionalTiles.Rebase(
+			Document.Session->GetParseSnapshot().GetDocument()->GetOriginalUtf8View(),
+			Document.Session->GetRevision());
 
 		const TArray<FVerseFunctionNavigationItem> Items = FVerseFunctionNavigationBuilder::Build(
 			Document.Session->GetTiles(),
@@ -1566,7 +1572,7 @@ namespace
 			BindGraphTiles(Document, Tab.GraphTiles, SemanticSnapshot);
 			// Provisional is transient editor state, so reapply it after every
 			// parse/semantic graph reconstruction rather than deriving it from source.
-			ApplyProvisionalState(Tab.GraphTiles, Document.ProvisionalTileRanges);
+			ApplyProvisionalState(Tab.GraphTiles, Document.ProvisionalTiles);
 			Tab.FirstDeclarationLine = Item->FirstDeclarationLine;
 			Tab.LastDeclarationLine = Item->LastDeclarationLine;
 		}
@@ -3066,7 +3072,7 @@ FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStar
 	{
 		const FVerseTextRange ExistingRange =
 			EffectiveDrag.Clause->Items[EffectiveDrag.ClauseInsertionIndex].Expression.Range;
-		if (ActiveDocument->ProvisionalTileRanges.Contains(ExistingRange))
+		if (ActiveDocument->ProvisionalTiles.Contains(ExistingRange))
 		{
 			// A drag from the execution anchor immediately before a provisional item
 			// means replace that item, not insert another item ahead of it.
@@ -3417,6 +3423,7 @@ void SVerseVisualEditor::HandleInlineLiteralCommitted(
 		}
 		return;
 	}
+	OpenDocument->ProvisionalTiles.AdoptContaining(LiteralRange);
 
 	OpenDocument->LoadError = FText::GetEmpty();
 	OpenDocument->bIsTemporary = false;
@@ -3672,6 +3679,7 @@ bool SVerseVisualEditor::ReloadDocument(const TSharedPtr<FOpenVerseDocument>& Op
 	if (OpenDocument->Session.IsValid())
 	{
 		OpenDocument->Session->Reload(LoadedDocument.ToSharedRef());
+		OpenDocument->ProvisionalTiles.Reset();
 	}
 	else
 	{
@@ -4599,6 +4607,7 @@ void SVerseVisualEditor::HandleRenameCommitted(
 		}
 		return;
 	}
+	OpenDocument->ProvisionalTiles.AdoptContaining(NameRange);
 
 	OpenDocument->bIsTemporary = false;
 	QueueSemanticAnalysis(true);
@@ -4690,6 +4699,7 @@ void SVerseVisualEditor::HandleTypeSelected(
 		}
 		return;
 	}
+	OpenDocument->ProvisionalTiles.AdoptContaining(DefinitionTile.Range);
 
 	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
 	OpenDocument->bIsTemporary = false;
@@ -4801,6 +4811,7 @@ void SVerseVisualEditor::HandleSpecifiersCommitted(
 		}
 		return;
 	}
+	OpenDocument->ProvisionalTiles.AdoptContaining(Tile.Range);
 
 	OpenDocument->bIsTemporary = false;
 	QueueSemanticAnalysis(true);
