@@ -214,6 +214,14 @@ namespace
 				? Socket.SemanticTypeName
 				: Socket.IntrinsicTypeName.ToString());
 		}
+		// Verse equality is a failable, value-producing generic operator. Its
+		// compiler return type may be a literal singleton such as type{0}, which
+		// is useful to the type checker but is not useful in the signature picker.
+		// Equality's selectable presentation is therefore just its operand types.
+		if (Tile.OperatorSpelling == TEXT("=") || Tile.OperatorSpelling == TEXT("<>"))
+		{
+			return FString::Join(Inputs, TEXT(" x "));
+		}
 		const FString Result = !Tile.SemanticTypeName.IsEmpty()
 			? Tile.SemanticTypeName : Tile.IntrinsicTypeName.ToString();
 		return FString::Printf(

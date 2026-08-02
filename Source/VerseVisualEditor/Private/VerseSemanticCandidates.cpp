@@ -1119,6 +1119,93 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 			{
 				continue;
 			}
+			const bool bComparableEquality =
+				OperatorSpelling == TEXT("=") || OperatorSpelling == TEXT("<>");
+
+			// Equality and inequality are declared by Verse as a generic failable
+			// operator whose type variable has `false` and `comparable` bounds.
+			// Calling Matches() proves that a visible type satisfies those bounds,
+			// but it does not substitute that type into the function returned by
+			// Instantiate(). Formatting that partially constrained function leaked
+			// `comparable x comparable -> false` into the editor. Build the concrete
+			// source-selectable signature from each matching visible type instead.
+			if (bComparableEquality && OperandCount == 2)
+			{
+				for (const FVisibleType& VisibleType : VisibleTypes)
+				{
+					const uLang::CFunctionType* FunctionType =
+						uLang::SemanticTypeUtils::Instantiate(
+							Function->_Signature.GetFunctionType(), UploadedVersion);
+					if (FunctionType == nullptr
+						|| FunctionType->GetParamTypes().Num() != OperandCount)
+					{
+						continue;
+					}
+
+					bool bMatchesBounds = true;
+					for (const uLang::CTypeBase* Parameter : FunctionType->GetParamTypes())
+					{
+						if (!uLang::SemanticTypeUtils::Matches(
+							VisibleType.Type, Parameter, UploadedVersion))
+						{
+							bMatchesBounds = false;
+							break;
+						}
+					}
+					if (!bMatchesBounds)
+					{
+						continue;
+					}
+
+					bool bCompatible = true;
+					for (const FVerseVisualSocket* Source : ConnectedOperands)
+					{
+						if (Source == nullptr || Source->SemanticTypeName.IsEmpty())
+						{
+							continue;
+						}
+						bCompatible = Source->SemanticType != nullptr
+							&& Source->SemanticSnapshot.Get() == Snapshot.Get()
+							? uLang::SemanticTypeUtils::IsSubtype(
+								Source->SemanticType, VisibleType.Type, UploadedVersion)
+							: Source->SemanticTypeName == VisibleType.Name;
+						if (!bCompatible)
+						{
+							break;
+						}
+					}
+					for (const FVerseVisualSocket* Consumer : OutputConsumers)
+					{
+						if (!bCompatible || Consumer == nullptr
+							|| Consumer->SemanticTypeName.IsEmpty())
+						{
+							continue;
+						}
+						bCompatible = Consumer->SemanticType != nullptr
+							&& Consumer->SemanticSnapshot.Get() == Snapshot.Get()
+							? uLang::SemanticTypeUtils::IsSubtype(
+								VisibleType.Type, Consumer->SemanticType, UploadedVersion)
+							: VisibleType.Name == Consumer->SemanticTypeName;
+					}
+					if (!bCompatible)
+					{
+						continue;
+					}
+
+					FVerseOperatorSignature Signature;
+					Signature.OperandTypeNames = {VisibleType.Name, VisibleType.Name};
+					Signature.ResultTypeName = VisibleType.Name;
+					Signature.DisplayText = FString::Join(
+						Signature.OperandTypeNames, TEXT(" x "));
+					Signature.Snapshot = Snapshot;
+					if (!Seen.Contains(Signature.DisplayText))
+					{
+						Seen.Add(Signature.DisplayText);
+						Result.Add(MoveTemp(Signature));
+					}
+				}
+				continue;
+			}
 			auto AddSignature = [&](const uLang::CFunctionType& FunctionType)
 			{
 				if (FunctionType.GetParamTypes().Num() != OperandCount)

@@ -584,6 +584,21 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 					&& Signature.OperandTypeNames[0] == TEXT("int")
 					&& Signature.OperandTypeNames[1] == TEXT("int");
 			}));
+		TestTrue(TEXT("Comparable signature labels omit compiler constraint results"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("float x float");
+			})
+			&& Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("int x int");
+			})
+			&& !Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText.Contains(TEXT("comparable"))
+					|| Signature.DisplayText.Contains(TEXT("false"))
+					|| Signature.DisplayText.Contains(TEXT("type{"));
+			}));
 		if (TestTrue(TEXT("Comparable fixture exposes its connected left operand"),
 			ComparableFloat->Children.Num() == 2
 			&& ComparableFloat->Children[0].GetValueOutputs().Num() == 1))
