@@ -3,6 +3,7 @@
 #include "SVerseLiteralEditor.h"
 
 #include "SVerseFunctionCanvas.h"
+#include "SVerseFunctionGraphLayout.h"
 #include "SVerseFileCanvas.h"
 #include "SVerseTile.h"
 
@@ -975,6 +976,12 @@ namespace
 	{
 		TSharedRef<SWidget> Widget;
 		TSharedRef<SVerseTile> RootTile;
+		TFunction<FVector2D()> RootPosition;
+
+		FVector2D GetRootPosition() const
+		{
+			return RootPosition ? RootPosition() : FVector2D::ZeroVector;
+		}
 	};
 
 	FBuiltFunctionGraphRow BuildFunctionGraphRow(
@@ -1001,13 +1008,15 @@ namespace
 			: StandardOperandWireSpace;
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
-			TSharedPtr<SVerticalBox> VerticalChain;
 			TSharedPtr<SHorizontalBox> HorizontalChain;
+			TSharedPtr<SVerseStatementLayoutPanel> AutomaticChain;
 			TSharedRef<SWidget> Chain = SNullWidget::NullWidget;
-			if (Presentation == EVerseFunctionGraphPresentation::VerticalExecution)
+			if (Presentation != EVerseFunctionGraphPresentation::Tracks)
 			{
-				VerticalChain = SNew(SVerticalBox);
-				Chain = VerticalChain.ToSharedRef();
+				AutomaticChain = SNew(SVerseStatementLayoutPanel)
+					.Presentation(Presentation)
+					.StatementGap(16.0f);
+				Chain = AutomaticChain.ToSharedRef();
 			}
 			else
 			{
@@ -1033,15 +1042,13 @@ namespace
 					WidgetRegistry,
 					RenderScope,
 					Presentation);
-				if (VerticalChain.IsValid())
+				if (AutomaticChain.IsValid())
 				{
-					VerticalChain->AddSlot()
-					.AutoHeight()
-					.HAlign(HAlign_Center)
-					.Padding(0.0f, ChildIndex == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
-					[
-						ChildRow.Widget
-					];
+					AutomaticChain->AddStatement(
+						ChildRow.Widget,
+						ChildRow.RootTile,
+						[ChildRow]() { return ChildRow.GetRootPosition(); },
+						0.0f);
 				}
 				else
 				{
@@ -1084,6 +1091,7 @@ namespace
 			{
 				return {BlockTile, BlockTile};
 			}
+			const float BlockOffset = OperandColumnWidth + OperandWireSpace;
 			return {
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth()
@@ -1094,7 +1102,8 @@ namespace
 				[
 					BlockTile
 				],
-				BlockTile};
+				BlockTile,
+				[BlockOffset]() { return FVector2D(BlockOffset, 0.0f); }};
 		}
 		if (Presentation != EVerseFunctionGraphPresentation::Tracks
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control
@@ -1143,7 +1152,10 @@ namespace
 				Presentation);
 			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind)
 			{
-				TSharedRef<SVerticalBox> Branch = SNew(SVerticalBox);
+				TSharedRef<SVerseStatementLayoutPanel> Branch =
+					SNew(SVerseStatementLayoutPanel)
+					.Presentation(Presentation)
+					.StatementGap(16.0f);
 				const FVerseVisualExpressionDescriptor::FControlRegion* Region =
 					Tile.ControlRegions.FindByPredicate(
 						[RegionKind](const FVerseVisualExpressionDescriptor::FControlRegion& Candidate)
@@ -1172,20 +1184,18 @@ namespace
 							WidgetRegistry,
 							OwningRenderScope,
 							Presentation);
-						Branch->AddSlot()
-						.AutoHeight()
-						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
-						[
-							ChildRow.Widget
-						];
+						Branch->AddStatement(
+							ChildRow.Widget,
+							ChildRow.RootTile,
+							[ChildRow]() { return ChildRow.GetRootPosition(); });
 					}
 				}
 				return Branch;
 			};
 
-			const TSharedRef<SVerticalBox> TrueBranch =
+			const TSharedRef<SVerseStatementLayoutPanel> TrueBranch =
 				BuildExecutionBranch(EVerseControlRegionKind::Body);
-			const TSharedRef<SVerticalBox> FalseBranch =
+			const TSharedRef<SVerseStatementLayoutPanel> FalseBranch =
 				BuildExecutionBranch(EVerseControlRegionKind::Else);
 			PredicatePresentation->SlatePrepass();
 			RootTile->SlatePrepass();
@@ -1240,7 +1250,11 @@ namespace
 						FalseBranch
 					]
 				],
-				RootTile};
+				RootTile,
+				[ExecutionSpineOffset]()
+				{
+					return FVector2D(ExecutionSpineOffset, 0.0f);
+				}};
 		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile,
@@ -1353,7 +1367,7 @@ namespace
 					]
 				];
 			}
-			return {
+			const TSharedRef<SVerticalBox> ControlPresentation =
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 				[
@@ -1362,8 +1376,19 @@ namespace
 				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
 				[
 					RegionRow
-				],
-				RootTile};
+				];
+			return {
+				ControlPresentation,
+				RootTile,
+				[ControlPresentation, RootTile]()
+				{
+					ControlPresentation->SlatePrepass();
+					RootTile->SlatePrepass();
+					return FVector2D(
+						(ControlPresentation->GetDesiredSize().X
+							- RootTile->GetDesiredSize().X) * 0.5f,
+						0.0f);
+				}};
 		}
 		const bool bHasOperandLayout = IsVerseOperatorExpression(Tile.ExpressionKind)
 			|| Tile.ExpressionKind == EVerseExpressionKind::Call
@@ -1384,66 +1409,48 @@ namespace
 				[
 					RootTile
 				],
-				RootTile};
+				RootTile,
+				[RootOffset = OperandColumnWidth + OperandWireSpace]()
+				{
+					return FVector2D(RootOffset, 0.0f);
+				}};
 		}
 
-		TSharedRef<SVerticalBox> OperandColumn = SNew(SVerticalBox);
+		TSharedRef<SVerseExpressionLayoutPanel> ExpressionLayout =
+			SNew(SVerseExpressionLayoutPanel)
+			.HorizontalGap(OperandWireSpace)
+			.VerticalGap(18.0f);
+		ExpressionLayout->SetRoot(RootTile);
 		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
-			TSharedRef<SWidget> OperandWidget =
-				SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
-			if (Tile.Children[Index].LiteralKind == EVerseLiteralKind::None)
+			if (Tile.Children[Index].LiteralKind != EVerseLiteralKind::None)
 			{
-				FBuiltFunctionGraphRow OperandRow = BuildFunctionGraphRow(
-					Tile.Children[Index],
-					Document,
-					OnSocketDragStarted,
-					OnInlineLiteralCommitted,
-					true,
-					OnTileSelected,
-					IsTileSelected,
-					OnClauseReordered,
-					ModelConnections,
-					WidgetRegistry,
-					OwningRenderScope,
-					Presentation);
-				OperandWidget = OperandRow.Widget;
+				continue;
 			}
-			OperandColumn->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Right)
-			.Padding(0.0f, Index == 0 ? 0.0f : 18.0f, 0.0f, 0.0f)
-			[
-				OperandWidget
-			];
+			FBuiltFunctionGraphRow OperandRow = BuildFunctionGraphRow(
+				Tile.Children[Index],
+				Document,
+				OnSocketDragStarted,
+				OnInlineLiteralCommitted,
+				true,
+				OnTileSelected,
+				IsTileSelected,
+				OnClauseReordered,
+				ModelConnections,
+				WidgetRegistry,
+				OwningRenderScope,
+				Presentation);
+			ExpressionLayout->AddOperand(
+				OperandRow.Widget,
+				OperandRow.RootTile,
+				[OperandRow]() { return OperandRow.GetRootPosition(); },
+				Index);
 		}
-		TSharedRef<SWidget> OperandPresentation = OperandColumn;
-		if (!bCompactOperands)
-		{
-			OperandPresentation =
-				SNew(SBox)
-					.MinDesiredWidth(OperandColumnWidth)
-					.HAlign(HAlign_Right)
-					[
-						OperandColumn
-					];
-		}
-		TSharedRef<SWidget> Subtree =
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
-			[
-				OperandPresentation
-			]
-			+ SHorizontalBox::Slot().AutoWidth()
-			[
-				SNew(SBox).WidthOverride(OperandWireSpace)
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
-			[
-				RootTile
-			];
 
-		return {Subtree, RootTile};
+		return {
+			ExpressionLayout,
+			RootTile,
+			[ExpressionLayout]() { return ExpressionLayout->GetRootPosition(); }};
 	}
 
 	FText GetSourceControlStatus(const FString& FilePath)
@@ -4251,14 +4258,12 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
 		TSharedPtr<SHorizontalBox> RootExecutionTrack;
-		if (FunctionGraphPresentation
-			!= EVerseFunctionGraphPresentation::VerticalExecution)
+		TSharedPtr<SVerseStatementLayoutPanel> AutomaticLayout;
+		if (FunctionGraphPresentation == EVerseFunctionGraphPresentation::Tracks)
 		{
 			RootExecutionTrack = SNew(SHorizontalBox);
 			TSharedRef<SWidget> RootTrackWidget = RootExecutionTrack.ToSharedRef();
-			if (FunctionGraphPresentation == EVerseFunctionGraphPresentation::Tracks)
-			{
-				RootTrackWidget =
+			RootTrackWidget =
 					SNew(SBox)
 					.Padding(8.0f)
 					[
@@ -4276,14 +4281,26 @@ void SVerseVisualEditor::RefreshActiveDocument()
 							RootExecutionTrack.ToSharedRef()
 						]
 					];
-			}
 			FunctionContent->AddSlot().AutoHeight()
 			[
 				RootTrackWidget
 			];
 		}
-		auto AddRootPresentation = [&FunctionContent, &RootExecutionTrack](
-			TSharedRef<SWidget> Widget,
+		else
+		{
+			AutomaticLayout = SNew(SVerseStatementLayoutPanel)
+				.Presentation(FunctionGraphPresentation)
+				.StatementGap(FunctionGraphPresentation
+					== EVerseFunctionGraphPresentation::VerticalExecution
+					? 12.0f : 72.0f);
+			FunctionContent->AddSlot().AutoHeight()
+			[
+				AutomaticLayout.ToSharedRef()
+			];
+		}
+		auto AddRootPresentation = [
+			&FunctionContent, &RootExecutionTrack, &AutomaticLayout](
+			const FBuiltFunctionGraphRow& Row,
 			float LeadingSpace = 0.0f)
 		{
 			if (RootExecutionTrack.IsValid())
@@ -4293,8 +4310,16 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				.VAlign(VAlign_Top)
 				.Padding(LeadingSpace, 0.0f, 72.0f, 0.0f)
 				[
-					Widget
+					Row.Widget
 				];
+			}
+			else if (AutomaticLayout.IsValid())
+			{
+				AutomaticLayout->AddStatement(
+					Row.Widget,
+					Row.RootTile,
+					[Row]() { return Row.GetRootPosition(); },
+					LeadingSpace);
 			}
 			else
 			{
@@ -4303,7 +4328,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				.HAlign(HAlign_Left)
 				.Padding(0.0f, LeadingSpace, 0.0f, 0.0f)
 				[
-					Widget
+					Row.Widget
 				];
 			}
 		};
@@ -4384,7 +4409,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 				const float ReturnTopPadding =
 					GraphRow.RootTile->GetValueSocketCenterY(0, true)
 					- ReturnRoot->GetValueSocketCenterY(0, false);
-				AddRootPresentation(
+				const TSharedRef<SWidget> PairWidget =
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 					[
@@ -4401,12 +4426,14 @@ void SVerseVisualEditor::RefreshActiveDocument()
 						[
 							ReturnRoot
 						]
-					],
+					];
+				AddRootPresentation(
+					{PairWidget, GraphRow.RootTile, GraphRow.RootPosition},
 					LeadingStatementSpace);
 				++Index;
 				continue;
 			}
-			AddRootPresentation(GraphRow.Widget, LeadingStatementSpace);
+			AddRootPresentation(GraphRow, LeadingStatementSpace);
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
 				FunctionEntryAnchor = GraphRow.RootTile;

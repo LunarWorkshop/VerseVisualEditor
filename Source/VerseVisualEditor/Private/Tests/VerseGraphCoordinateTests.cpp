@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "SVerseGraphSurface.h"
+#include "SVerseFunctionGraphLayout.h"
 #include "SVerseTile.h"
 #include "VerseGraphCoordinates.h"
 
@@ -350,6 +351,74 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		&& TwoBindingWidget->GetSocketAnchor(TwoBindingBlock.GetValueOutputs()[1].Id).IsValid());
 	TestTrue(TEXT("The Condition header grows to contain additional bindings"),
 		TwoBindingWidget->GetDesiredSize().Y > OneBindingWidget->GetDesiredSize().Y);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseFunctionAutomaticLayoutTest,
+	"VerseVisualEditor.Graph.Layout.AutomaticExecutionAndOperands",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
+{
+	auto MakeTile = [](float BodyWidth, float BodyHeight)
+	{
+		FVerseVisualTile Model;
+		Model.Kind = EVerseVisualTileKind::Expression;
+		Model.ExpressionKind = EVerseExpressionKind::Identifier;
+		Model = FinalizeTestTile(MoveTemp(Model));
+		TSharedRef<SVerseTile> Widget =
+			SNew(SVerseTile)
+			.Tile(Model)
+			.TileColor(FLinearColor::Black)
+			.ShowBody(true)
+			.BodyContent()
+			[
+				SNew(SBox).WidthOverride(BodyWidth).HeightOverride(BodyHeight)
+			];
+		Widget->SlatePrepass();
+		return Widget;
+	};
+
+	const TSharedRef<SVerseTile> Root = MakeTile(90.0f, 50.0f);
+	const TSharedRef<SVerseTile> FirstOperand = MakeTile(120.0f, 80.0f);
+	const TSharedRef<SVerseTile> SecondOperand = MakeTile(70.0f, 120.0f);
+	const TSharedRef<SVerseExpressionLayoutPanel> Expression =
+		SNew(SVerseExpressionLayoutPanel).HorizontalGap(72.0f).VerticalGap(18.0f);
+	Expression->SetRoot(Root);
+	Expression->AddOperand(
+		FirstOperand, FirstOperand, []() { return FVector2D::ZeroVector; }, 0);
+	Expression->AddOperand(
+		SecondOperand, SecondOperand, []() { return FVector2D::ZeroVector; }, 1);
+	Expression->SlatePrepass();
+	const FVector2D RootPosition = Expression->GetRootPosition();
+	TestTrue(TEXT("Operand subtrees reserve their combined vertical extent"),
+		Expression->GetDesiredSize().Y
+			>= FirstOperand->GetDesiredSize().Y + 18.0f
+				+ SecondOperand->GetDesiredSize().Y);
+	TestTrue(TEXT("Multiple operands fan around the consuming root"),
+		RootPosition.Y > 0.0f);
+
+	const TSharedRef<SVerseStatementLayoutPanel> Statements =
+		SNew(SVerseStatementLayoutPanel)
+		.Presentation(EVerseFunctionGraphPresentation::VerticalExecution)
+		.StatementGap(12.0f);
+	const TSharedRef<SWidget> FirstBounds =
+		SNew(SBox).WidthOverride(420.0f).HeightOverride(180.0f);
+	const TSharedRef<SWidget> SecondBounds =
+		SNew(SBox).WidthOverride(260.0f).HeightOverride(90.0f);
+	Statements->AddStatement(
+		FirstBounds, Root, []() { return FVector2D(280.0f, 0.0f); });
+	Statements->AddStatement(
+		SecondBounds, SecondOperand, []() { return FVector2D(80.0f, 0.0f); });
+	Statements->SlatePrepass();
+	const FVector2D FirstPosition = Statements->GetStatementPosition(0);
+	const FVector2D SecondPosition = Statements->GetStatementPosition(1);
+	TestEqual(TEXT("Completed execution spines align"),
+		FirstPosition.X + 280.0f + 16.0f,
+		SecondPosition.X + 80.0f + 16.0f);
+	TestTrue(TEXT("A statement reserves its entire subtree before the next one"),
+		SecondPosition.Y >= FirstPosition.Y + FirstBounds->GetDesiredSize().Y + 12.0f);
 	return true;
 }
 
