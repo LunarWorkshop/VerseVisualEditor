@@ -744,6 +744,7 @@ private:
 				Binding.SemanticTypeName = Child.SemanticTypeName;
 				Binding.SemanticType = Child.SemanticType;
 				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
+				Binding.SemanticName = Child.SemanticDefinitionName;
 				Binding.LegalConsumerScopes = Child.LegalConsumerScopes;
 				Binding.SemanticSnapshot = Child.SemanticSnapshot;
 				AddInsertionTarget(
@@ -916,6 +917,7 @@ private:
 			Output.SemanticTypeName = Tile.SemanticTypeName;
 			Output.SemanticType = Tile.SemanticType;
 			Output.SemanticDataDefinition = Tile.SemanticDataDefinition;
+			Output.SemanticName = Tile.SemanticDefinitionName;
 			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
 			Output.SemanticSnapshot = Tile.SemanticSnapshot;
 			if (Tile.Kind == EVerseVisualTileKind::Definition

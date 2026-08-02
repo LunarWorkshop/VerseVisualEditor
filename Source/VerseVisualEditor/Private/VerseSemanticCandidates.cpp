@@ -397,6 +397,8 @@ namespace
 			{
 				Tile.SemanticDataDefinition = Definition->_DataMember.Get();
 				Tile.SemanticSnapshot = Snapshot;
+				Tile.SemanticDefinitionName = ToFString(
+					Tile.SemanticDataDefinition->AsNameStringView());
 				Tile.SemanticType = GetDataValueType(*Tile.SemanticDataDefinition);
 				Tile.SemanticTypeName = GetUserFacingDataType(*Tile.SemanticDataDefinition);
 				Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
@@ -439,9 +441,14 @@ namespace
 			Tile.SemanticSnapshot = Snapshot;
 			Tile.SemanticTypeName = ToFString(ResultType->AsCode());
 			Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
-			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+			const bool bFailureOnlyBottomType = bCanFail.Get(false)
+				&& ResultType == &Program._falseType;
+			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase)
+				|| bFailureOnlyBottomType)
 			{
 				Tile.bProducesValue = false;
+				Tile.SemanticType = nullptr;
+				Tile.SemanticTypeName.Reset();
 				if (bCanFail.Get(false))
 				{
 					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;
@@ -548,9 +555,14 @@ namespace
 			Tile.SemanticTypeName = ToFString(FunctionType->GetReturnType().AsCode());
 			Tile.SemanticType = &FunctionType->GetReturnType();
 			Tile.SemanticSnapshot = Snapshot;
-			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase))
+			const bool bFailureOnlyBottomReturn = bCanFail.Get(false)
+				&& &FunctionType->GetReturnType() == &Program._falseType;
+			if (Tile.SemanticTypeName.Equals(TEXT("void"), ESearchCase::IgnoreCase)
+				|| bFailureOnlyBottomReturn)
 			{
 				Tile.bProducesValue = false;
+				Tile.SemanticType = nullptr;
+				Tile.SemanticTypeName.Reset();
 				if (bCanFail.Get(false))
 				{
 					Tile.Outcome = EVerseExpressionOutcome::FailureOnly;

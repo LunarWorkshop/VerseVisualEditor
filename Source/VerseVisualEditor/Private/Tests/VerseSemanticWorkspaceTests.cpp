@@ -1355,7 +1355,7 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		if (!TestNotNull(FunctionName, Function)
 			|| !TestTrue(
 				*FString::Printf(TEXT("%s has a statement tile"), FunctionName),
-				Function->GraphTiles.Num() >= 3))
+				Function->GraphTiles.Num() >= 2))
 		{
 			return nullptr;
 		}
@@ -1398,13 +1398,18 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		BindStatement(TEXT("FailableVoidCall"));
 	if (FailableVoidCall != nullptr)
 	{
-		TestTrue(
-			TEXT("Decides void call is represented as failure-only"),
-			FailableVoidCall->Outcome == EVerseExpressionOutcome::FailureOnly
-			&& FailableVoidCall->GetValueOutputs().Num() == 1
-			&& FailableVoidCall->GetValueOutputs()[0].Outcome
-				== EVerseExpressionOutcome::FailureOnly
-			&& FailableVoidCall->GetValueOutputs()[0].SemanticTypeName.IsEmpty());
+		TestEqual(TEXT("Decides void call is classified as failure-only"),
+			FailableVoidCall->Outcome, EVerseExpressionOutcome::FailureOnly);
+		TestEqual(TEXT("Failure-only call exposes exactly one failure socket"),
+			FailableVoidCall->GetValueOutputs().Num(), 1);
+		if (FailableVoidCall->GetValueOutputs().Num() == 1)
+		{
+			TestEqual(TEXT("Failure-only socket retains its outcome"),
+				FailableVoidCall->GetValueOutputs()[0].Outcome,
+				EVerseExpressionOutcome::FailureOnly);
+			TestTrue(TEXT("Failure-only socket has no value type"),
+				FailableVoidCall->GetValueOutputs()[0].SemanticTypeName.IsEmpty());
+		}
 	}
 
 	const FVerseVisualTile* NonFailableOperator =

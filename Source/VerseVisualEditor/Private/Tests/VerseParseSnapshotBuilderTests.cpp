@@ -457,7 +457,9 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Last expression is the function result position"),
 			Last.bIsFinalValuePosition);
 		TestTrue(TEXT("Trailing trivia preserves source through the next expression"),
-			Snapshot.GetSourceView(First.TrailingTriviaRange).Find(UTF8TEXTVIEW("\n\n")) != INDEX_NONE);
+			First.TrailingTriviaRange.IsSet()
+			&& First.TrailingTriviaRange.BeginByte == First.Expression.Range.EndByte()
+			&& First.TrailingTriviaRange.EndByte() == Last.Expression.Range.BeginByte);
 	}
 
 	auto FindOnlyExpression = [this, &Snapshot](FUtf8StringView Name) -> const FVerseExpressionDescriptor*

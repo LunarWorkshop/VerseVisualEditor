@@ -319,6 +319,8 @@ struct FVerseVisualTile
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
 	FString SemanticTypeName;
+	/** Compiler-authored definition name copied while the semantic snapshot is active. */
+	FString SemanticDefinitionName;
 	const uLang::CTypeBase* SemanticType = nullptr;
 	TArray<FString> SemanticInputNames;
 	TArray<FString> SemanticInputTypeNames;
