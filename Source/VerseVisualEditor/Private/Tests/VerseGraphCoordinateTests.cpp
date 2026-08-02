@@ -110,6 +110,40 @@ bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
 		TEXT("Compact output home plate uses its painted center"),
 		GetVerseExecutionPinAnchorCoordinate(false, true),
 		FVector2D(0.5f, 0.4f));
+	for (const EVerseFunctionGraphPresentation Presentation : {
+		EVerseFunctionGraphPresentation::HorizontalExecution,
+		EVerseFunctionGraphPresentation::Tracks})
+	{
+		TestEqual(
+			TEXT("Horizontal presentation input uses its geometric center"),
+			GetVerseExecutionPinAnchorCoordinate(true, false, Presentation),
+			FVector2D(0.5f, 0.5f));
+		TestEqual(
+			TEXT("Horizontal presentation output uses its geometric center"),
+			GetVerseExecutionPinAnchorCoordinate(false, true, Presentation),
+			FVector2D(0.5f, 0.5f));
+	}
+	TestEqual(
+		TEXT("Vertical presentation preserves execution flow axis"),
+		GetVersePresentedConnectionAxis(
+			EVerseVisualConnectionAxis::Vertical,
+			EVerseVisualSocketRole::Execution,
+			EVerseFunctionGraphPresentation::VerticalExecution),
+		EVerseGraphConnectionAxis::Vertical);
+	TestEqual(
+		TEXT("Horizontal presentation rotates execution flow"),
+		GetVersePresentedConnectionAxis(
+			EVerseVisualConnectionAxis::Vertical,
+			EVerseVisualSocketRole::Execution,
+			EVerseFunctionGraphPresentation::HorizontalExecution),
+		EVerseGraphConnectionAxis::Horizontal);
+	TestEqual(
+		TEXT("Track presentation preserves horizontal data flow"),
+		GetVersePresentedConnectionAxis(
+			EVerseVisualConnectionAxis::Horizontal,
+			EVerseVisualSocketRole::Value,
+			EVerseFunctionGraphPresentation::Tracks),
+		EVerseGraphConnectionAxis::Horizontal);
 	return true;
 }
 

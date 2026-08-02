@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VerseVisualTile.h"
+#include "VerseVisualEditorSettings.h"
 #include "VerseGraphCoordinates.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -21,7 +22,11 @@ TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D
 TStaticArray<FVector2D, 4> BuildVerseFailableCornerCenters(FVector2D Size);
 
 /** Normalized location at which an execution pin actually paints its home plate. */
-FVector2D GetVerseExecutionPinAnchorCoordinate(bool bInput, bool bCompact);
+FVector2D GetVerseExecutionPinAnchorCoordinate(
+	bool bInput,
+	bool bCompact,
+	EVerseFunctionGraphPresentation Presentation =
+		EVerseFunctionGraphPresentation::VerticalExecution);
 
 struct FVerseSocketDragStart
 {
@@ -80,6 +85,7 @@ public:
 		, _ShowBody(true)
 		, _Compact(false)
 		, _CompactExecutionSpacing(false)
+		, _FunctionGraphPresentation(EVerseFunctionGraphPresentation::VerticalExecution)
 		, _IsSelected(false)
 	{}
 		SLATE_ARGUMENT(FVerseVisualTile, Tile)
@@ -91,6 +97,7 @@ public:
 		SLATE_ARGUMENT(bool, ShowBody)
 		SLATE_ARGUMENT(bool, Compact)
 		SLATE_ARGUMENT(bool, CompactExecutionSpacing)
+		SLATE_ARGUMENT(EVerseFunctionGraphPresentation, FunctionGraphPresentation)
 		SLATE_ARGUMENT(FText, DiagnosticText)
 		SLATE_ARGUMENT(TArray<FText>, ExecutionOutputLabels)
 		SLATE_ARGUMENT(TSet<FVerseVisualSocketId>, ConnectedSockets)
@@ -121,6 +128,7 @@ public:
 			: OwningRenderScope;
 	}
 	const FVerseVisualTile& GetTile() const { return Tile; }
+	bool IsExpanded() const { return !bCollapsible || bExpanded; }
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
 
@@ -185,6 +193,7 @@ private:
 	TSharedPtr<SWidget> HeaderSocketRow;
 	TSharedPtr<SWidget> ValueInputColumn;
 	TSharedPtr<SWidget> ValueOutputColumn;
+	TSharedPtr<SWidget> HeaderOutputGroupWidget;
 	TArray<TSharedPtr<SWidget>> ValueInputRows;
 	TArray<TSharedPtr<SWidget>> ValueOutputRows;
 	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
@@ -197,4 +206,6 @@ private:
 	bool bShowBody = true;
 	bool bCollapsible = true;
 	bool bCompactExecutionSpacing = false;
+	EVerseFunctionGraphPresentation FunctionGraphPresentation =
+		EVerseFunctionGraphPresentation::VerticalExecution;
 };

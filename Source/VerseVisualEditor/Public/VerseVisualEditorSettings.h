@@ -12,6 +12,15 @@ enum class EVerseCompilationMode : uint8
 	Manual UMETA(DisplayName = "Manual"),
 };
 
+/** Temporary prototype choices for evaluating function-graph presentation. */
+UENUM()
+enum class EVerseFunctionGraphPresentation : uint8
+{
+	VerticalExecution UMETA(DisplayName = "Vertical Execution"),
+	HorizontalExecution UMETA(DisplayName = "Horizontal Execution"),
+	Tracks UMETA(DisplayName = "Tracks"),
+};
+
 /** Per-user, per-project preferences for the Verse Visual Editor. */
 UCLASS(config = EditorPerProjectUserSettings, meta = (DisplayName = "Verse Visual Editor"))
 class VERSEVISUALEDITOR_API UVerseVisualEditorSettings final : public UDeveloperSettings
@@ -27,5 +36,11 @@ public:
 
 	UPROPERTY(config, EditAnywhere, Category = Compilation, meta = (DisplayName = "Compilation Mode"))
 	EVerseCompilationMode CompilationMode = EVerseCompilationMode::Continuous;
+
+	UPROPERTY(config, EditAnywhere, Category = Prototype,
+		meta = (DisplayName = "Function Graph Presentation", ConfigRestartRequired = true,
+			ToolTip = "Temporary prototype selector. Restart the Verse Visual Editor after changing it."))
+	EVerseFunctionGraphPresentation FunctionGraphPresentation =
+		EVerseFunctionGraphPresentation::VerticalExecution;
 
 };

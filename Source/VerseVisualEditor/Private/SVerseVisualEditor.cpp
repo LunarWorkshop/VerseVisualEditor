@@ -60,6 +60,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Views/STableRow.h"
@@ -593,7 +594,9 @@ namespace
 		TConstArrayView<FVerseVisualConnection> ModelConnections,
 		const FVerseTileWidgetRegistry& Widgets,
 		TSharedRef<const FVerseDocument> Document,
-		FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root());
+		FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root(),
+		EVerseFunctionGraphPresentation Presentation =
+			EVerseFunctionGraphPresentation::VerticalExecution);
 
 	TSharedRef<SVerseTile> BuildFunctionGraphTile(
 		const FVerseVisualTile& Tile,
@@ -608,7 +611,9 @@ namespace
 		FOnVerseClauseReordered OnClauseReordered = {},
 		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
-		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr)
+		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
+		EVerseFunctionGraphPresentation Presentation =
+			EVerseFunctionGraphPresentation::VerticalExecution)
 	{
 		TSet<FVerseVisualSocketId> ConnectedSockets;
 		for (const FVerseVisualConnection& Connection : ModelConnections)
@@ -694,6 +699,7 @@ namespace
 				|| bFailableBlock
 				|| (bExpression && !bIdentifier && !bControl))
 			.CompactExecutionSpacing(bCompactExecutionSpacing)
+			.FunctionGraphPresentation(Presentation)
 			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
 			.ConnectedSockets(MoveTemp(ConnectedSockets))
 			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
@@ -806,7 +812,8 @@ namespace
 		TConstArrayView<FVerseVisualConnection> ModelConnections,
 		const FVerseTileWidgetRegistry& Widgets,
 		TSharedRef<const FVerseDocument> Document,
-		FVerseGraphRenderScopeId RenderScope)
+		FVerseGraphRenderScopeId RenderScope,
+		EVerseFunctionGraphPresentation Presentation)
 	{
 		TArray<FVerseGraphConnection> Result;
 		for (const FVerseVisualConnection& Model : ModelConnections)
@@ -859,9 +866,10 @@ namespace
 			Connection.Source = Model.Source;
 			Connection.Target = Model.Target;
 			Connection.EndpointRegistry = Widgets.Endpoints;
-			Connection.Axis = Model.Axis == EVerseVisualConnectionAxis::Horizontal
-				? EVerseGraphConnectionAxis::Horizontal
-				: EVerseGraphConnectionAxis::Vertical;
+			Connection.Axis = GetVersePresentedConnectionAxis(
+				Model.Axis,
+				Model.Source.Socket.Role,
+				Presentation);
 			Connection.Color = Color;
 			Connection.Thickness =
 				Model.Source.Socket.Role == EVerseVisualSocketRole::Execution
@@ -904,7 +912,9 @@ namespace
 		FOnVerseClauseReordered OnClauseReordered = {},
 		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
-		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr)
+		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
+		EVerseFunctionGraphPresentation Presentation =
+			EVerseFunctionGraphPresentation::VerticalExecution)
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -915,7 +925,19 @@ namespace
 			: StandardOperandWireSpace;
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 		{
-			TSharedRef<SVerticalBox> Chain = SNew(SVerticalBox);
+			TSharedPtr<SVerticalBox> VerticalChain;
+			TSharedPtr<SHorizontalBox> HorizontalChain;
+			TSharedRef<SWidget> Chain = SNullWidget::NullWidget;
+			if (Presentation == EVerseFunctionGraphPresentation::VerticalExecution)
+			{
+				VerticalChain = SNew(SVerticalBox);
+				Chain = VerticalChain.ToSharedRef();
+			}
+			else
+			{
+				HorizontalChain = SNew(SHorizontalBox);
+				Chain = HorizontalChain.ToSharedRef();
+			}
 			TSharedRef<SVerseGraphRenderScope> RenderScope =
 				SNew(SVerseGraphRenderScope)
 				.Background(EVerseGraphRenderScopeBackground::Failable)
@@ -933,14 +955,28 @@ namespace
 					OnClauseReordered,
 					ModelConnections,
 					WidgetRegistry,
-					RenderScope);
-				Chain->AddSlot()
-				.AutoHeight()
-				.HAlign(HAlign_Center)
-				.Padding(0.0f, ChildIndex == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
-				[
-					ChildRow.Widget
-				];
+					RenderScope,
+					Presentation);
+				if (VerticalChain.IsValid())
+				{
+					VerticalChain->AddSlot()
+					.AutoHeight()
+					.HAlign(HAlign_Center)
+					.Padding(0.0f, ChildIndex == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
+					[
+						ChildRow.Widget
+					];
+				}
+				else
+				{
+					HorizontalChain->AddSlot()
+					.AutoWidth()
+					.VAlign(VAlign_Top)
+					.Padding(ChildIndex == 0 ? 0.0f : 72.0f, 0.0f, 0.0f, 0.0f)
+					[
+						ChildRow.Widget
+					];
+				}
 			}
 
 			const TSharedRef<SVerseTile> BlockTile = BuildFunctionGraphTile(
@@ -956,16 +992,19 @@ namespace
 				OnClauseReordered,
 				ModelConnections,
 				WidgetRegistry,
-				OwningRenderScope);
+				OwningRenderScope,
+				Presentation);
 			RenderScope->SetConnections(
 				WidgetRegistry != nullptr
 					? ResolveModelConnections(
 						ModelConnections,
 						*WidgetRegistry,
 						Document,
-						FVerseGraphRenderScopeId::ForTile(Tile.Id))
+						FVerseGraphRenderScopeId::ForTile(Tile.Id),
+						Presentation)
 					: TArray<FVerseGraphConnection>());
-			if (bCompactOperands)
+			if (bCompactOperands
+				|| Presentation == EVerseFunctionGraphPresentation::Tracks)
 			{
 				return {BlockTile, BlockTile};
 			}
@@ -981,7 +1020,8 @@ namespace
 				],
 				BlockTile};
 		}
-		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+		if (Presentation != EVerseFunctionGraphPresentation::Tracks
+			&& Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
 			TSharedRef<SWidget> PredicatePresentation = SNullWidget::NullWidget;
@@ -1006,7 +1046,8 @@ namespace
 					OnClauseReordered,
 					ModelConnections,
 					WidgetRegistry,
-					OwningRenderScope);
+					OwningRenderScope,
+					Presentation);
 				PredicatePresentation = PredicateRow.Widget;
 			}
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
@@ -1022,7 +1063,8 @@ namespace
 				OnClauseReordered,
 				ModelConnections,
 				WidgetRegistry,
-				OwningRenderScope);
+				OwningRenderScope,
+				Presentation);
 			auto BuildExecutionBranch = [&](EVerseControlRegionKind RegionKind)
 			{
 				TSharedRef<SVerticalBox> Branch = SNew(SVerticalBox);
@@ -1052,7 +1094,8 @@ namespace
 							OnClauseReordered,
 							ModelConnections,
 							WidgetRegistry,
-							OwningRenderScope);
+							OwningRenderScope,
+							Presentation);
 						Branch->AddSlot()
 						.AutoHeight()
 						.Padding(0.0f, Offset == 0 ? 0.0f : 16.0f, 0.0f, 0.0f)
@@ -1136,7 +1179,13 @@ namespace
 			OnClauseReordered,
 			ModelConnections,
 			WidgetRegistry,
-			OwningRenderScope);
+			OwningRenderScope,
+			Presentation);
+		if (Presentation == EVerseFunctionGraphPresentation::Tracks
+			&& Tile.ExpressionKind == EVerseExpressionKind::Control)
+		{
+			return {RootTile, RootTile};
+		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 		{
 			TSharedRef<SHorizontalBox> RegionRow = SNew(SHorizontalBox);
@@ -1183,7 +1232,8 @@ namespace
 						OnClauseReordered,
 						ModelConnections,
 						WidgetRegistry,
-						OwningRenderScope);
+						OwningRenderScope,
+						Presentation);
 					RegionContent->AddSlot()
 					.AutoHeight()
 					.Padding(8.0f, Offset == 0 ? 8.0f : 16.0f, 8.0f, 0.0f)
@@ -1264,7 +1314,7 @@ namespace
 		TSharedRef<SVerticalBox> OperandColumn = SNew(SVerticalBox);
 		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
-			TSharedRef<SWidget> Presentation =
+			TSharedRef<SWidget> OperandWidget =
 				SNew(SSpacer).Size(FVector2D(1.0f, 24.0f));
 			if (Tile.Children[Index].LiteralKind == EVerseLiteralKind::None)
 			{
@@ -1279,15 +1329,16 @@ namespace
 					OnClauseReordered,
 					ModelConnections,
 					WidgetRegistry,
-					OwningRenderScope);
-				Presentation = OperandRow.Widget;
+					OwningRenderScope,
+					Presentation);
+				OperandWidget = OperandRow.Widget;
 			}
 			OperandColumn->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Right)
 			.Padding(0.0f, Index == 0 ? 0.0f : 18.0f, 0.0f, 0.0f)
 			[
-				Presentation
+				OperandWidget
 			];
 		}
 		TSharedRef<SWidget> OperandPresentation = OperandColumn;
@@ -4040,6 +4091,63 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		const TSharedRef<const FVerseDocument> SourceDocument =
 			ActiveDocument->Session->GetParseSnapshot().GetDocument();
 		TSharedRef<SVerticalBox> FunctionContent = SNew(SVerticalBox);
+		TSharedPtr<SHorizontalBox> RootExecutionTrack;
+		if (FunctionGraphPresentation
+			!= EVerseFunctionGraphPresentation::VerticalExecution)
+		{
+			RootExecutionTrack = SNew(SHorizontalBox);
+			TSharedRef<SWidget> RootTrackWidget = RootExecutionTrack.ToSharedRef();
+			if (FunctionGraphPresentation == EVerseFunctionGraphPresentation::Tracks)
+			{
+				RootTrackWidget =
+					SNew(SBox)
+					.Padding(8.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+						.Padding(0.0f, 4.0f, 14.0f, 0.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("MainExecutionTrack", "Main"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							RootExecutionTrack.ToSharedRef()
+						]
+					];
+			}
+			FunctionContent->AddSlot().AutoHeight()
+			[
+				RootTrackWidget
+			];
+		}
+		auto AddRootPresentation = [&FunctionContent, &RootExecutionTrack](
+			TSharedRef<SWidget> Widget,
+			float LeadingSpace = 0.0f)
+		{
+			if (RootExecutionTrack.IsValid())
+			{
+				RootExecutionTrack->AddSlot()
+				.AutoWidth()
+				.VAlign(VAlign_Top)
+				.Padding(LeadingSpace, 0.0f, 72.0f, 0.0f)
+				[
+					Widget
+				];
+			}
+			else
+			{
+				FunctionContent->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Left)
+				.Padding(0.0f, LeadingSpace, 0.0f, 0.0f)
+				[
+					Widget
+				];
+			}
+		};
 		const TArray<FVerseVisualConnection> ModelConnections =
 			FVerseVisualTileBuilder::BuildConnections(FunctionTab.GraphTiles);
 		FVerseTileWidgetRegistry WidgetRegistry;
@@ -4061,15 +4169,9 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		for (int32 Index = 0; Index < FunctionTab.GraphTiles.Num(); ++Index)
 		{
 			const FVerseVisualTile& Tile = FunctionTab.GraphTiles[Index];
-			if (Index > 0 && FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount > 0)
-			{
-				FunctionContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(SBox).HeightOverride(
-						FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount * 24.0f)
-				];
-			}
+			const float LeadingStatementSpace = Index > 0
+				? FunctionTab.GraphTiles[Index - 1].ExtraBlankLineCount * 24.0f
+				: 0.0f;
 			const FBuiltFunctionGraphRow GraphRow = BuildFunctionGraphRow(
 				Tile,
 				SourceDocument,
@@ -4078,13 +4180,15 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					this,
 					&SVerseVisualEditor::HandleInlineLiteralCommitted,
 					ActiveDocument),
-			false,
-			OnFunctionTileSelected,
-			IsFunctionTileSelected,
-			FOnVerseClauseReordered::CreateSP(
-				this, &SVerseVisualEditor::HandleClauseReordered),
-			ModelConnections,
-			&WidgetRegistry);
+				false,
+				OnFunctionTileSelected,
+				IsFunctionTileSelected,
+				FOnVerseClauseReordered::CreateSP(
+					this, &SVerseVisualEditor::HandleClauseReordered),
+				ModelConnections,
+				&WidgetRegistry,
+				nullptr,
+				FunctionGraphPresentation);
 			const bool bPairWithImplicitReturn = Tile.bImplicitReturnValue
 				&& FunctionTab.GraphTiles.IsValidIndex(Index + 1)
 				&& FunctionTab.GraphTiles[Index + 1].Kind
@@ -4113,16 +4217,15 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					FOnVerseClauseReordered::CreateSP(
 						this, &SVerseVisualEditor::HandleClauseReordered),
 					ModelConnections,
-					&WidgetRegistry);
+					&WidgetRegistry,
+					nullptr,
+					FunctionGraphPresentation);
 				GraphRow.RootTile->SlatePrepass();
 				ReturnRoot->SlatePrepass();
 				const float ReturnTopPadding =
 					GraphRow.RootTile->GetValueSocketCenterY(0, true)
 					- ReturnRoot->GetValueSocketCenterY(0, false);
-				FunctionContent->AddSlot()
-				.AutoHeight()
-				.HAlign(HAlign_Left)
-				[
+				AddRootPresentation(
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 					[
@@ -4139,27 +4242,163 @@ void SVerseVisualEditor::RefreshActiveDocument()
 						[
 							ReturnRoot
 						]
-					]
-				];
+					],
+					LeadingStatementSpace);
 				++Index;
 				continue;
 			}
-			FunctionContent->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			[
-				GraphRow.Widget
-			];
+			AddRootPresentation(GraphRow.Widget, LeadingStatementSpace);
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
 				FunctionEntryAnchor = GraphRow.RootTile;
 			}
 		}
 
+		if (FunctionGraphPresentation == EVerseFunctionGraphPresentation::Tracks)
+		{
+			TFunction<void(const FVerseVisualTile&, int32,
+				TArray<TWeakPtr<SVerseTile>>)> AddControlTracks;
+			AddControlTracks = [&, this](
+				const FVerseVisualTile& ControlTile,
+				int32 Depth,
+				TArray<TWeakPtr<SVerseTile>> VisibilityOwners)
+			{
+				if (ControlTile.ExpressionKind != EVerseExpressionKind::Control)
+				{
+					return;
+				}
+				if (const TSharedPtr<SVerseTile>* ControlWidget =
+					WidgetRegistry.Find(ControlTile.Id))
+				{
+					VisibilityOwners.Add(*ControlWidget);
+				}
+				for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
+					ControlTile.ControlRegions)
+				{
+					TArray<const FVerseVisualTile*> NestedControls;
+					FText TrackName = LOCTEXT("BodyExecutionTrack", "Body");
+					if (Region.Kind == EVerseControlRegionKind::Condition)
+					{
+						TrackName = LOCTEXT("ConditionExecutionTrack", "Condition");
+					}
+					else if (Region.Kind == EVerseControlRegionKind::Else)
+					{
+						TrackName = LOCTEXT("FalseExecutionTrack", "False");
+					}
+					else if (ControlTile.ControlKind == EVerseControlKind::If)
+					{
+						TrackName = LOCTEXT("TrueExecutionTrack", "True");
+					}
+
+					const auto GetTrackVisibility = [VisibilityOwners]()
+					{
+						for (const TWeakPtr<SVerseTile>& Owner : VisibilityOwners)
+						{
+							const TSharedPtr<SVerseTile> Pinned = Owner.Pin();
+							if (!Pinned.IsValid() || !Pinned->IsExpanded())
+							{
+								return EVisibility::Collapsed;
+							}
+						}
+						return EVisibility::Visible;
+					};
+					const TAttribute<EVisibility> TrackVisibility =
+						TAttribute<EVisibility>::CreateLambda(GetTrackVisibility);
+					TSharedRef<SHorizontalBox> Track = SNew(SHorizontalBox);
+					TSharedRef<SVerseGraphRenderScope> TrackRenderScope =
+						SNew(SVerseGraphRenderScope)
+						.Background(EVerseGraphRenderScopeBackground::Root)
+						.ClipToBounds(false)
+						.VisibilityGuardOnly(true)
+						.Visibility(TrackVisibility);
+					for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
+					{
+						const int32 ChildIndex = Region.FirstOperandIndex + Offset;
+						if (!ControlTile.Children.IsValidIndex(ChildIndex))
+						{
+							continue;
+						}
+						const FVerseVisualTile& Child = ControlTile.Children[ChildIndex];
+						const FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
+							Child,
+							SourceDocument,
+							FOnVerseSocketDragStarted::CreateSP(
+								this, &SVerseVisualEditor::BeginSocketDrag),
+							FOnVerseInlineLiteralCommitted::CreateSP(
+								this,
+								&SVerseVisualEditor::HandleInlineLiteralCommitted,
+								ActiveDocument),
+							false,
+							OnFunctionTileSelected,
+							IsFunctionTileSelected,
+							FOnVerseClauseReordered::CreateSP(
+								this, &SVerseVisualEditor::HandleClauseReordered),
+							ModelConnections,
+							&WidgetRegistry,
+							TrackRenderScope,
+							FunctionGraphPresentation);
+						Track->AddSlot().AutoWidth().VAlign(VAlign_Top)
+						.Padding(Offset == 0 ? 0.0f : 72.0f, 0.0f, 0.0f, 0.0f)
+						[
+							ChildRow.Widget
+						];
+						if (Child.ExpressionKind == EVerseExpressionKind::Control)
+						{
+							NestedControls.Add(&Child);
+						}
+					}
+					TrackRenderScope->SetContent(Track);
+					FunctionContent->AddSlot().AutoHeight()
+					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SNew(SVerticalBox)
+						.Visibility(TrackVisibility)
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							SNew(SSeparator)
+							.SeparatorImage(FAppStyle::GetBrush("Menu.Separator"))
+							.Thickness(1.0f)
+							.ColorAndOpacity(FLinearColor(0.42f, 0.44f, 0.48f, 0.8f))
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						.Padding(Depth * 36.0f + 8.0f, 8.0f, 8.0f, 8.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+							.Padding(0.0f, 4.0f, 14.0f, 0.0f)
+							[
+								SNew(STextBlock)
+								.Text(TrackName)
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+								.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							]
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								TrackRenderScope
+							]
+						]
+					];
+					for (const FVerseVisualTile* NestedControl : NestedControls)
+					{
+						AddControlTracks(
+							*NestedControl, Depth + 1, VisibilityOwners);
+					}
+				}
+			};
+			for (const FVerseVisualTile& Tile : FunctionTab.GraphTiles)
+			{
+				AddControlTracks(Tile, 1, {});
+			}
+		}
+
 		// Rendering consumes only immutable model endpoints. The positional layout
 		// code above may arrange widgets, but it cannot invent sockets or wires.
 		TArray<FVerseGraphConnection> GraphConnections = ResolveModelConnections(
-			ModelConnections, WidgetRegistry, SourceDocument);
+			ModelConnections,
+			WidgetRegistry,
+			SourceDocument,
+			FVerseGraphRenderScopeId::Root(),
+			FunctionGraphPresentation);
 		if (FunctionTab.FunctionCanvas.IsValid())
 		{
 			FunctionTab.FunctionCanvas->RefreshContent(
@@ -4860,6 +5099,8 @@ void SVerseVisualEditor::LoadSession()
 	int32 TabCount = 0;
 	GConfig->GetInt(SessionSection, TEXT("TabCount"), TabCount, GEditorPerProjectIni);
 	CompilationMode = GetDefault<UVerseVisualEditorSettings>()->CompilationMode;
+	FunctionGraphPresentation =
+		GetDefault<UVerseVisualEditorSettings>()->FunctionGraphPresentation;
 	FString StoredPreference;
 	const FString SettingsSection = UVerseVisualEditorSettings::StaticClass()->GetPathName();
 	if (!GConfig->GetString(

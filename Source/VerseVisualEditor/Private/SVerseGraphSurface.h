@@ -19,6 +19,12 @@ enum class EVerseGraphConnectionAxis : uint8
 	Vertical,
 };
 
+/** Applies a prototype presentation to an otherwise presentation-neutral wire. */
+EVerseGraphConnectionAxis GetVersePresentedConnectionAxis(
+	EVerseVisualConnectionAxis ModelAxis,
+	EVerseVisualSocketRole SourceRole,
+	EVerseFunctionGraphPresentation Presentation);
+
 struct FVerseGraphConnection
 {
 	FVerseVisualSocketEndpoint Source;
@@ -57,10 +63,12 @@ public:
 	SLATE_BEGIN_ARGS(SVerseGraphRenderScope)
 		: _Background(EVerseGraphRenderScopeBackground::Root)
 		, _ClipToBounds(false)
+		, _VisibilityGuardOnly(false)
 	{}
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_ARGUMENT(EVerseGraphRenderScopeBackground, Background)
 		SLATE_ARGUMENT(bool, ClipToBounds)
+		SLATE_ARGUMENT(bool, VisibilityGuardOnly)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
 
@@ -69,6 +77,7 @@ public:
 	void SetContent(TSharedRef<SWidget> InContent);
 	bool WasPaintedThisFrame() const;
 	bool WasPaintedRecently() const;
+	bool CanSupplyVisibleEndpoints() const;
 	virtual int32 OnPaint(
 		const FPaintArgs& Args,
 		const FGeometry& AllottedGeometry,
@@ -81,6 +90,7 @@ public:
 private:
 	TArray<FVerseGraphConnection> Connections;
 	EVerseGraphRenderScopeBackground Background = EVerseGraphRenderScopeBackground::Root;
+	bool bVisibilityGuardOnly = false;
 	mutable uint64 LastPaintFrame = MAX_uint64;
 };
 

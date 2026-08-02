@@ -14,6 +14,23 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSpacer.h"
 
+EVerseGraphConnectionAxis GetVersePresentedConnectionAxis(
+	EVerseVisualConnectionAxis ModelAxis,
+	EVerseVisualSocketRole SourceRole,
+	EVerseFunctionGraphPresentation Presentation)
+{
+	const bool bExecutionConnection = SourceRole == EVerseVisualSocketRole::Execution
+		|| SourceRole == EVerseVisualSocketRole::ClauseInsertion;
+	if (bExecutionConnection
+		&& Presentation != EVerseFunctionGraphPresentation::VerticalExecution)
+	{
+		return EVerseGraphConnectionAxis::Horizontal;
+	}
+	return ModelAxis == EVerseVisualConnectionAxis::Horizontal
+		? EVerseGraphConnectionAxis::Horizontal
+		: EVerseGraphConnectionAxis::Vertical;
+}
+
 TArray<FVector2D> BuildVerseSplineMarkerCenters(
 	FVector2D Start,
 	FVector2D StartTangent,
@@ -147,7 +164,7 @@ namespace
 				return true;
 			}
 			const TSharedPtr<SVerseGraphRenderScope> Scope = Binding.RenderScope.Pin();
-			return Scope.IsValid() && Scope->WasPaintedThisFrame();
+			return Scope.IsValid() && Scope->CanSupplyVisibleEndpoints();
 		};
 		if (!IsBindingVisible(*SourceBinding) || !IsBindingVisible(*TargetBinding))
 		{
@@ -222,6 +239,7 @@ void SVerseGraphRenderScope::Construct(const FArguments& InArgs)
 {
 	Connections = InArgs._Connections;
 	Background = InArgs._Background;
+	bVisibilityGuardOnly = InArgs._VisibilityGuardOnly;
 	SetCanTick(false);
 	SetClipping(InArgs._ClipToBounds
 		? EWidgetClipping::ClipToBounds
@@ -253,6 +271,12 @@ bool SVerseGraphRenderScope::WasPaintedThisFrame() const
 bool SVerseGraphRenderScope::WasPaintedRecently() const
 {
 	return LastPaintFrame != MAX_uint64 && GFrameCounter <= LastPaintFrame + 1;
+}
+
+bool SVerseGraphRenderScope::CanSupplyVisibleEndpoints() const
+{
+	return GetVisibility().IsVisible()
+		&& (bVisibilityGuardOnly || WasPaintedThisFrame());
 }
 
 int32 SVerseGraphRenderScope::OnPaint(

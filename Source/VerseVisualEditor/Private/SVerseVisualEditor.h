@@ -7,6 +7,7 @@
 #include "VerseDocumentRevision.h"
 #include "VerseEditorFileTree.h"
 #include "VerseOutliner.h"
+#include "VerseVisualEditorSettings.h"
 #include "SVerseTile.h"
 #include "VerseExpressionActions.h"
 #include "VerseGraphCoordinates.h"
@@ -221,6 +222,8 @@ private:
 	int32 ProjectBuildWarningCount = 0;
 	int32 ProjectBuildErrorCount = 0;
 	EVerseCompilationMode CompilationMode = EVerseCompilationMode::Continuous;
+	EVerseFunctionGraphPresentation FunctionGraphPresentation =
+		EVerseFunctionGraphPresentation::VerticalExecution;
 	TOptional<struct FVerseSocketDragStart> SocketDrag;
 	TArray<TSharedPtr<struct FVerseExpressionAction>> ExpressionActions;
 	TSharedPtr<class IMenu> ExpressionMenu;
