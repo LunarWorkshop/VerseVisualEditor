@@ -241,6 +241,7 @@ namespace
 			Function->_Signature.GetParams();
 		for (int32 Index = 0; Index < Params.Num(); ++Index)
 		{
+			Action->InputTypeNames.Add(SemanticTextToString(Params[Index]->AsCode()));
 			const uLang::CDataDefinition* Definition = Definitions.IsValidIndex(Index)
 				? Definitions[Index]
 				: nullptr;
@@ -288,6 +289,74 @@ namespace
 			Action->InputDefaultSources.Add(MoveTemp(Default));
 		}
 		return Action;
+	}
+
+	bool UsesPreferredUntypedOperand(
+		const FVerseExpressionAction& Action,
+		FStringView PreferredType)
+	{
+		return !PreferredType.IsEmpty()
+			&& !Action.InputTypeNames.IsEmpty()
+			&& !Action.InputTypeNames.ContainsByPredicate(
+				[PreferredType](const FString& Type)
+				{
+					return !FStringView(Type).Equals(
+						PreferredType, ESearchCase::IgnoreCase);
+				});
+	}
+
+	void GroupPolymorphicOperatorActions(
+		TArray<TSharedPtr<FVerseExpressionAction>>& Actions)
+	{
+		TArray<TSharedPtr<FVerseExpressionAction>> Grouped;
+		TMap<FString, int32> GroupIndices;
+		for (TSharedPtr<FVerseExpressionAction>& Action : Actions)
+		{
+			if (!Action.IsValid())
+			{
+				continue;
+			}
+			EVerseIntrinsicCallableForm Form;
+			switch (Action->SourceForm)
+			{
+			case EVerseExpressionSourceForm::InfixOperator:
+				Form = EVerseIntrinsicCallableForm::InfixOperator;
+				break;
+			case EVerseExpressionSourceForm::PrefixOperator:
+				Form = EVerseIntrinsicCallableForm::PrefixOperator;
+				break;
+			case EVerseExpressionSourceForm::PostfixOperator:
+				Form = EVerseIntrinsicCallableForm::PostfixOperator;
+				break;
+			default:
+				Grouped.Add(MoveTemp(Action));
+				continue;
+			}
+			const FVerseIntrinsicPresentationDescriptor* Presentation =
+				FindVerseIntrinsicOperatorPresentation(Form, Action->SourceSpelling);
+			if (Presentation == nullptr || !Presentation->bGroupOverloadsInActionMenu)
+			{
+				Grouped.Add(MoveTemp(Action));
+				continue;
+			}
+			const FString Key = FString::Printf(
+				TEXT("%d|%s"), static_cast<int32>(Form), *Action->SourceSpelling);
+			if (const int32* ExistingIndex = GroupIndices.Find(Key))
+			{
+				TSharedPtr<FVerseExpressionAction>& Existing = Grouped[*ExistingIndex];
+				if (!UsesPreferredUntypedOperand(
+						*Existing, Presentation->PreferredUntypedOperandType)
+					&& UsesPreferredUntypedOperand(
+						*Action, Presentation->PreferredUntypedOperandType))
+				{
+					Existing = MoveTemp(Action);
+				}
+				continue;
+			}
+			GroupIndices.Add(Key, Grouped.Num());
+			Grouped.Add(MoveTemp(Action));
+		}
+		Actions = MoveTemp(Grouped);
 	}
 
 	FString NormalizeActionType(FString Type)
@@ -546,6 +615,7 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	ConstantAction->Category = LOCTEXT("VariablesCategory", "Variables");
 	ConstantAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 	Result.Add(MoveTemp(ConstantAction));
+	GroupPolymorphicOperatorActions(Result);
 	return Result;
 }
 
@@ -606,6 +676,7 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 				? DraggedSocket.SemanticTypeName
 				: GetTypeName(SocketType, Document.GetOriginalUtf8View()));
 	}
+	GroupPolymorphicOperatorActions(Result);
 	return Result;
 }
 

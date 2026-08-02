@@ -42,6 +42,13 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 					*Descriptor.Key.Spelling),
 				ResolveVerseIntrinsicBlueprintFunction(Descriptor));
 		}
+		if (Descriptor.Key.Form != EVerseIntrinsicCallableForm::Ordinary)
+		{
+			TestTrue(
+				*FString::Printf(TEXT("Operator %s groups its overloads"),
+					*Descriptor.Key.Spelling),
+				Descriptor.bGroupOverloadsInActionMenu);
+		}
 	}
 
 	FVerseIntrinsicPresentationKey AddKey;
@@ -55,6 +62,10 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	TestTrue(TEXT("Add groups compiler overloads into one polymorphic menu action"),
+		Add->bGroupOverloadsInActionMenu);
+	TestEqual(TEXT("Unconstrained Add starts from the integer overload"),
+		Add->PreferredUntypedOperandType, FString(TEXT("int")));
 	FVerseIntrinsicPresentationKey IntegerLessKey;
 	IntegerLessKey.Form = EVerseIntrinsicCallableForm::InfixOperator;
 	IntegerLessKey.Spelling = TEXT("<");

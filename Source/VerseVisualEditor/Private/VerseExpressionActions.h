@@ -50,6 +50,8 @@ struct FVerseExpressionAction
 		EVerseProvisionalContentTarget::None;
 	bool bUsesFailureCallSyntax = false;
 	int32 BoundInputIndex = INDEX_NONE;
+	/** Concrete formal types for overload grouping and deterministic untyped defaults. */
+	TArray<FString> InputTypeNames;
 	TArray<FString> InputDefaultSources;
 	TArray<FString> InputNames;
 	TArray<bool> NamedInputs;

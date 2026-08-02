@@ -48,6 +48,10 @@ struct FVerseIntrinsicPresentationDescriptor
 	bool bSymmetricOperands = false;
 	/** The signature picker may omit a result that is not useful for choosing an overload. */
 	bool bOmitResultInSignaturePicker = false;
+	/** Present all compiler overloads as one polymorphic expression-search action. */
+	bool bGroupOverloadsInActionMenu = false;
+	/** Operand type preferred when a grouped action is created without a type constraint. */
+	FString PreferredUntypedOperandType;
 	EVerseIntrinsicBlueprintLibrary BlueprintLibrary =
 		EVerseIntrinsicBlueprintLibrary::None;
 	FName BlueprintFunctionName;

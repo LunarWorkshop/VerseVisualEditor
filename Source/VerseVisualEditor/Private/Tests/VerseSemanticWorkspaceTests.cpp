@@ -412,6 +412,53 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			FVerseTextRange(Document.Revision, {ExpressionBeginByte, 0}),
 			Document.FilePath,
 			CandidateSnapshots);
+	const TArray<TSharedPtr<FVerseExpressionAction>> UntypedAddActions =
+		UntypedSemanticActions.FilterByPredicate(
+			[](const TSharedPtr<FVerseExpressionAction>& Action)
+			{
+				return Action.IsValid()
+					&& Action->SourceForm == EVerseExpressionSourceForm::InfixOperator
+					&& Action->SourceSpelling == TEXT("+");
+			});
+	TestEqual(TEXT("Untyped semantic search presents one polymorphic Add action"),
+		UntypedAddActions.Num(), 1);
+	if (!UntypedAddActions.IsEmpty())
+	{
+		FString UntypedAddSource;
+		TestTrue(TEXT("Unconstrained Add has a source-safe default overload"),
+			BuildVerseExpressionActionSource(
+				*UntypedAddActions[0], FStringView(), UntypedAddSource, DocumentError));
+		TestEqual(TEXT("Unconstrained Add starts as integer addition"),
+			UntypedAddSource, FString(TEXT("0 + 0")));
+	}
+	TMap<FString, int32> UntypedOperatorCounts;
+	for (const TSharedPtr<FVerseExpressionAction>& Action : UntypedSemanticActions)
+	{
+		if (!Action.IsValid())
+		{
+			continue;
+		}
+		int32 Form = INDEX_NONE;
+		switch (Action->SourceForm)
+		{
+		case EVerseExpressionSourceForm::InfixOperator: Form = 0; break;
+		case EVerseExpressionSourceForm::PrefixOperator: Form = 1; break;
+		case EVerseExpressionSourceForm::PostfixOperator: Form = 2; break;
+		default: break;
+		}
+		if (Form != INDEX_NONE)
+		{
+			++UntypedOperatorCounts.FindOrAdd(FString::Printf(
+				TEXT("%d|%s"), Form, *Action->SourceSpelling));
+		}
+	}
+	for (const TPair<FString, int32>& Pair : UntypedOperatorCounts)
+	{
+		TestEqual(
+			*FString::Printf(TEXT("Operator action %s appears once"), *Pair.Key),
+			Pair.Value,
+			1);
+	}
 	const TSharedPtr<FVerseExpressionAction>* UntypedNotEqualAction =
 		UntypedSemanticActions.FindByPredicate(
 			[](const TSharedPtr<FVerseExpressionAction>& Action)

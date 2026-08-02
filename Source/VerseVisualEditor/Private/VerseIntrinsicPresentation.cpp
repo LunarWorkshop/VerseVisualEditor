@@ -31,7 +31,9 @@ namespace
 		std::initializer_list<int32> DefaultSourceTypeParameterIndices = {},
 		bool bSymmetricOperands = false,
 		const TCHAR* UntypedDefaultSource = nullptr,
-		bool bOmitResultInSignaturePicker = false)
+		bool bOmitResultInSignaturePicker = false,
+		bool bGroupOverloadsInActionMenu = false,
+		const TCHAR* PreferredUntypedOperandType = nullptr)
 	{
 		FVerseIntrinsicPresentationDescriptor Result;
 		Result.Key.Form = Form;
@@ -48,6 +50,10 @@ namespace
 		Result.DefaultSourceTypeParameterIndices = DefaultSourceTypeParameterIndices;
 		Result.bSymmetricOperands = bSymmetricOperands;
 		Result.bOmitResultInSignaturePicker = bOmitResultInSignaturePicker;
+		Result.bGroupOverloadsInActionMenu = bGroupOverloadsInActionMenu;
+		Result.PreferredUntypedOperandType = PreferredUntypedOperandType != nullptr
+			? PreferredUntypedOperandType
+			: TEXT("");
 		Result.UntypedDefaultSource = UntypedDefaultSource != nullptr
 			? UntypedDefaultSource
 			: TEXT("");
@@ -96,24 +102,24 @@ namespace
 
 			// Presentation-only operator rows. Availability and resolved signatures
 			// come exclusively from the active compiler semantic program.
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("+"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("AddName", "Add"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("-"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("SubtractName", "Subtract"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("/"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("DivideName", "Divide"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("+"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("AddName", "Add"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("-"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("SubtractName", "Subtract"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("*"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("MultiplyName", "Multiply"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("/"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("DivideName", "Divide"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
 			// Equality's compiler signature retains one operand as abstract
 			// `comparable` after matching a concrete dragged socket. Derive that
 			// operand's placeholder from its counterpart so both actions remain
 			// source-safe. The menu description and source-spelling keyword make
 			// Not Equal searchable by both `!=` and Verse's canonical `<>`.
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (!=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less (<)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal (<=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater (>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterEqualName", "Greater or Equal (>=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateIntName", "Negate Int"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateFloatName", "Negate Float"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::PostfixOperator, TEXT("?"), {TEXT("logic")}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("QueryLogicName", "Query (?)"), LOCTEXT("OperatorsCategory", "Utilities|Operators")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (!=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less (<)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal (<=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater (>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterEqualName", "Greater or Equal (>=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("int")}, TEXT("int"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateIntName", "Negate Int"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::PrefixOperator, TEXT("-"), {TEXT("float")}, TEXT("float"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NegateFloatName", "Negate Float"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::PostfixOperator, TEXT("?"), {TEXT("logic")}, TEXT("logic"), EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("QueryLogicName", "Query (?)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("logic")),
 		};
 		return Table;
 	}
