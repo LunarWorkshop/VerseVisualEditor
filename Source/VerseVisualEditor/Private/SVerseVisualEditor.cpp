@@ -53,6 +53,7 @@
 #include "VerseTileProperties.h"
 #include "VerseVisualTile.h"
 #include "VerseVisualEditorSettings.h"
+#include "VerseVisualEditorStyle.h"
 #include "VerseVisualEditorLifetimeDiagnostics.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
@@ -608,40 +609,7 @@ namespace
 
 	FLinearColor GetBlueprintPinColor(const FString& VerseType)
 	{
-		const UGraphEditorSettings* Settings = GetDefault<UGraphEditorSettings>();
-		FString Type = VerseType.TrimStartAndEnd().ToLower();
-		while (Type.RemoveFromStart(TEXT("?")) || Type.RemoveFromStart(TEXT("[]")))
-		{
-		}
-		if (Type == TEXT("logic"))
-		{
-			return Settings->BooleanPinTypeColor;
-		}
-		if (Type == TEXT("int"))
-		{
-			return Settings->IntPinTypeColor;
-		}
-		if (Type == TEXT("float"))
-		{
-			return Settings->FloatPinTypeColor;
-		}
-		if (Type == TEXT("string"))
-		{
-			return Settings->StringPinTypeColor;
-		}
-		if (Type == TEXT("message"))
-		{
-			return Settings->TextPinTypeColor;
-		}
-		if (Type == TEXT("char"))
-		{
-			return Settings->BytePinTypeColor;
-		}
-		if (Type == TEXT("type"))
-		{
-			return Settings->ClassPinTypeColor;
-		}
-		return Settings->ObjectPinTypeColor;
+		return VerseVisualEditorStyle::GetTypeColor(VerseType);
 	}
 
 	const FSlateBrush* GetBlueprintPinBrush(const FString& VerseType)
@@ -707,39 +675,11 @@ namespace
 		}
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
-		const bool bFunctionBoundary = Tile.Kind == EVerseVisualTileKind::FunctionEntry
-			|| Tile.Kind == EVerseVisualTileKind::FunctionReturn;
 		const bool bIdentifier = bExpression
 			&& Tile.ExpressionKind == EVerseExpressionKind::Identifier;
-		const bool bCall = bExpression
-			&& Tile.ExpressionKind == EVerseExpressionKind::Call;
 		const bool bControl = bExpression
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control;
-		FLinearColor TileColor;
-		if (bFunctionBoundary)
-		{
-			TileColor = FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("6a3083")));
-		}
-		else if (bFailableBlock)
-		{
-			TileColor = FLinearColor(0.10f, 0.09f, 0.055f, 1.0f);
-		}
-		else if (bCall)
-		{
-			TileColor = FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4a6646")));
-		}
-		else if (bControl)
-		{
-			TileColor = FLinearColor(0.12f, 0.14f, 0.17f, 1.0f);
-		}
-		else if (bIdentifier)
-		{
-			TileColor = FLinearColor(0.025f, 0.025f, 0.035f, 1.0f);
-		}
-		else
-		{
-			TileColor = FLinearColor(0.12f, 0.14f, 0.17f, 1.0f);
-		}
+		const FLinearColor TileColor = VerseVisualEditorStyle::GetTileTitleColor(Tile);
 		TSharedRef<SWidget> Body = BodyOverride.IsValid()
 			? BodyOverride.ToSharedRef()
 			: SNullWidget::NullWidget;
@@ -762,14 +702,21 @@ namespace
 				LOCTEXT("IfTrueOutput", "True"),
 				LOCTEXT("IfFalseOutput", "False")};
 		}
+		FMargin TileHeaderPadding(0.0f, 6.0f, 8.0f, 6.0f);
+		if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
+		{
+			TileHeaderPadding = FMargin(10.0f, 7.0f, 10.0f, 8.0f);
+		}
+		else if (bIdentifier)
+		{
+			TileHeaderPadding = FMargin(6.0f, 6.0f, 8.0f, 6.0f);
+		}
 		TSharedRef<SVerseTile> Result = SNew(SVerseTile)
 			.Tile(Tile)
 			.Document(Document)
 			.TileColor(TileColor)
 			.UnselectedOutlineColor(FLinearColor::Black)
-			.HeaderPadding(Tile.Kind == EVerseVisualTileKind::FunctionEntry
-				? FMargin(10.0f, 7.0f, 10.0f, 8.0f)
-				: FMargin(0.0f, 6.0f, 8.0f, 6.0f))
+			.HeaderPadding(TileHeaderPadding)
 			.ArrowPadding(bFailableBlock
 				? FMargin(8.0f, 4.0f, 3.0f, 0.0f)
 				: FMargin(8.0f, 14.0f, 3.0f, 0.0f))
@@ -953,7 +900,8 @@ namespace
 			Connection.Thickness =
 				Model.Source.Socket.Role == EVerseVisualSocketRole::Execution
 				|| Model.Source.Socket.Role == EVerseVisualSocketRole::ClauseInsertion
-				? 2.5f : 2.0f;
+				? GetDefault<UGraphEditorSettings>()->DefaultExecutionWireThickness
+				: GetDefault<UGraphEditorSettings>()->DefaultDataWireThickness;
 			Connection.ExtraBlankLineMarkers = Model.ExtraBlankLineMarkers;
 			const TWeakPtr<SVerseGraphRenderScope> SourceScope =
 				(*SourceWidget)->GetSocketRenderScope(Model.Source.Socket);

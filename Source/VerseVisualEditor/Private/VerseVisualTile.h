@@ -185,11 +185,15 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	static FVerseVisualSocketTopology MakeInvalidForTesting(
 		TArray<FVerseVisualSocket> InValueInputs,
-		TArray<FVerseVisualSocket> InValueOutputs = {})
+		TArray<FVerseVisualSocket> InValueOutputs = {},
+		TArray<FVerseVisualSocket> InOtherInputs = {},
+		TArray<FVerseVisualSocket> InOtherOutputs = {})
 	{
 		FVerseVisualSocketTopology Result;
 		Result.ValueInputs = MoveTemp(InValueInputs);
 		Result.ValueOutputs = MoveTemp(InValueOutputs);
+		Result.OtherInputs = MoveTemp(InOtherInputs);
+		Result.OtherOutputs = MoveTemp(InOtherOutputs);
 		return Result;
 	}
 #endif

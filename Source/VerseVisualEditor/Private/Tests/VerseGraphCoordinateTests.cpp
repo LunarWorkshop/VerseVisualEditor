@@ -4,8 +4,12 @@
 #include "SVerseFunctionGraphLayout.h"
 #include "SVerseTile.h"
 #include "VerseGraphCoordinates.h"
+#include "VerseVisualEditorStyle.h"
 
+#include "GraphEditorSettings.h"
 #include "Misc/AutomationTest.h"
+#include "Styling/AppStyle.h"
+#include "Styling/SlateStyleRegistry.h"
 #include "Widgets/Layout/SBox.h"
 
 namespace
@@ -17,6 +21,106 @@ namespace
 		FVerseVisualTileBuilder::FinalizeSocketTopology(Tiles);
 		return MoveTemp(Tiles[0]);
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseGraphVisualStyleTest,
+	"VerseVisualEditor.Graph.Style.BlueprintInspiredChrome",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseGraphVisualStyleTest::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("Plugin style is initialized"), VerseVisualEditorStyle::IsInitialized());
+	const ISlateStyle* Registered =
+		FSlateStyleRegistry::FindSlateStyle(TEXT("VerseVisualEditorStyle"));
+	TestNotNull(TEXT("Plugin style is registered independently"), Registered);
+	if (Registered == nullptr)
+	{
+		return false;
+	}
+	for (const FName BrushName : {
+		FName(TEXT("Tile.Shadow")),
+		FName(TEXT("Tile.Outline")),
+		FName(TEXT("Tile.Header.Expanded")),
+		FName(TEXT("Tile.Header.Collapsed")),
+		FName(TEXT("Tile.Header.Highlight.Expanded")),
+		FName(TEXT("Tile.Body")),
+		FName(TEXT("Tile.BodyOverlay")),
+		FName(TEXT("Tile.Separator"))})
+	{
+		TestTrue(*FString::Printf(TEXT("Style supplies %s"), *BrushName.ToString()),
+			Registered->GetBrush(BrushName) != nullptr);
+	}
+	TestTrue(TEXT("Verse chrome does not replace AppStyle node body"),
+		Registered->GetBrush(TEXT("Tile.Body"))
+			!= FAppStyle::GetBrush(TEXT("Graph.Node.Body")));
+
+	const UGraphEditorSettings* BlueprintSettings = GetDefault<UGraphEditorSettings>();
+	auto Darkened = [](FLinearColor Color, float Brightness, float Opacity)
+	{
+		Color.R *= Brightness;
+		Color.G *= Brightness;
+		Color.B *= Brightness;
+		Color.A = Opacity;
+		return Color;
+	};
+	TestEqual(TEXT("Logic uses Blueprint boolean color"),
+		VerseVisualEditorStyle::GetTypeColor(TEXT("logic")),
+		BlueprintSettings->BooleanPinTypeColor);
+	TestEqual(TEXT("Optional float uses Blueprint float color"),
+		VerseVisualEditorStyle::GetTypeColor(TEXT("?float")),
+		BlueprintSettings->FloatPinTypeColor);
+	TestEqual(TEXT("Array int uses Blueprint int color"),
+		VerseVisualEditorStyle::GetTypeColor(TEXT("[]int")),
+		BlueprintSettings->IntPinTypeColor);
+
+	FVerseVisualTile FunctionEntry;
+	FunctionEntry.Kind = EVerseVisualTileKind::FunctionEntry;
+	TestEqual(TEXT("Function boundary uses darkened Blueprint terminator color"),
+		VerseVisualEditorStyle::GetTileTitleColor(FunctionEntry),
+		Darkened(BlueprintSettings->FunctionTerminatorNodeTitleColor, 0.58f, 0.92f));
+
+	FVerseVisualTile FunctionDefinition;
+	FunctionDefinition.Kind = EVerseVisualTileKind::Definition;
+	FunctionDefinition.DefinitionKind = VerseSyntaxKind::Function;
+	TestEqual(TEXT("File function definition uses the selected function blue"),
+		VerseVisualEditorStyle::GetTileTitleColor(FunctionDefinition),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("3d637d")))
+			.CopyWithNewOpacity(0.90f));
+
+	FVerseVisualTile PureCall;
+	PureCall.Kind = EVerseVisualTileKind::Expression;
+	PureCall.ExpressionKind = EVerseExpressionKind::Call;
+	TestEqual(TEXT("Verse call uses the selected function blue"),
+		VerseVisualEditorStyle::GetTileTitleColor(PureCall),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("3d637d")))
+			.CopyWithNewOpacity(0.90f));
+
+	FVerseVisualTile ExecutableCall = PureCall;
+	FVerseVisualSocket ExecutionSocket;
+	ExecutionSocket.Id = {EVerseVisualSocketDirection::Input,
+		EVerseVisualSocketRole::Execution, 0};
+	ExecutableCall.SocketTopology = FVerseVisualSocketTopology::MakeInvalidForTesting(
+		{}, {}, {ExecutionSocket});
+	TestEqual(TEXT("Calls remain the same blue regardless of execution topology"),
+		VerseVisualEditorStyle::GetTileTitleColor(ExecutableCall),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("3d637d")))
+			.CopyWithNewOpacity(0.90f));
+
+	FVerseVisualTile IfControl;
+	IfControl.Kind = EVerseVisualTileKind::Expression;
+	IfControl.ExpressionKind = EVerseExpressionKind::Control;
+	IfControl.ControlKind = EVerseControlKind::If;
+	TestEqual(TEXT("If uses the restrained neutral tile brightness"),
+		VerseVisualEditorStyle::GetTileTitleColor(IfControl),
+		VerseVisualEditorStyle::Get().GetColor(TEXT("Color.NeutralTitle")));
+
+	FVerseVisualTile Failure;
+	Failure.Kind = EVerseVisualTileKind::FailableBlock;
+	const FLinearColor FailureTitle = VerseVisualEditorStyle::GetTileTitleColor(Failure);
+	TestTrue(TEXT("Failure title retains a restrained gold identity"),
+		FailureTitle.R > FailureTitle.B && FailureTitle.G > FailureTitle.B);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

@@ -4,9 +4,7 @@
 #include "SVerseLiteralEditor.h"
 
 #include "Brushes/SlateColorBrush.h"
-#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Input/DragAndDrop.h"
-#include "GraphEditorSettings.h"
 #include "Rendering/DrawElements.h"
 #include "Settings/EditorStyleSettings.h"
 #include "Styling/AppStyle.h"
@@ -14,6 +12,7 @@
 #include "VerseDefinitionIcon.h"
 #include "VerseDocument.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseVisualEditorStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -58,8 +57,8 @@ TArray<FVerseFailablePatternSegment> BuildVerseFailablePatternSegments(FVector2D
 		return Segments;
 	}
 
-	constexpr float HalfWidth = 12.0f;
-	constexpr float HalfHeight = 18.0f;
+	constexpr float HalfWidth = 18.0f;
+	constexpr float HalfHeight = 24.0f;
 	for (float CenterY = 0.0f; CenterY <= Size.Y + HalfHeight; CenterY += HalfHeight)
 	{
 		const bool bOffsetRow = FMath::RoundToInt(CenterY / HalfHeight) % 2 != 0;
@@ -131,19 +130,7 @@ namespace
 
 	FLinearColor GetVerseTilePinColor(const FString& VerseType)
 	{
-		const UGraphEditorSettings* Settings = GetDefault<UGraphEditorSettings>();
-		FString Type = VerseType.TrimStartAndEnd().ToLower();
-		while (Type.RemoveFromStart(TEXT("?")) || Type.RemoveFromStart(TEXT("[]")))
-		{
-		}
-		if (Type == TEXT("logic")) return Settings->BooleanPinTypeColor;
-		if (Type == TEXT("int")) return Settings->IntPinTypeColor;
-		if (Type == TEXT("float")) return Settings->FloatPinTypeColor;
-		if (Type == TEXT("string")) return Settings->StringPinTypeColor;
-		if (Type == TEXT("message")) return Settings->TextPinTypeColor;
-		if (Type == TEXT("char")) return Settings->BytePinTypeColor;
-		if (Type == TEXT("type")) return Settings->ClassPinTypeColor;
-		return Settings->ObjectPinTypeColor;
+		return VerseVisualEditorStyle::GetTypeColor(VerseType);
 	}
 
 	const FSlateBrush* GetVerseTilePinBrush(const FString& VerseType, bool bConnected)
@@ -298,20 +285,130 @@ namespace
 		bool bConnected = false;
 	};
 
+	/** A restrained Blueprint-like vertical gloss which leaves rounded corner arcs untouched. */
+	class SVerseTileHeaderGradient final : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseTileHeaderGradient)
+			: _RoundBottom(false)
+		{}
+			SLATE_ATTRIBUTE(bool, RoundBottom)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			RoundBottom = InArgs._RoundBottom;
+			SetVisibility(EVisibility::HitTestInvisible);
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		virtual int32 OnPaint(
+			const FPaintArgs& Args,
+			const FGeometry& AllottedGeometry,
+			const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements,
+			int32 LayerId,
+			const FWidgetStyle& InWidgetStyle,
+			bool bParentEnabled) const override
+		{
+			const FVector2D Size = AllottedGeometry.GetLocalSize();
+			const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
+			const float Radius = VisualStyle.GetFloat(TEXT("Metric.TileCornerRadius"));
+			if (Size.X <= Radius * 2.0f || Size.Y <= 2.0f)
+			{
+				return LayerId;
+			}
+
+			TArray<FSlateGradientStop> Stops({
+				FSlateGradientStop(
+					FVector2D(0.0f, 0.0f),
+					VisualStyle.GetColor(TEXT("Color.HeaderGlossTop"))),
+				FSlateGradientStop(
+					FVector2D(0.0f, Size.Y * 0.42f),
+					VisualStyle.GetColor(TEXT("Color.HeaderGlossMiddle"))),
+				FSlateGradientStop(
+					FVector2D(0.0f, Size.Y),
+					VisualStyle.GetColor(TEXT("Color.HeaderGlossBottom")))});
+			const float BottomRadius = RoundBottom.Get(false) ? Radius : 0.0f;
+			FSlateDrawElement::MakeGradient(
+				OutDrawElements,
+				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(Stops),
+				Orient_Horizontal,
+				ESlateDrawEffect::None,
+				FVector4f(Radius, Radius, BottomRadius, BottomRadius));
+			return LayerId;
+		}
+
+	private:
+		TAttribute<bool> RoundBottom;
+	};
+
+	/** Extends the same restrained depth cue through expanded tile bodies. */
+	class SVerseTileBodyGradient final : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVerseTileBodyGradient) {}
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			SetVisibility(EVisibility::HitTestInvisible);
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		virtual int32 OnPaint(
+			const FPaintArgs& Args,
+			const FGeometry& AllottedGeometry,
+			const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements,
+			int32 LayerId,
+			const FWidgetStyle& InWidgetStyle,
+			bool bParentEnabled) const override
+		{
+			const FVector2D Size = AllottedGeometry.GetLocalSize();
+			if (Size.X <= 0.0f || Size.Y <= 2.0f)
+			{
+				return LayerId;
+			}
+
+			const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
+			const float Radius = VisualStyle.GetFloat(TEXT("Metric.TileCornerRadius"));
+			TArray<FSlateGradientStop> Stops({
+				FSlateGradientStop(
+					FVector2D(0.0f, 0.0f),
+					VisualStyle.GetColor(TEXT("Color.BodyGradientTop"))),
+				FSlateGradientStop(
+					FVector2D(0.0f, Size.Y * 0.42f),
+					VisualStyle.GetColor(TEXT("Color.BodyGradientMiddle"))),
+				FSlateGradientStop(
+					FVector2D(0.0f, Size.Y),
+					VisualStyle.GetColor(TEXT("Color.BodyGradientBottom")))});
+			FSlateDrawElement::MakeGradient(
+				OutDrawElements,
+				LayerId,
+				AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(Stops),
+				Orient_Horizontal,
+				ESlateDrawEffect::None,
+				FVector4f(0.0f, 0.0f, Radius, Radius));
+			return LayerId;
+		}
+	};
+
 }
 
 void SVerseTile::Construct(const FArguments& InArgs)
 {
-	constexpr float BlueprintCornerRadius = 6.0f;
-	constexpr float InnerCornerRadius = BlueprintCornerRadius - 1.0f;
-	OuterBrush = MakeUnique<FSlateRoundedBoxBrush>(FLinearColor::White, BlueprintCornerRadius);
-	ExpandedHeaderBrush = MakeUnique<FSlateRoundedBoxBrush>(
-		FLinearColor::White,
-		FVector4(InnerCornerRadius, InnerCornerRadius, 0.0f, 0.0f));
-	CollapsedHeaderBrush = MakeUnique<FSlateRoundedBoxBrush>(FLinearColor::White, InnerCornerRadius);
-	BodyBrush = MakeUnique<FSlateRoundedBoxBrush>(
-		FLinearColor::White,
-		FVector4(0.0f, 0.0f, InnerCornerRadius, InnerCornerRadius));
 	Tile = InArgs._Tile;
 	ConnectedSockets = InArgs._ConnectedSockets;
 	SetRenderOpacity(Tile.bIsProvisional ? 0.5f : 1.0f);
@@ -363,6 +460,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			];
 		}
 	}
+
 	const bool bOperatorTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& IsVerseOperatorExpression(Tile.ExpressionKind);
 	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
@@ -586,11 +684,138 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		}
 	}
 	HeaderOutputGroupWidget = HeaderOutputGroup;
+	const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
+
+	TSharedRef<SVerticalBox> HeaderContents =
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SAssignNew(OperatorLineWidget, STextBlock)
+			.Visibility(bOperatorTile && !OperatorLines.IsEmpty()
+				? EVisibility::Visible
+				: EVisibility::Collapsed)
+			.Text(OperatorLines)
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetMetadataTextColor())
+			.Margin(FMargin(5.0f, 2.0f, 0.0f, 0.0f))
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SAssignNew(HeaderSocketRow, SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				FailureContextInputWidget
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				BuildSocketColumn(Tile.GetValueInputs(), false)
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Top)
+			.Padding(InArgs._ArrowPadding)
+			[
+				SNew(SButton)
+				.Visibility(bCollapsible ? EVisibility::Visible : EVisibility::Collapsed)
+				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+				.ContentPadding(0.0f)
+				.OnClicked(this, &SVerseTile::ToggleExpanded)
+				[
+					SNew(SImage).Image(this, &SVerseTile::GetExpansionImage)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				SNew(SBorder)
+				.OnMouseButtonDown(this, &SVerseTile::HandleHeaderMouseButtonDown)
+				.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
+				.Padding(InArgs._HeaderPadding)
+				[
+					BuildHeader(InArgs._Compact, InArgs._DiagnosticText)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				HeaderOutputGroup
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				Tile.Kind == EVerseVisualTileKind::FailableBlock
+					? SNullWidget::NullWidget
+					: FailureContextOutputWidget
+			]
+		];
+
+	TSharedRef<SOverlay> HeaderSurface =
+		SNew(SOverlay)
+		+ SOverlay::Slot()
+		[
+			SNew(SBorder)
+			.BorderImage(this, &SVerseTile::GetHeaderBrush)
+			.BorderBackgroundColor(InArgs._TileColor)
+		]
+		+ SOverlay::Slot()
+		[
+			SNew(SVerseTileHeaderGradient)
+			.RoundBottom_Lambda([this]()
+			{
+				return GetBodyVisibility() != EVisibility::Visible;
+			})
+		]
+		+ SOverlay::Slot()
+		[
+			SNew(SBorder)
+			.Visibility(EVisibility::HitTestInvisible)
+			.BorderImage(this, &SVerseTile::GetHeaderHighlightBrush)
+		]
+		+ SOverlay::Slot()
+		[
+			HeaderContents
+		];
+
+	TSharedRef<SOverlay> BodySurface =
+		SNew(SOverlay)
+		.Visibility(this, &SVerseTile::GetBodyVisibility)
+		+ SOverlay::Slot()
+		[
+			SNew(SBorder)
+			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Body")))
+			.Padding(0.0f)
+		]
+		+ SOverlay::Slot()
+		[
+			SNew(SVerseTileBodyGradient)
+		]
+		+ SOverlay::Slot()
+		[
+			BodyContent
+		]
+		+ SOverlay::Slot()
+		.VAlign(VAlign_Top)
+		[
+			SNew(SBox)
+			.HeightOverride(1.0f)
+			[
+				SNew(SImage)
+				.Image(VisualStyle.GetBrush(TEXT("Tile.Separator")))
+			]
+		];
 
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
 		.OnMouseButtonDown(this, &SVerseTile::HandleTileMouseButtonDown)
-		.BorderImage(OuterBrush.Get())
+		.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Outline")))
 		.BorderBackgroundColor(this, &SVerseTile::GetOutlineColor)
 		.Padding(Tile.Kind == EVerseVisualTileKind::FailableBlock ? 2.0f : 1.0f)
 		[
@@ -598,93 +823,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				SNew(SBorder)
-				.BorderImage(this, &SVerseTile::GetHeaderBrush)
-				.BorderBackgroundColor(InArgs._TileColor)
-				.Padding(0.0f)
-				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SAssignNew(OperatorLineWidget, STextBlock)
-						.Visibility(bOperatorTile && !OperatorLines.IsEmpty()
-							? EVisibility::Visible
-							: EVisibility::Collapsed)
-						.Text(OperatorLines)
-						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-						.ColorAndOpacity(FLinearColor(0.68f, 0.72f, 0.78f, 1.0f))
-						.Margin(FMargin(5.0f, 2.0f, 0.0f, 0.0f))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-					SAssignNew(HeaderSocketRow, SHorizontalBox)
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						FailureContextInputWidget
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						BuildSocketColumn(Tile.GetValueInputs(), false)
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Top)
-					.Padding(InArgs._ArrowPadding)
-					[
-						SNew(SButton)
-						.Visibility(bCollapsible ? EVisibility::Visible : EVisibility::Collapsed)
-						.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-						.ContentPadding(0.0f)
-						.OnClicked(this, &SVerseTile::ToggleExpanded)
-						[
-							SNew(SImage).Image(this, &SVerseTile::GetExpansionImage)
-						]
-					]
-					+ SHorizontalBox::Slot()
-					.FillWidth(1.0f)
-					[
-						SNew(SBorder)
-						.OnMouseButtonDown(this, &SVerseTile::HandleHeaderMouseButtonDown)
-						.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
-						.Padding(InArgs._HeaderPadding)
-						[
-							BuildHeader(InArgs._Compact, InArgs._DiagnosticText)
-						]
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						HeaderOutputGroup
-					]
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.VAlign(VAlign_Center)
-					[
-						Tile.Kind == EVerseVisualTileKind::FailableBlock
-							? SNullWidget::NullWidget
-							: FailureContextOutputWidget
-					]
-					]
-				]
+				HeaderSurface
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				SNew(SBorder)
-				.Visibility(this, &SVerseTile::GetBodyVisibility)
-				.BorderImage(BodyBrush.Get())
-				.BorderBackgroundColor(FLinearColor(0.04f, 0.04f, 0.05f, 1.0f))
-				.Padding(0.0f)
-				[
-					BodyContent
-				]
+				BodySurface
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -695,11 +839,26 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		]
 	;
 
-	TSharedRef<SWidget> DecoratedTileSurface = TileSurface;
+	TSharedRef<SWidget> ChromeSurface =
+		SNew(SOverlay)
+		+ SOverlay::Slot()
+		[
+			SNew(SBorder)
+			.Visibility(EVisibility::HitTestInvisible)
+			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Shadow")))
+			.BorderBackgroundColor(this, &SVerseTile::GetShadowColor)
+			.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, 2.0f)))
+		]
+		+ SOverlay::Slot()
+		[
+			TileSurface
+		];
+
+	TSharedRef<SWidget> DecoratedTileSurface = ChromeSurface;
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
 		TSharedRef<SOverlay> Decorated = SNew(SOverlay);
-		Decorated->AddSlot()[TileSurface];
+		Decorated->AddSlot()[ChromeSurface];
 		const FLinearColor FailureColor = GetVerseFailureDecorationColor();
 		auto AddCorner = [&](EHorizontalAlignment Horizontal, EVerticalAlignment Vertical,
 			FVector2D Offset)
@@ -802,7 +961,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 							? OutputLabels[OutputIndex]
 							: FText::GetEmpty())
 						.TextStyle(FAppStyle::Get(), "Graph.Node.PinName")
-						.ColorAndOpacity(FLinearColor(0.92f, 0.92f, 0.94f, 1.0f))
+						.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 					]
 					+ SVerticalBox::Slot()
 					.AutoHeight()
@@ -1021,6 +1180,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 				SNew(STextBlock)
 				.Text(FText::FromString(Tile.OperatorSpelling))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+				.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 				.Justification(ETextJustify::Center)
 				.Margin(FMargin(0.0f, 2.0f))
 			]
@@ -1055,7 +1215,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			SNew(STextBlock)
 			.Text(Kind)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-			.ColorAndOpacity(FLinearColor(0.84f, 0.91f, 1.0f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 10.0f : 0.0f, 0.0f)
 		[
@@ -1063,7 +1223,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			.Visibility(bCompact && !HeaderName.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
 			.Text(HeaderName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
-			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 8.0f : 0.0f, 0.0f)
 		[
@@ -1072,7 +1232,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 				? EVisibility::Visible
 				: EVisibility::Collapsed)
 			.Text(Type.IsEmpty() ? FText::GetEmpty() : FText::Format(LOCTEXT("CompactType", ": {0}"), Type))
-			.ColorAndOpacity(FLinearColor(0.82f, 0.84f, 0.88f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
 		]
 	];
 	if (!bCompact && !HeaderName.IsEmpty())
@@ -1082,7 +1242,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			SNew(STextBlock)
 			.Text(HeaderName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
-			.ColorAndOpacity(FLinearColor(0.95f, 0.95f, 0.97f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 		];
 	}
 	if (!Lines.IsEmpty())
@@ -1096,7 +1256,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			SNew(STextBlock)
 			.Text(Lines)
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-			.ColorAndOpacity(FLinearColor(0.68f, 0.72f, 0.78f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetMetadataTextColor())
 		];
 	}
 	if (!bCompact && !bInlineDefinitionType && !Type.IsEmpty()
@@ -1106,7 +1266,7 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 		[
 			SNew(STextBlock)
 			.Text(FText::Format(LOCTEXT("DefinitionType", "Type: {0}"), Type))
-			.ColorAndOpacity(FLinearColor(0.82f, 0.84f, 0.88f, 1.0f))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
 		];
 	}
 	if (!DiagnosticText.IsEmpty())
@@ -1202,7 +1362,7 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 				.Visibility(Name.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 				.Text(Name)
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-				.ColorAndOpacity(FLinearColor(0.92f, 0.92f, 0.94f, 1.0f))
+				.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 			];
 		};
 		auto AddInlineLiteral = [&]()
@@ -1611,9 +1771,18 @@ const FSlateBrush* SVerseTile::GetExpansionImage() const
 
 const FSlateBrush* SVerseTile::GetHeaderBrush() const
 {
+	const ISlateStyle& Style = VerseVisualEditorStyle::Get();
 	return bShowBody && (!bCollapsible || bExpanded)
-		? ExpandedHeaderBrush.Get()
-		: CollapsedHeaderBrush.Get();
+		? Style.GetBrush(TEXT("Tile.Header.Expanded"))
+		: Style.GetBrush(TEXT("Tile.Header.Collapsed"));
+}
+
+const FSlateBrush* SVerseTile::GetHeaderHighlightBrush() const
+{
+	const ISlateStyle& Style = VerseVisualEditorStyle::Get();
+	return bShowBody && (!bCollapsible || bExpanded)
+		? Style.GetBrush(TEXT("Tile.Header.Highlight.Expanded"))
+		: Style.GetBrush(TEXT("Tile.Header.Highlight.Collapsed"));
 }
 
 EVisibility SVerseTile::GetBodyVisibility() const
@@ -1628,6 +1797,14 @@ FSlateColor SVerseTile::GetOutlineColor() const
 	return IsSelected.Get(false)
 		? FLinearColor(1.0f, 0.82f, 0.05f, 1.0f)
 		: UnselectedOutlineColor;
+}
+
+FSlateColor SVerseTile::GetShadowColor() const
+{
+	const ISlateStyle& Style = VerseVisualEditorStyle::Get();
+	return IsSelected.Get(false)
+		? Style.GetColor(TEXT("Color.SelectedShadow"))
+		: Style.GetColor(TEXT("Color.Shadow"));
 }
 
 #undef LOCTEXT_NAMESPACE

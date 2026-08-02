@@ -64,11 +64,22 @@ void PaintVerseGraphBackground(
 
 			const bool bCenterLine = GridIndex == 0;
 			const bool bRuleLine = (GridIndex % RulePeriod) == 0;
-			const FLinearColor Color = bCenterLine
+			FLinearColor Color = bCenterLine
 				? Settings->CenterColor
 				: bRuleLine
 					? Settings->RuleColor
 					: Settings->RegularColor;
+			if (bRuleLine || bCenterLine)
+			{
+				const float Emphasis = bCenterLine ? 1.30f : 1.18f;
+				Color.R = FMath::Min(1.0f, Color.R * Emphasis);
+				Color.G = FMath::Min(1.0f, Color.G * Emphasis);
+				Color.B = FMath::Min(1.0f, Color.B * Emphasis);
+			}
+			else
+			{
+				Color.A *= 0.48f;
+			}
 			if (bVertical)
 			{
 				LinePoints[0] = FVector2f(Position, 0.0f);

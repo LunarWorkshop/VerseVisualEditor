@@ -7,6 +7,7 @@
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
 #include "VerseGraphBackground.h"
+#include "VerseVisualEditorStyle.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
@@ -292,17 +293,19 @@ int32 SVerseGraphRenderScope::OnPaint(
 	int32 BackgroundLayer = LayerId;
 	if (Background == EVerseGraphRenderScopeBackground::Failable)
 	{
-		static const FSlateColorBrush WhiteBrush(FLinearColor::White);
 		const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
+		const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
+		const FLinearColor FailureGlass =
+			VisualStyle.GetColor(TEXT("Color.FailureGlass")) * WidgetTint;
 		FSlateDrawElement::MakeBox(
 			OutDrawElements,
 			BackgroundLayer,
 			AllottedGeometry.ToPaintGeometry(),
-			&WhiteBrush,
+			VisualStyle.GetBrush(TEXT("Tile.BodyOverlay")),
 			ESlateDrawEffect::None,
-			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14"))) * WidgetTint);
+			FailureGlass);
 		const FLinearColor PatternColor =
-			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b"))) * WidgetTint;
+			VisualStyle.GetColor(TEXT("Color.FailurePattern")) * WidgetTint;
 		for (const FVerseFailablePatternSegment& Segment :
 			BuildVerseFailablePatternSegments(AllottedGeometry.GetLocalSize()))
 		{

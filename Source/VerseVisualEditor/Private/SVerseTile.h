@@ -7,7 +7,6 @@
 
 class FVerseDocument;
 class SVerseGraphRenderScope;
-struct FSlateRoundedBoxBrush;
 
 struct FVerseFailablePatternSegment
 {
@@ -184,8 +183,10 @@ private:
 	FReply ToggleExpanded();
 	const FSlateBrush* GetExpansionImage() const;
 	const FSlateBrush* GetHeaderBrush() const;
+	const FSlateBrush* GetHeaderHighlightBrush() const;
 	EVisibility GetBodyVisibility() const;
 	FSlateColor GetOutlineColor() const;
+	FSlateColor GetShadowColor() const;
 
 	FVerseVisualTile Tile;
 	TSharedPtr<const FVerseDocument> Document;
@@ -205,10 +206,6 @@ private:
 	TSharedPtr<SWidget> HeaderOutputGroupWidget;
 	TArray<TSharedPtr<SWidget>> ValueInputRows;
 	TArray<TSharedPtr<SWidget>> ValueOutputRows;
-	TUniquePtr<FSlateRoundedBoxBrush> OuterBrush;
-	TUniquePtr<FSlateRoundedBoxBrush> ExpandedHeaderBrush;
-	TUniquePtr<FSlateRoundedBoxBrush> CollapsedHeaderBrush;
-	TUniquePtr<FSlateRoundedBoxBrush> BodyBrush;
 	TWeakPtr<SVerseGraphRenderScope> OwningRenderScope;
 	TWeakPtr<SVerseGraphRenderScope> BodyRenderScope;
 	bool bExpanded = true;

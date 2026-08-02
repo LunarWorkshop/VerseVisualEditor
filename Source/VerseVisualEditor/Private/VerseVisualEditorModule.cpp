@@ -12,6 +12,7 @@
 #include "Styling/AppStyle.h"
 #include "Textures/SlateIcon.h"
 #include "ToolMenus.h"
+#include "VerseVisualEditorStyle.h"
 #include "VerseVisualEditorLifetimeDiagnostics.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
@@ -52,6 +53,7 @@ public:
 
 void FVerseVisualEditorModule::StartupModule()
 {
+	VerseVisualEditorStyle::Initialize();
 	VerseVisualEditorLifetimeDiagnostics::Track(
 		this,
 		TEXT("PluginModule"));
@@ -86,6 +88,7 @@ void FVerseVisualEditorModule::ShutdownModule()
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(VerseVisualEditorModule::MainTabId);
 	}
+	VerseVisualEditorStyle::Shutdown();
 	VerseVisualEditorLifetimeDiagnostics::Dump(
 		TEXT("VerseVisualEditor module shutdown end"));
 	VerseVisualEditorLifetimeDiagnostics::Untrack(

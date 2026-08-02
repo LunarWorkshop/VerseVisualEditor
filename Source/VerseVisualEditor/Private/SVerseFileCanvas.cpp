@@ -5,6 +5,7 @@
 #include "VerseOrderedTilePacking.h"
 #include "Styling/CoreStyle.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VerseVisualEditorStyle.h"
 #include "VerseVisualTile.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -97,36 +98,6 @@ namespace
 				&& (Tile.DefinitionKind == VerseSyntaxKind::Constant
 					|| Tile.DefinitionKind == VerseSyntaxKind::TypeAlias
 					|| Tile.DefinitionKind == VerseSyntaxKind::Function));
-	}
-
-	FLinearColor GetVerseTypeColor(const FString& TypeName)
-	{
-		const FString Type = TypeName.TrimStartAndEnd().ToLower();
-		if (Type == TEXT("logic"))
-		{
-			return FLinearColor(0.78f, 0.08f, 0.12f, 1.0f);
-		}
-		if (Type == TEXT("int"))
-		{
-			return FLinearColor(0.10f, 0.72f, 0.62f, 1.0f);
-		}
-		if (Type == TEXT("float"))
-		{
-			return FLinearColor(0.32f, 0.82f, 0.18f, 1.0f);
-		}
-		if (Type == TEXT("string") || Type == TEXT("message"))
-		{
-			return FLinearColor(0.92f, 0.18f, 0.62f, 1.0f);
-		}
-		if (Type == TEXT("char"))
-		{
-			return FLinearColor(0.42f, 0.85f, 0.35f, 1.0f);
-		}
-		if (Type == TEXT("void"))
-		{
-			return FLinearColor(0.72f, 0.72f, 0.72f, 1.0f);
-		}
-		return FLinearColor(0.24f, 0.58f, 1.0f, 1.0f);
 	}
 
 }
@@ -302,14 +273,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildTile(const FVerseVisualTile& Tile, in
 TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile& Tile, int32 TileIndex)
 {
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
-	const bool bComment = Tile.Kind == EVerseVisualTileKind::Comment;
-	const FLinearColor TileColor = bDefinition
-		? Tile.DefinitionKind == VerseSyntaxKind::Function
-			? FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2f4655")))
-			: FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("182a36")))
-		: bComment
-			? FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("10251a")))
-			: FLinearColor(0.35f, 0.20f, 0.08f, 1.0f);
+	const FLinearColor TileColor = VerseVisualEditorStyle::GetTileTitleColor(Tile);
 	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
 	const FVerseByteRange ContentRange = Tile.Kind == EVerseVisualTileKind::Unknown
 		? Tile.Range
@@ -427,7 +391,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildFunctionSignature(const FVerseVisualT
 				.Text(ParameterType.IsEmpty()
 					? LOCTEXT("UntypedFunctionParameter", "untyped")
 					: ParameterType)
-				.ColorAndOpacity(GetVerseTypeColor(ParameterType.ToString()))
+				.ColorAndOpacity(VerseVisualEditorStyle::GetTypeColor(ParameterType.ToString()))
 			]
 		];
 	}
@@ -451,7 +415,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildFunctionSignature(const FVerseVisualT
 		[
 			SNew(STextBlock)
 			.Text(ReturnType.IsEmpty() ? LOCTEXT("InferredReturnType", "inferred") : ReturnType)
-			.ColorAndOpacity(GetVerseTypeColor(ReturnType.ToString()))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetTypeColor(ReturnType.ToString()))
 		]
 	];
 	return Signature;
@@ -469,7 +433,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.Document(Snapshot->GetDocument())
 		.Compact(true)
 		.DiagnosticText(bHasDiagnostic ? FormatDiagnosticMessages(TileIndex) : FText::GetEmpty())
-		.TileColor(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("182a36"))))
+		.TileColor(VerseVisualEditorStyle::GetTileTitleColor(Tile))
 		.UnselectedOutlineColor(bHasDiagnostic
 			? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
 			: FLinearColor::Black)
