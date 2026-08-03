@@ -23,15 +23,52 @@ namespace
 		ELogVerbosity::Type Severity,
 		FString FilePath = FString(),
 		FIntPoint RowSpan = FIntPoint(INDEX_NONE, INDEX_NONE),
-		FIntPoint ColumnSpan = FIntPoint(INDEX_NONE, INDEX_NONE))
+		FIntPoint ColumnSpan = FIntPoint(INDEX_NONE, INDEX_NONE),
+		uint16 ReferenceCode = 0,
+		FVerseByteRange SourceRange = {},
+		FVerseDocumentRevision SourceRevision = {})
 	{
 		FVerseSemanticDiagnostic Result;
 		Result.Message = MoveTemp(Message);
 		Result.Severity = Severity;
+		Result.ReferenceCode = ReferenceCode;
 		Result.FilePath = MoveTemp(FilePath);
 		Result.RowSpan = RowSpan;
 		Result.ColumnSpan = ColumnSpan;
+		Result.SourceRange = SourceRange;
+		Result.SourceRevision = SourceRevision;
 		return Result;
+	}
+
+	const FVerseSemanticDocumentInput* FindDiagnosticDocument(
+		TConstArrayView<FVerseSemanticDocumentInput> Documents,
+		FString DiagnosticPath)
+	{
+		FPaths::NormalizeFilename(DiagnosticPath);
+		return Documents.FindByPredicate(
+			[&DiagnosticPath](const FVerseSemanticDocumentInput& Document)
+			{
+				FString DocumentPath = Document.FilePath;
+				FPaths::NormalizeFilename(DocumentPath);
+				return DocumentPath.Equals(DiagnosticPath, ESearchCase::IgnoreCase)
+					|| DocumentPath.EndsWith(
+						TEXT("/") + DiagnosticPath,
+						ESearchCase::IgnoreCase);
+			});
+	}
+
+	FVerseByteRange MakeDiagnosticByteRange(
+		const FVerseSemanticDocumentInput& Document,
+		const uLang::STextRange& Range)
+	{
+		const uLang::CUTF8StringView Source(
+			reinterpret_cast<const char*>(*Document.Source),
+			Document.Source.Len());
+		const uLang::TOptional<int32_t> Begin = uLang::ScanToRowCol(Source, Range.GetBegin());
+		const uLang::TOptional<int32_t> End = uLang::ScanToRowCol(Source, Range.GetEnd());
+		return Begin.IsSet() && End.IsSet() && End.GetValue() >= Begin.GetValue()
+			? FVerseByteRange::FromBounds(Begin.GetValue(), End.GetValue())
+			: FVerseByteRange();
 	}
 
 	ELogVerbosity::Type ToLogVerbosity(uLang::EDiagnosticSeverity Severity)
@@ -639,7 +676,8 @@ bool FVerseSemanticWorkspace::RebuildPrivateEnvironment(
 				Diagnostic.Info.Severity,
 				Diagnostic.Location.FilePath,
 				Diagnostic.Location.RowSpan,
-				Diagnostic.Location.ColSpan));
+				Diagnostic.Location.ColSpan,
+				Diagnostic.Info.ReferenceCode));
 		});
 	const TOptional<TSharedRef<ISolIdeSourceProject>> IndependentProject =
 		ISolarisModule::Get().CreateProjectSource(
@@ -777,16 +815,26 @@ FVerseSemanticAnalysisResult FVerseSemanticWorkspace::AnalyzeWithPrivateEnvironm
 		BuildManager.Get());
 	for (const uLang::TSRef<uLang::SGlitch>& Glitch : CompilerDiagnostics->GetGlitches())
 	{
+		const FString DiagnosticPath =
+			UTF8_TO_TCHAR(Glitch->_Locus._SnippetPath.AsCString());
+		const FVerseSemanticDocumentInput* DiagnosticDocument =
+			FindDiagnosticDocument(Documents, DiagnosticPath);
 		Result.Diagnostics.Add(MakeDiagnostic(
 			FText::FromString(UTF8_TO_TCHAR(Glitch->_Result._Message.AsCString())),
 			ToLogVerbosity(Glitch->_Result.GetInfo().Severity),
-			UTF8_TO_TCHAR(Glitch->_Locus._SnippetPath.AsCString()),
+			DiagnosticPath,
 			FIntPoint(
 				Glitch->_Locus._Range.BeginRow() + 1,
 				Glitch->_Locus._Range.EndRow() + 1),
 			FIntPoint(
 				Glitch->_Locus._Range.BeginColumn() + 1,
-				Glitch->_Locus._Range.EndColumn() + 1)));
+				Glitch->_Locus._Range.EndColumn() + 1),
+			Glitch->_Result.GetInfo().ReferenceCode,
+			DiagnosticDocument != nullptr
+				? MakeDiagnosticByteRange(*DiagnosticDocument, Glitch->_Locus._Range)
+				: FVerseByteRange(),
+			DiagnosticDocument != nullptr
+				? DiagnosticDocument->Revision : FVerseDocumentRevision()));
 	}
 	if (!BuildManager->GetProgramContext()._Program.IsValid()
 		|| !BuildManager->GetProjectVst().IsValid())

@@ -822,6 +822,13 @@ private:
 					Tile.ClauseItemIndex == INDEX_NONE ? 0 : Tile.ClauseItemIndex + 1);
 			}
 		}
+		if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+		{
+			// This is a presentation-only channel for the complete statement's
+			// failure. It is deliberately independent of any carried value socket.
+			AddOther(Tile, EVerseVisualSocketDirection::Output,
+				EVerseVisualSocketRole::FailureContext, 0);
+		}
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
@@ -948,7 +955,8 @@ private:
 
 		const bool bNeedsOutput = (Tile.bProducesValue
 			&& (Tile.bValueConsumed || Tile.bStatementLevel))
-			|| Tile.Outcome == EVerseExpressionOutcome::FailureOnly
+			|| (Tile.Outcome == EVerseExpressionOutcome::FailureOnly
+				&& Tile.StatementFailure == EVerseStatementFailureDisposition::None)
 			|| (Tile.Kind == EVerseVisualTileKind::Definition && bInsideFailableBlock);
 		if (bNeedsOutput && !bInlineLiteral)
 		{
@@ -963,6 +971,12 @@ private:
 			Output.SemanticName = Tile.SemanticDefinitionName;
 			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
 			Output.SemanticSnapshot = Tile.SemanticSnapshot;
+			if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+			{
+				// A statement's data channel carries only the successful value. The
+				// separate FailureContext output owns the gold failure decoration.
+				Output.Outcome = EVerseExpressionOutcome::Ordinary;
+			}
 			if (Tile.Kind == EVerseVisualTileKind::Definition
 				&& Tile.EditableClause.IsSet())
 			{
@@ -1095,6 +1109,30 @@ namespace
 			RenderScope});
 	}
 
+	void AddVisualTerminalConnection(
+		TArray<FVerseVisualConnection>& Connections,
+		const FVerseVisualTile& SourceTile,
+		FVerseVisualSocketId SourceSocket,
+		EVerseVisualConnectionTerminal Terminal,
+		FVerseGraphRenderScopeId RenderScope)
+	{
+		if (!ensureMsgf(SourceSocket.Direction == EVerseVisualSocketDirection::Output,
+				TEXT("A terminal Verse graph connection must begin at an output socket."))
+			|| !ensureMsgf(SourceTile.FindSocket(SourceSocket) != nullptr,
+				TEXT("A terminal Verse graph connection references a missing source socket."))
+			|| !ensureMsgf(Terminal != EVerseVisualConnectionTerminal::Socket,
+				TEXT("A source-only Verse graph connection requires a terminal mode.")))
+		{
+			return;
+		}
+		FVerseVisualConnection& Connection = Connections.AddDefaulted_GetRef();
+		Connection.Source = {SourceTile.Id, SourceSocket};
+		Connection.Axis = EVerseVisualConnectionAxis::Horizontal;
+		Connection.Outcome = EVerseExpressionOutcome::FailureOnly;
+		Connection.RenderScope = RenderScope;
+		Connection.Terminal = Terminal;
+	}
+
 	const FVerseVisualSocket* FirstValueOutput(const FVerseVisualTile& Tile)
 	{
 		return Tile.GetValueOutputs().IsEmpty() ? nullptr : &Tile.GetValueOutputs()[0];
@@ -1166,6 +1204,23 @@ namespace
 						0, ContentScope);
 				}
 			}
+		}
+
+		if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+		{
+			const EVerseVisualConnectionTerminal Terminal =
+				Tile.StatementFailure == EVerseStatementFailureDisposition::ContextBoundary
+					? EVerseVisualConnectionTerminal::RenderScopeRightBoundary
+					: Tile.StatementFailure == EVerseStatementFailureDisposition::CompilerError
+					? EVerseVisualConnectionTerminal::RedX
+					: EVerseVisualConnectionTerminal::GoldDiamond;
+			AddVisualTerminalConnection(
+				Connections,
+				Tile,
+				{EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::FailureContext, 0},
+				Terminal,
+				ContentScope);
 		}
 
 		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
@@ -1453,8 +1508,11 @@ bool FVerseVisualTileBuilder::ValidateRenderScopes(
 		{
 			return Fail(TEXT("A connection references a missing render scope."));
 		}
-		const FVerseGraphRenderScopeId Expected = NearestCommonScope(
-			EndpointScope(Connection.Source), EndpointScope(Connection.Target));
+		const FVerseGraphRenderScopeId Expected =
+			Connection.Terminal == EVerseVisualConnectionTerminal::Socket
+				? NearestCommonScope(
+					EndpointScope(Connection.Source), EndpointScope(Connection.Target))
+				: EndpointScope(Connection.Source);
 		if (!(Expected == Connection.RenderScope))
 		{
 			return Fail(FString::Printf(
@@ -1553,21 +1611,38 @@ bool FVerseVisualTileBuilder::ValidateConnections(
 	for (const FVerseVisualConnection& Connection : Connections)
 	{
 		const FVerseVisualTile* const* SourceTile = TilesById.Find(Connection.Source.Tile);
-		const FVerseVisualTile* const* TargetTile = TilesById.Find(Connection.Target.Tile);
-		if (SourceTile == nullptr || TargetTile == nullptr)
+		if (SourceTile == nullptr)
 		{
-			return Fail(TEXT("A connection references a missing tile."));
+			return Fail(TEXT("A connection references a missing source tile."));
 		}
 		const FVerseVisualSocket* SourceSocket = (*SourceTile)->FindSocket(Connection.Source.Socket);
-		const FVerseVisualSocket* TargetSocket = (*TargetTile)->FindSocket(Connection.Target.Socket);
-		if (SourceSocket == nullptr || TargetSocket == nullptr)
+		if (SourceSocket == nullptr
+			|| SourceSocket->Id.Direction != EVerseVisualSocketDirection::Output)
 		{
-			return Fail(TEXT("A connection references a missing socket."));
+			return Fail(TEXT("A connection references a missing or invalid source socket."));
 		}
-		if (SourceSocket->Id.Direction != EVerseVisualSocketDirection::Output
+		if (Connection.Terminal != EVerseVisualConnectionTerminal::Socket)
+		{
+			if (Connection.Target.IsValid()
+				|| SourceSocket->Id.Role != EVerseVisualSocketRole::FailureContext)
+			{
+				return Fail(TEXT("A terminal connection must be source-only and use a failure output."));
+			}
+			if (OccupiedSingleOutputs.Contains(Connection.Source))
+			{
+				return Fail(TEXT("A single-cardinality output has more than one connection."));
+			}
+			OccupiedSingleOutputs.Add(Connection.Source);
+			continue;
+		}
+		const FVerseVisualTile* const* TargetTile = TilesById.Find(Connection.Target.Tile);
+		const FVerseVisualSocket* TargetSocket = TargetTile != nullptr
+			? (*TargetTile)->FindSocket(Connection.Target.Socket)
+			: nullptr;
+		if (TargetTile == nullptr || TargetSocket == nullptr
 			|| TargetSocket->Id.Direction != EVerseVisualSocketDirection::Input)
 		{
-			return Fail(TEXT("A connection has incompatible endpoint directions."));
+			return Fail(TEXT("A socket connection references a missing or invalid target socket."));
 		}
 		if (OccupiedInputs.Contains(Connection.Target))
 		{

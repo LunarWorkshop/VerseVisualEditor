@@ -1262,6 +1262,43 @@ bool FVerseImmutableSocketTopologyTest::RunTest(const FString& Parameters)
 			FVerseVisualTileBuilder::ValidateConnections(
 				InvalidInsertionTarget, {}, &Diagnostic));
 	}
+
+	FVerseVisualTile FailureContext;
+	FailureContext.Kind = EVerseVisualTileKind::FailableBlock;
+	FVerseVisualTile& ContextStatement = FailureContext.Children.AddDefaulted_GetRef();
+	ContextStatement.Kind = EVerseVisualTileKind::Expression;
+	ContextStatement.ExpressionKind = EVerseExpressionKind::UnaryOperator;
+	ContextStatement.bStatementLevel = true;
+	ContextStatement.bProducesValue = true;
+	ContextStatement.Outcome = EVerseExpressionOutcome::FailableValue;
+	ContextStatement.StatementFailure = EVerseStatementFailureDisposition::ContextBoundary;
+	TArray<FVerseVisualTile> FailureGraph;
+	FailureGraph.Add(MoveTemp(FailureContext));
+	FVerseVisualTileBuilder::FinalizeSocketTopology(FailureGraph);
+	const TArray<FVerseVisualConnection> FailureConnections =
+		FVerseVisualTileBuilder::BuildConnections(FailureGraph);
+	const FVerseVisualConnection* BoundaryConnection =
+		FailureConnections.FindByPredicate(
+			[](const FVerseVisualConnection& Connection)
+			{
+				return Connection.Terminal
+					== EVerseVisualConnectionTerminal::RenderScopeRightBoundary;
+			});
+	TestTrue(TEXT("A handled statement failure terminates at its render-scope wall"),
+		BoundaryConnection != nullptr
+			&& !BoundaryConnection->Target.IsValid()
+			&& BoundaryConnection->Source.Socket.Role
+				== EVerseVisualSocketRole::FailureContext
+			&& BoundaryConnection->RenderScope
+				== FVerseGraphRenderScopeId::ForTile(FailureGraph[0].Id));
+	TestTrue(TEXT("Source-only failure terminals pass immutable topology validation"),
+		FVerseVisualTileBuilder::ValidateConnections(
+			FailureGraph, FailureConnections, &Diagnostic)
+			&& FVerseVisualTileBuilder::ValidateRenderScopes(
+				FailureGraph,
+				FVerseVisualTileBuilder::BuildRenderScopes(FailureGraph),
+				FailureConnections,
+				&Diagnostic));
 	return true;
 }
 

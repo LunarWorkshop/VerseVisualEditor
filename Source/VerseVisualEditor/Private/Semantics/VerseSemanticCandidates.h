@@ -5,6 +5,7 @@
 #include "Templates/SharedPointer.h"
 
 class FVerseDocument;
+struct FVerseSemanticDiagnostic;
 class FVerseSemanticSnapshot;
 struct FVerseVisualTile;
 struct FVerseVisualSocket;
@@ -88,5 +89,6 @@ public:
 		TArray<FVerseVisualTile>& GraphTiles,
 		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
 		const FString& FilePath,
-		const FVerseDocument& Document);
+		const FVerseDocument& Document,
+		TConstArrayView<FVerseSemanticDiagnostic> Diagnostics = {});
 };

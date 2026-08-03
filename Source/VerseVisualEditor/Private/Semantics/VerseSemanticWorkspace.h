@@ -32,10 +32,15 @@ struct FVerseSemanticDiagnostic
 {
 	FText Message;
 	ELogVerbosity::Type Severity = ELogVerbosity::Log;
+	/** Stable compiler diagnostic identity; zero is reserved for editor-authored diagnostics. */
+	uint16 ReferenceCode = 0;
 	FString FilePath;
 	/** One-based compiler source location; INDEX_NONE means unavailable. */
 	FIntPoint RowSpan = FIntPoint(INDEX_NONE, INDEX_NONE);
 	FIntPoint ColumnSpan = FIntPoint(INDEX_NONE, INDEX_NONE);
+	/** Exact UTF-8 locus in SourceRevision when the diagnostic came from an editor buffer. */
+	FVerseByteRange SourceRange;
+	FVerseDocumentRevision SourceRevision;
 
 	bool AppliesToFile(const FString& CandidateFilePath) const;
 };

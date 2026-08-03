@@ -512,7 +512,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		NotEqualAction))
 	{
 		TestEqual(TEXT("Not Equal uses its Blueprint-style searchable name"),
-			(*NotEqualAction)->DisplayName.ToString(), FString(TEXT("Not Equal (!=)")));
+			(*NotEqualAction)->DisplayName.ToString(), FString(TEXT("Not Equal (<>)")));
 		TestEqual(TEXT("Not Equal uses the operators category"),
 			(*NotEqualAction)->Category.ToString(), FString(TEXT("Utilities|Operators")));
 		FString NotEqualSource;
@@ -1386,11 +1386,18 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 	if (FailableCall != nullptr)
 	{
 		TestTrue(
-			TEXT("Decides call carries an int through a failable socket"),
+			TEXT("Decides call separates its carried value from propagated failure"),
 			FailableCall->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableCall->StatementFailure
+				== EVerseStatementFailureDisposition::Propagated
 			&& FailableCall->GetValueOutputs().Num() == 1
 			&& FailableCall->GetValueOutputs()[0].Outcome
-				== EVerseExpressionOutcome::FailableValue
+				== EVerseExpressionOutcome::Ordinary
+			&& FailableCall->GetOtherOutputs().ContainsByPredicate(
+				[](const FVerseVisualSocket& Socket)
+				{
+					return Socket.Id.Role == EVerseVisualSocketRole::FailureContext;
+				})
 			&& FailableCall->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
@@ -1400,16 +1407,16 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Decides void call is classified as failure-only"),
 			FailableVoidCall->Outcome, EVerseExpressionOutcome::FailureOnly);
-		TestEqual(TEXT("Failure-only call exposes exactly one failure socket"),
-			FailableVoidCall->GetValueOutputs().Num(), 1);
-		if (FailableVoidCall->GetValueOutputs().Num() == 1)
-		{
-			TestEqual(TEXT("Failure-only socket retains its outcome"),
-				FailableVoidCall->GetValueOutputs()[0].Outcome,
-				EVerseExpressionOutcome::FailureOnly);
-			TestTrue(TEXT("Failure-only socket has no value type"),
-				FailableVoidCall->GetValueOutputs()[0].SemanticTypeName.IsEmpty());
-		}
+		TestEqual(TEXT("Failure-only call exposes no synthetic data output"),
+			FailableVoidCall->GetValueOutputs().Num(), 0);
+		TestTrue(TEXT("Failure-only call exposes its dedicated propagated channel"),
+			FailableVoidCall->StatementFailure
+				== EVerseStatementFailureDisposition::Propagated
+			&& FailableVoidCall->GetOtherOutputs().ContainsByPredicate(
+				[](const FVerseVisualSocket& Socket)
+				{
+					return Socket.Id.Role == EVerseVisualSocketRole::FailureContext;
+				}));
 	}
 
 	const FVerseVisualTile* NonFailableOperator =
@@ -1427,11 +1434,13 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 	if (FailableOperator != nullptr)
 	{
 		TestTrue(
-			TEXT("Comparison carries its compiler-resolved value through failure"),
+			TEXT("Comparison separates its compiler-resolved value from failure"),
 			FailableOperator->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableOperator->StatementFailure
+				== EVerseStatementFailureDisposition::Propagated
 			&& FailableOperator->GetValueOutputs().Num() == 1
 			&& FailableOperator->GetValueOutputs()[0].Outcome
-				== EVerseExpressionOutcome::FailableValue
+				== EVerseExpressionOutcome::Ordinary
 			&& FailableOperator->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
 
@@ -1441,6 +1450,8 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 		TestTrue(
 			TEXT("Failable cast carries the compiler-resolved int type"),
 			FailableCast->Outcome == EVerseExpressionOutcome::FailableValue
+			&& FailableCast->StatementFailure
+				== EVerseStatementFailureDisposition::Propagated
 			&& FailableCast->GetValueOutputs().Num() == 1
 			&& FailableCast->GetValueOutputs()[0].SemanticTypeName == TEXT("int"));
 	}
@@ -1460,11 +1471,31 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 				ConditionRegion->FirstOperandIndex)
 			? &PredicateBinding->Children[ConditionRegion->FirstOperandIndex]
 			: nullptr;
+		const FVerseVisualTile* FailureStatement = Predicate != nullptr
+			? Predicate->Children.FindByPredicate(
+				[](const FVerseVisualTile& Child)
+				{
+					return Child.StatementFailure
+						== EVerseStatementFailureDisposition::ContextBoundary;
+				})
+			: nullptr;
 		if (TestNotNull(TEXT("If exposes its external failure context"), Predicate)
 			&& TestTrue(TEXT("Predicate bindings are compiler-backed"),
 				Predicate->GetValueOutputs().Num() == 2
-				&& Predicate->GetValueOutputs()[0].SemanticDataDefinition != nullptr))
+				&& Predicate->GetValueOutputs()[0].SemanticDataDefinition != nullptr)
+			&& TestNotNull(TEXT("Predicate contains a handled failable statement"), FailureStatement))
 		{
+			TestEqual(
+				TEXT("Direct failable predicate definition terminates at the visible context"),
+				FailureStatement->StatementFailure,
+				EVerseStatementFailureDisposition::ContextBoundary);
+			TestTrue(
+				TEXT("Direct failable predicate definition has a dedicated failure output"),
+				FailureStatement->GetOtherOutputs().ContainsByPredicate(
+					[](const FVerseVisualSocket& Socket)
+					{
+						return Socket.Id.Role == EVerseVisualSocketRole::FailureContext;
+					}));
 			const FVerseVisualSocket& Boundary = Predicate->GetValueOutputs()[0];
 			const FVerseVisualSocket& MutableBoundary = Predicate->GetValueOutputs()[1];
 			TestTrue(TEXT("Predicate boundary carries the exact typed binding"),
@@ -1530,6 +1561,104 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 			}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseUnhandledStatementFailureTest,
+	"VerseVisualEditor.Semantics.Workspace.BindsUnhandledStatementFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseUnhandledStatementFailureTest::RunTest(const FString& Parameters)
+{
+	const TSharedPtr<IPlugin> Plugin =
+		IPluginManager::Get().FindPlugin(TEXT("VerseVisualEditor"));
+	if (!TestTrue(TEXT("VerseVisualEditor plugin is discoverable"), Plugin.IsValid()))
+	{
+		return false;
+	}
+	FString FilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		Plugin->GetBaseDir(), TEXT("Tests/Fixtures/failure_statement_errors.verse")));
+	FPaths::NormalizeFilename(FilePath);
+	FString Source;
+	if (!TestTrue(TEXT("Unhandled-failure fixture loads"),
+		FFileHelper::LoadFileToString(Source, *FilePath)))
+	{
+		return false;
+	}
+
+	const FTCHARToUTF8 Utf8Source(*Source);
+	FVerseSemanticDocumentInput Input;
+	Input.FilePath = FilePath;
+	Input.Source = FUtf8String(FUtf8StringView(
+		reinterpret_cast<const UTF8CHAR*>(Utf8Source.Get()), Utf8Source.Length()));
+	Input.Revision.Value = 1162;
+	FVerseSemanticWorkspace Workspace(
+		EVerseSemanticDependencyPolicy::PublicApiOnly, 0.0);
+	Workspace.RequestAnalysis({Input}, 0.0, false);
+	Workspace.Tick(0.0);
+	const FVerseSemanticDiagnostic* EffectDiagnostic =
+		Workspace.GetDiagnostics().FindByPredicate(
+			[&FilePath, &Input](const FVerseSemanticDiagnostic& Diagnostic)
+			{
+				return Diagnostic.ReferenceCode == 3512
+					&& Diagnostic.AppliesToFile(FilePath)
+					&& Diagnostic.SourceRevision == Input.Revision
+					&& Diagnostic.SourceRange.IsSet();
+			});
+	if (!TestNotNull(TEXT("Compiler preserves the exact 3512 source locus"), EffectDiagnostic))
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<const FVerseSemanticSnapshot>> CandidateSnapshots =
+		Workspace.GetCandidateSnapshots();
+	const TSharedPtr<const FVerseSemanticSnapshot>* ExactSnapshot =
+		CandidateSnapshots.FindByPredicate(
+			[&FilePath, &Input](const TSharedPtr<const FVerseSemanticSnapshot>& Candidate)
+			{
+				return Candidate.IsValid()
+					&& Candidate->Describes(FilePath, Input.Revision);
+			});
+	if (!TestNotNull(TEXT("Failed analysis retains an exact discovery snapshot"), ExactSnapshot))
+	{
+		return false;
+	}
+
+	FText Error;
+	const TSharedPtr<const FVerseDocument> Document = FVerseDocument::CreateFromBytes(
+		MakeArrayView(reinterpret_cast<const uint8*>(*Input.Source), Input.Source.Len()), Error);
+	if (!TestTrue(TEXT("Unhandled-failure fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	const FVerseParseSnapshot ParseSnapshot =
+		FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			FVerseVisualTileBuilder::Build(ParseSnapshot, Input.Revision), ParseSnapshot);
+	if (!TestTrue(TEXT("Unhandled-failure function has a statement"),
+		Functions.Num() == 1 && Functions[0].GraphTiles.Num() >= 2))
+	{
+		return false;
+	}
+	FVerseSemanticCandidateProvider::BindFunctionGraph(
+		Functions[0].GraphTiles,
+		*ExactSnapshot,
+		FilePath,
+		*Document,
+		Workspace.GetDiagnostics());
+	const FVerseVisualTile& Statement = Functions[0].GraphTiles[1];
+	TestEqual(TEXT("Exact 3512 marks the enclosing statement as a compiler error"),
+		Statement.StatementFailure,
+		EVerseStatementFailureDisposition::CompilerError);
+	const TArray<FVerseVisualConnection> Connections =
+		FVerseVisualTileBuilder::BuildConnections(Functions[0].GraphTiles);
+	TestTrue(TEXT("Unhandled failure terminates in a red X"),
+		Connections.ContainsByPredicate(
+			[](const FVerseVisualConnection& Connection)
+			{
+				return Connection.Terminal == EVerseVisualConnectionTerminal::RedX;
+			}));
 	return true;
 }
 

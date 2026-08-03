@@ -196,7 +196,8 @@ namespace
 		const FVerseGraphConnection& Connection,
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId,
-		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints)
+		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints,
+		TOptional<float> RenderScopeRight = {})
 	{
 		if (!Connection.EndpointRegistry.IsValid())
 		{
@@ -204,9 +205,12 @@ namespace
 		}
 		const FVerseGraphEndpointBinding* SourceBinding =
 			Connection.EndpointRegistry->Find(Connection.Source);
-		const FVerseGraphEndpointBinding* TargetBinding =
-			Connection.EndpointRegistry->Find(Connection.Target);
-		if (SourceBinding == nullptr || TargetBinding == nullptr)
+		const bool bSocketTarget =
+			Connection.Terminal == EVerseVisualConnectionTerminal::Socket;
+		const FVerseGraphEndpointBinding* TargetBinding = bSocketTarget
+			? Connection.EndpointRegistry->Find(Connection.Target)
+			: nullptr;
+		if (SourceBinding == nullptr || (bSocketTarget && TargetBinding == nullptr))
 		{
 			return;
 		}
@@ -219,41 +223,56 @@ namespace
 			const TSharedPtr<SVerseGraphRenderScope> Scope = Binding.RenderScope.Pin();
 			return Scope.IsValid() && Scope->CanSupplyVisibleEndpoints();
 		};
-		if (!IsBindingVisible(*SourceBinding) || !IsBindingVisible(*TargetBinding))
+		if (!IsBindingVisible(*SourceBinding)
+			|| (TargetBinding != nullptr && !IsBindingVisible(*TargetBinding)))
 		{
 			return;
 		}
 		const TSharedPtr<SWidget> Source = SourceBinding->Anchor.Pin();
-		const TSharedPtr<SWidget> Target = TargetBinding->Anchor.Pin();
-		if (!Source.IsValid() || !Target.IsValid())
+		const TSharedPtr<SWidget> Target = TargetBinding != nullptr
+			? TargetBinding->Anchor.Pin() : nullptr;
+		if (!Source.IsValid() || (bSocketTarget && !Target.IsValid()))
 		{
 			return;
 		}
 		const FArrangedWidget* SourceArrangement =
 			ArrangedEndpoints.Find(Source.ToSharedRef());
-		const FArrangedWidget* TargetArrangement =
-			ArrangedEndpoints.Find(Target.ToSharedRef());
-		if (SourceArrangement == nullptr || TargetArrangement == nullptr)
+		const FArrangedWidget* TargetArrangement = Target.IsValid()
+			? ArrangedEndpoints.Find(Target.ToSharedRef()) : nullptr;
+		if (SourceArrangement == nullptr || (bSocketTarget && TargetArrangement == nullptr))
 		{
 			return;
 		}
 		const FGeometry& SourceGeometry = SourceArrangement->Geometry;
-		const FGeometry& TargetGeometry = TargetArrangement->Geometry;
 		if (!Source->GetVisibility().IsVisible()
-			|| !Target->GetVisibility().IsVisible()
 			|| SourceGeometry.GetLocalSize().GetMin() <= 0.0f
-			|| TargetGeometry.GetLocalSize().GetMin() <= 0.0f)
+			|| (Target.IsValid() && !Target->GetVisibility().IsVisible())
+			|| (TargetArrangement != nullptr
+				&& TargetArrangement->Geometry.GetLocalSize().GetMin() <= 0.0f))
 		{
 			return;
 		}
 		const FVersePaintPoint Start = AnchorPoint(
 			SourceGeometry, SourceBinding->AnchorCoordinate);
-		const FVersePaintPoint End = AnchorPoint(
-			TargetGeometry, TargetBinding->AnchorCoordinate);
+		FVersePaintPoint End;
+		if (bSocketTarget)
+		{
+			End = AnchorPoint(
+				TargetArrangement->Geometry, TargetBinding->AnchorCoordinate);
+		}
+		else
+		{
+			const float EndX =
+				Connection.Terminal == EVerseVisualConnectionTerminal::RenderScopeRightBoundary
+					&& RenderScopeRight.IsSet()
+					? RenderScopeRight.GetValue()
+					: Start.Value.X + 96.0f;
+			End = FVersePaintPoint(FVector2D(FMath::Max(Start.Value.X, EndX), Start.Value.Y));
+		}
 		const TSharedPtr<SVerseGraphMotionWidget> SourceMotion =
 			SourceBinding->MotionOwner.Pin();
-		const TSharedPtr<SVerseGraphMotionWidget> TargetMotion =
-			TargetBinding->MotionOwner.Pin();
+		const TSharedPtr<SVerseGraphMotionWidget> TargetMotion = TargetBinding != nullptr
+			? TargetBinding->MotionOwner.Pin() : nullptr;
 		const float WireOpacity = FMath::Min(
 			SourceMotion.IsValid() ? SourceMotion->GetCurrentOpacity() : 1.0f,
 			TargetMotion.IsValid() ? TargetMotion->GetCurrentOpacity() : 1.0f);
@@ -267,6 +286,33 @@ namespace
 		{
 			DrawFailureMarkers(
 				OutDrawElements, LayerId, Start, End, Connection.Axis, WireOpacity);
+		}
+		if (Connection.Terminal == EVerseVisualConnectionTerminal::GoldDiamond)
+		{
+			static const FSlateColorBrush WhiteBrush(FLinearColor::White);
+			const FVector2D MarkerSize(8.0f, 8.0f);
+			FSlateDrawElement::MakeRotatedBox(
+				OutDrawElements,
+				LayerId + 1,
+				FPaintGeometry(End.Value - MarkerSize * 0.5f, MarkerSize, 1.0f),
+				&WhiteBrush,
+				ESlateDrawEffect::None,
+				PI * 0.25f,
+				MarkerSize * 0.5f,
+				FSlateDrawElement::RelativeToElement,
+				GetVerseFailureDecorationColor().CopyWithNewOpacity(WireOpacity));
+		}
+		else if (Connection.Terminal == EVerseVisualConnectionTerminal::RedX)
+		{
+			const FVector2D Half(4.0f, 4.0f);
+			TArray<FVector2f> First({FVector2f(End.Value - Half), FVector2f(End.Value + Half)});
+			TArray<FVector2f> Second({
+				FVector2f(End.Value + FVector2D(-Half.X, Half.Y)),
+				FVector2f(End.Value + FVector2D(Half.X, -Half.Y))});
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, FPaintGeometry(),
+				MoveTemp(First), ESlateDrawEffect::None, FLinearColor(1.0f, 0.08f, 0.05f), true, 2.0f);
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, FPaintGeometry(),
+				MoveTemp(Second), ESlateDrawEffect::None, FLinearColor(1.0f, 0.08f, 0.05f), true, 2.0f);
 		}
 		for (int32 Index = 0;
 			Index < Connection.ExtraBlankLineMarkers;
@@ -410,7 +456,11 @@ int32 SVerseGraphRenderScope::OnPaint(
 	for (const FVerseGraphConnection& Connection : Connections)
 	{
 		PaintConnectionRecord(
-			Connection, OutDrawElements, ConnectionLayer, ArrangedEndpoints);
+			Connection,
+			OutDrawElements,
+			ConnectionLayer,
+			ArrangedEndpoints,
+			AllottedGeometry.GetRenderBoundingRect().Right - 2.0f);
 	}
 	const int32 ContentLayer = SCompoundWidget::OnPaint(
 		Args,

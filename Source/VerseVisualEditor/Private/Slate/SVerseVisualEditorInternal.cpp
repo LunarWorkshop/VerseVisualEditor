@@ -176,7 +176,8 @@ namespace VerseVisualEditorPrivate
 				GraphTiles,
 				Snapshot,
 				Document.FilePath,
-				*Document.Session->GetParseSnapshot().GetDocument());
+				*Document.Session->GetParseSnapshot().GetDocument(),
+				Document.SemanticCompilationDiagnostics);
 		}
 	}
 

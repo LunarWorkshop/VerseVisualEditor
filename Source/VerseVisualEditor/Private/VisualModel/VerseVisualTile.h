@@ -39,6 +39,18 @@ enum class EVerseExpressionOutcome : uint8
 	FailureOnly,
 };
 
+/** How a complete statement-level failure is handled by its enclosing context. */
+enum class EVerseStatementFailureDisposition : uint8
+{
+	None,
+	/** The failure is consumed by the nearest visible failable context. */
+	ContextBoundary,
+	/** The failure legally propagates through an invisible context such as <decides>. */
+	Propagated,
+	/** The compiler reported that this statement's failure is not handled. */
+	CompilerError,
+};
+
 struct FVerseVisualTileId
 {
 	int32 Value = INDEX_NONE;
@@ -133,6 +145,15 @@ FORCEINLINE uint32 GetTypeHash(const FVerseVisualSocketEndpoint& Endpoint)
 
 enum class EVerseVisualConnectionAxis : uint8 { Horizontal, Vertical };
 
+/** A connection may terminate without inventing a destination socket. */
+enum class EVerseVisualConnectionTerminal : uint8
+{
+	Socket,
+	RenderScopeRightBoundary,
+	GoldDiamond,
+	RedX,
+};
+
 struct FVerseVisualConnection
 {
 	FVerseVisualSocketEndpoint Source;
@@ -141,6 +162,7 @@ struct FVerseVisualConnection
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	int32 ExtraBlankLineMarkers = 0;
 	FVerseGraphRenderScopeId RenderScope = FVerseGraphRenderScopeId::Root();
+	EVerseVisualConnectionTerminal Terminal = EVerseVisualConnectionTerminal::Socket;
 };
 
 inline FLinearColor GetVerseFailureDecorationColor()
@@ -366,6 +388,8 @@ struct FVerseVisualTile
 	TArray<bool> SemanticInputNamed;
 	TArray<bool> SemanticInputHasDefault;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	EVerseStatementFailureDisposition StatementFailure =
+		EVerseStatementFailureDisposition::None;
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TArray<const uLang::CScope*> LegalConsumerScopes;
@@ -384,6 +408,8 @@ struct FVerseVisualTile
 	TArray<FVerseVisualSocketInsertionTarget> SocketInsertionTargets;
 	TConstArrayView<FVerseVisualSocket> GetValueInputs() const { return SocketTopology.GetValueInputs(); }
 	TConstArrayView<FVerseVisualSocket> GetValueOutputs() const { return SocketTopology.GetValueOutputs(); }
+	TConstArrayView<FVerseVisualSocket> GetOtherInputs() const { return SocketTopology.GetOtherInputs(); }
+	TConstArrayView<FVerseVisualSocket> GetOtherOutputs() const { return SocketTopology.GetOtherOutputs(); }
 	const FVerseVisualSocket* FindSocket(FVerseVisualSocketId SocketId) const
 	{
 		return SocketTopology.Find(SocketId);

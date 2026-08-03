@@ -584,7 +584,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 						: SNullWidget::NullWidget
 				]
 				+ SHorizontalBox::Slot().AutoWidth()
-				.Padding(FMargin(0.0f, 20.0f, 20.0f, 28.0f))
+				.Padding(FMargin(0.0f, 20.0f, 116.0f, 28.0f))
 				[
 					BodyContent
 				];
@@ -593,7 +593,9 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		{
 			BodyContent->SlatePrepass();
 			const float BodyWidth = BodyContent->GetDesiredSize().X;
-			const float FailureChainWidth = BodyWidth + 40.0f;
+			// Direct failable statements terminate at this scope's right wall.
+			// Keep a marker lane beyond the widest internal tile.
+			const float FailureChainWidth = BodyWidth + 40.0f + 96.0f;
 			if (EntryPinButton.IsValid())
 			{
 				EntryPinButton->SlatePrepass();
@@ -658,12 +660,13 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		FailureContextInputWidget = Pin;
 	}
 	TSharedRef<SWidget> FailureContextOutputWidget = SNullWidget::NullWidget;
-	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	const FVerseVisualSocketId FailureOutputId{
+		EVerseVisualSocketDirection::Output,
+		EVerseVisualSocketRole::FailureContext,
+		0};
+	const bool bHasFailureOutput = Tile.FindSocket(FailureOutputId) != nullptr;
+	if (bHasFailureOutput)
 	{
-		const FVerseVisualSocketId FailureOutputId{
-			EVerseVisualSocketDirection::Output,
-			EVerseVisualSocketRole::FailureContext,
-			0};
 		const TSharedRef<SVerseFailableValuePin> Pin =
 			SNew(SVerseFailableValuePin)
 				.Color(GetVerseFailureDecorationColor())
@@ -675,7 +678,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	}
 	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.GetValueOutputs(), true);
 	TSharedRef<SWidget> HeaderOutputGroup = ValueOutputWidget;
-	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	if (bHasFailureOutput)
 	{
 		HeaderOutputGroup =
 			SNew(SVerticalBox)
@@ -715,6 +718,15 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					HeaderOutputGroup
 				];
 		}
+	}
+	if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+	{
+		HeaderOutputGroup =
+			SNew(SBox)
+			.Padding(FMargin(0.0f, 22.0f, 0.0f, 0.0f))
+			[
+				HeaderOutputGroup
+			];
 	}
 	HeaderOutputGroupWidget = HeaderOutputGroup;
 	const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
@@ -784,7 +796,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			.AutoWidth()
 			.VAlign(VAlign_Center)
 			[
-				Tile.Kind == EVerseVisualTileKind::FailableBlock
+				bHasFailureOutput
 					? SNullWidget::NullWidget
 					: FailureContextOutputWidget
 			]
@@ -824,6 +836,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		[
 			SNew(SBorder)
 			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Body")))
+			.BorderBackgroundColor(FLinearColor::White)
 			.Padding(0.0f)
 		]
 		+ SOverlay::Slot()
@@ -887,12 +900,11 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			TileSurface
 		];
 
-	TSharedRef<SWidget> DecoratedTileSurface = ChromeSurface;
+	TSharedRef<SOverlay> Decorated = SNew(SOverlay);
+	Decorated->AddSlot()[ChromeSurface];
+	const FLinearColor FailureColor = GetVerseFailureDecorationColor();
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
-		TSharedRef<SOverlay> Decorated = SNew(SOverlay);
-		Decorated->AddSlot()[ChromeSurface];
-		const FLinearColor FailureColor = GetVerseFailureDecorationColor();
 		auto AddCorner = [&](EHorizontalAlignment Horizontal, EVerticalAlignment Vertical,
 			FVector2D Offset)
 		{
@@ -914,8 +926,30 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		AddCorner(HAlign_Right, VAlign_Top, FVector2D(5.5f, -5.5f));
 		AddCorner(HAlign_Left, VAlign_Bottom, FVector2D(-5.5f, 5.5f));
 		AddCorner(HAlign_Right, VAlign_Bottom, FVector2D(5.5f, 5.5f));
-		DecoratedTileSurface = Decorated;
 	}
+	if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+	{
+		Decorated->AddSlot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Top)
+		// Straddle the tile boundary so the badge is centered on the
+		// top-right corner rather than inset into the header.
+		.Padding(FMargin(0.0f, -10.0f, -10.0f, 0.0f))
+		[
+			SNew(SBox)
+			.WidthOverride(20.0f)
+			.HeightOverride(20.0f)
+			[
+				SNew(SVerseFailableValuePin)
+					.Color(FailureColor)
+					.Connected(true)
+					.Visibility(EVisibility::HitTestInvisible)
+					.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+					.RenderTransform(FSlateRenderTransform(FScale2D(1.8f, 1.8f)))
+			]
+		];
+	}
+	TSharedRef<SWidget> DecoratedTileSurface = Decorated;
 
 	TSharedRef<SOverlay> TileAndOutput = SNew(SOverlay);
 	TileAndOutput->AddSlot()
@@ -1835,8 +1869,12 @@ EVisibility SVerseTile::GetBodyVisibility() const
 
 FSlateColor SVerseTile::GetOutlineColor() const
 {
-	return IsSelected.Get(false)
-		? FLinearColor(1.0f, 0.82f, 0.05f, 1.0f)
+	if (IsSelected.Get(false))
+	{
+		return FLinearColor(1.0f, 0.82f, 0.05f, 1.0f);
+	}
+	return Tile.StatementFailure != EVerseStatementFailureDisposition::None
+		? GetVerseFailureDecorationColor()
 		: UnselectedOutlineColor;
 }
 

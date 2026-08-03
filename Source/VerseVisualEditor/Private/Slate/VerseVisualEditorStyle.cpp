@@ -61,7 +61,6 @@ namespace VerseVisualEditorStyle
 			FVector4(0.0f, 0.0f, InnerRadius, InnerRadius)));
 		Style->Set(TEXT("Tile.Separator"), new FSlateColorBrush(
 			FLinearColor(0.0f, 0.0f, 0.0f, 0.32f)));
-
 		Style->Set(TEXT("Color.PrimaryText"),
 			FLinearColor(0.96f, 0.97f, 0.985f, 1.0f));
 		Style->Set(TEXT("Color.SecondaryText"),

@@ -265,24 +265,32 @@ namespace
 				continue;
 			}
 			const TSharedPtr<SVerseTile>* SourceWidget = Widgets.Find(Model.Source.Tile);
-			const TSharedPtr<SVerseTile>* TargetWidget = Widgets.Find(Model.Target.Tile);
-			if (SourceWidget == nullptr || TargetWidget == nullptr
-				|| !SourceWidget->IsValid() || !TargetWidget->IsValid())
+			const TSharedPtr<SVerseTile>* TargetWidget =
+				Model.Terminal == EVerseVisualConnectionTerminal::Socket
+					? Widgets.Find(Model.Target.Tile)
+					: nullptr;
+			if (SourceWidget == nullptr || !SourceWidget->IsValid()
+				|| (Model.Terminal == EVerseVisualConnectionTerminal::Socket
+					&& (TargetWidget == nullptr || !TargetWidget->IsValid())))
 			{
 				continue;
 			}
 			const TSharedPtr<SWidget> SourceAnchor =
 				(*SourceWidget)->GetSocketAnchor(Model.Source.Socket);
-			const TSharedPtr<SWidget> TargetAnchor =
-				(*TargetWidget)->GetSocketAnchor(Model.Target.Socket);
-			if (!SourceAnchor.IsValid() || !TargetAnchor.IsValid())
+			const TSharedPtr<SWidget> TargetAnchor = TargetWidget != nullptr
+				? (*TargetWidget)->GetSocketAnchor(Model.Target.Socket)
+				: nullptr;
+			if (!SourceAnchor.IsValid()
+				|| (Model.Terminal == EVerseVisualConnectionTerminal::Socket
+					&& !TargetAnchor.IsValid()))
 			{
 				continue;
 			}
 			const FVerseVisualSocket* SourceSocket =
 				(*SourceWidget)->GetTile().FindSocket(Model.Source.Socket);
-			const FVerseVisualSocket* TargetSocket =
-				(*TargetWidget)->GetTile().FindSocket(Model.Target.Socket);
+			const FVerseVisualSocket* TargetSocket = TargetWidget != nullptr
+				? (*TargetWidget)->GetTile().FindSocket(Model.Target.Socket)
+				: nullptr;
 			const FVerseVisualSocket* TypedSocket = SourceSocket != nullptr
 				&& (!SourceSocket->SemanticTypeName.IsEmpty()
 					|| SourceSocket->TypeRange.IsSet()
@@ -319,22 +327,26 @@ namespace
 				? GetDefault<UGraphEditorSettings>()->DefaultExecutionWireThickness
 				: GetDefault<UGraphEditorSettings>()->DefaultDataWireThickness;
 			Connection.ExtraBlankLineMarkers = Model.ExtraBlankLineMarkers;
+			Connection.Terminal = Model.Terminal;
 			const TWeakPtr<SVerseGraphRenderScope> SourceScope =
 				(*SourceWidget)->GetSocketRenderScope(Model.Source.Socket);
-			const TWeakPtr<SVerseGraphRenderScope> TargetScope =
-				(*TargetWidget)->GetSocketRenderScope(Model.Target.Socket);
 			Widgets.Endpoints->Register(Model.Source, {
 				SourceAnchor,
 				(*SourceWidget)->GetSocketAnchorCoordinate(Model.Source.Socket),
 				SourceScope,
 				(*SourceWidget)->GetMotionTarget(),
 				SourceScope.IsValid()});
-			Widgets.Endpoints->Register(Model.Target, {
-				TargetAnchor,
-				(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket),
-				TargetScope,
-				(*TargetWidget)->GetMotionTarget(),
-				TargetScope.IsValid()});
+			if (TargetWidget != nullptr)
+			{
+				const TWeakPtr<SVerseGraphRenderScope> TargetScope =
+					(*TargetWidget)->GetSocketRenderScope(Model.Target.Socket);
+				Widgets.Endpoints->Register(Model.Target, {
+					TargetAnchor,
+					(*TargetWidget)->GetSocketAnchorCoordinate(Model.Target.Socket),
+					TargetScope,
+					(*TargetWidget)->GetMotionTarget(),
+					TargetScope.IsValid()});
+			}
 			Connection.Outcome = Model.Outcome;
 		}
 		return Result;
@@ -383,10 +395,23 @@ namespace
 			: FString();
 		const bool bIsGraphAnchor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
 			&& ParentMotionKey.IsEmpty();
+		const bool bReserveFailureTerminalLane =
+			Tile.StatementFailure == EVerseStatementFailureDisposition::Propagated
+			|| Tile.StatementFailure == EVerseStatementFailureDisposition::CompilerError;
 		auto FinishRow = [MotionController, MotionKey, ParentMotionKey, Presentation,
-			bIsGraphAnchor](
+			bIsGraphAnchor, bReserveFailureTerminalLane](
 			FBuiltFunctionGraphRow Row)
 		{
+			if (bReserveFailureTerminalLane)
+			{
+				Row.Widget =
+					SNew(SBorder)
+					.BorderImage(nullptr)
+					.Padding(FMargin(0.0f, 0.0f, 96.0f, 0.0f))
+					[
+						Row.Widget
+					];
+			}
 			if (!MotionController.IsValid())
 			{
 				return Row;

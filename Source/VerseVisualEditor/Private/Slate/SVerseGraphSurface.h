@@ -36,6 +36,7 @@ struct FVerseGraphConnection
 	float Thickness = 2.0f;
 	int32 ExtraBlankLineMarkers = 0;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	EVerseVisualConnectionTerminal Terminal = EVerseVisualConnectionTerminal::Socket;
 };
 
 struct FVerseGraphEndpointBinding

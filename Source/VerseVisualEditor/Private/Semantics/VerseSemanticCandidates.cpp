@@ -388,6 +388,13 @@ namespace
 
 		const Verse::Vst::Node* Node = FindExactSemanticNode(
 			*Snapshot, FilePath, Tile.Range, Document);
+		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+		const uLang::CScope* ActiveScope = Node != nullptr
+			? FindActiveScope(*Node, Program)
+			: nullptr;
+		const uLang::CAstPackage* Package = ActiveScope != nullptr
+			? ActiveScope->GetPackage()
+			: nullptr;
 		if (Tile.Kind == EVerseVisualTileKind::Definition)
 		{
 			const uLang::CExprDataDefinition* Definition = Node != nullptr
@@ -402,6 +409,12 @@ namespace
 				Tile.SemanticType = GetDataValueType(*Tile.SemanticDataDefinition);
 				Tile.SemanticTypeName = GetUserFacingDataType(*Tile.SemanticDataDefinition);
 				Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
+				if (Package != nullptr)
+				{
+					Tile.Outcome = Definition->CanFail(Package)
+						? EVerseExpressionOutcome::FailableValue
+						: EVerseExpressionOutcome::Ordinary;
+				}
 			}
 			return;
 		}
@@ -421,11 +434,6 @@ namespace
 			return;
 		}
 
-		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
-		const uLang::CScope* ActiveScope = FindActiveScope(*Node, Program);
-		const uLang::CAstPackage* Package = ActiveScope != nullptr
-			? ActiveScope->GetPackage()
-			: nullptr;
 		const TOptional<bool> bCanFail = Package != nullptr
 			? TOptional<bool>(Expression->CanFail(Package))
 			: TOptional<bool>();
@@ -1697,11 +1705,73 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 	return Result;
 }
 
+namespace
+{
+	bool DiagnosticOverlapsTile(
+		const FVerseSemanticDiagnostic& Diagnostic,
+		const FVerseVisualTile& Tile,
+		const FString& FilePath)
+	{
+		if (Diagnostic.ReferenceCode != 3512
+			|| !Diagnostic.AppliesToFile(FilePath))
+		{
+			return false;
+		}
+		if (Diagnostic.SourceRange.IsSet()
+			&& Diagnostic.SourceRevision == Tile.Range.Revision)
+		{
+			return Diagnostic.SourceRange.BeginByte < Tile.Range.EndByte()
+				&& Tile.Range.BeginByte < Diagnostic.SourceRange.EndByte();
+		}
+		return Diagnostic.RowSpan.X != INDEX_NONE
+			&& Diagnostic.RowSpan.Y != INDEX_NONE
+			&& Diagnostic.RowSpan.X <= Tile.LastSourceLine
+			&& Tile.FirstSourceLine <= Diagnostic.RowSpan.Y;
+	}
+
+	void ClassifyStatementFailures(
+		FVerseVisualTile& Tile,
+		bool bDirectChildOfVisibleFailureContext,
+		TConstArrayView<FVerseSemanticDiagnostic> Diagnostics,
+		const FString& FilePath)
+	{
+		for (FVerseVisualTile& Child : Tile.Children)
+		{
+			ClassifyStatementFailures(
+				Child,
+				Tile.Kind == EVerseVisualTileKind::FailableBlock,
+				Diagnostics,
+				FilePath);
+		}
+
+		Tile.StatementFailure = EVerseStatementFailureDisposition::None;
+		const bool bCanFail = Tile.Outcome == EVerseExpressionOutcome::FailableValue
+			|| Tile.Outcome == EVerseExpressionOutcome::FailureOnly;
+		if (!Tile.bStatementLevel || !bCanFail || !Tile.SemanticSnapshot.IsValid())
+		{
+			return;
+		}
+		if (bDirectChildOfVisibleFailureContext)
+		{
+			Tile.StatementFailure = EVerseStatementFailureDisposition::ContextBoundary;
+			return;
+		}
+		Tile.StatementFailure = Diagnostics.ContainsByPredicate(
+			[&Tile, &FilePath](const FVerseSemanticDiagnostic& Diagnostic)
+			{
+				return DiagnosticOverlapsTile(Diagnostic, Tile, FilePath);
+			})
+			? EVerseStatementFailureDisposition::CompilerError
+			: EVerseStatementFailureDisposition::Propagated;
+	}
+}
+
 void FVerseSemanticCandidateProvider::BindFunctionGraph(
 	TArray<FVerseVisualTile>& GraphTiles,
 	const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot,
 	const FString& FilePath,
-	const FVerseDocument& Document)
+	const FVerseDocument& Document,
+	TConstArrayView<FVerseSemanticDiagnostic> Diagnostics)
 {
 	if (!Snapshot.IsValid())
 	{
@@ -1710,6 +1780,10 @@ void FVerseSemanticCandidateProvider::BindFunctionGraph(
 	for (FVerseVisualTile& Tile : GraphTiles)
 	{
 		BindExpressionTile(Tile, Snapshot, FilePath, Document);
+	}
+	for (FVerseVisualTile& Tile : GraphTiles)
+	{
+		ClassifyStatementFailures(Tile, false, Diagnostics, FilePath);
 	}
 	FVerseVisualTileBuilder::FinalizeSocketTopology(GraphTiles);
 }

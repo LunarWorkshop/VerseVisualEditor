@@ -94,7 +94,7 @@ bool FVerseIntrinsicPresentationRegistryTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Not Equal mirrors Blueprint's action-menu name"),
 			IntegerNotEqual->FallbackDisplayName.ToString(),
-			FString(TEXT("Not Equal (!=)")));
+			FString(TEXT("Not Equal (<>)")));
 		TestEqual(TEXT("Not Equal remains in the operators category"),
 			IntegerNotEqual->FallbackCategory.ToString(),
 			FString(TEXT("Utilities|Operators")));
