@@ -42,6 +42,18 @@ enum class EVerseStructuralExpressionKind : uint8
 	If,
 };
 
+/** Atomic recipe for replacing one operand while retargeting an operator's literal defaults. */
+struct FVerseOperatorRetargetRecipe
+{
+	FVerseTextRange OperatorRange;
+	FString OperatorSpelling;
+	int32 OperandCount = 0;
+	int32 ReplacedOperandIndex = INDEX_NONE;
+	FString SignatureDisplayText;
+	TArray<FString> OperandTypeNames;
+	TArray<FVerseTextRange> InlineLiteralRanges;
+};
+
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
@@ -65,6 +77,7 @@ struct FVerseExpressionAction
 	TArray<FString> InputDefaultSources;
 	TArray<FString> InputNames;
 	TArray<bool> NamedInputs;
+	TOptional<FVerseOperatorRetargetRecipe> OperatorRetarget;
 };
 
 /** Returns the canonical source-safe initializer for an editor-supported primitive type. */
@@ -107,6 +120,12 @@ public:
 bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
+	const FVerseExpressionAction& Action,
+	FText& OutError);
+
+/** Applies a provider and all literal changes required by its selected concrete signature. */
+bool TryApplyVerseOperatorOperandAction(
+	FVerseDocumentSession& Session,
 	const FVerseExpressionAction& Action,
 	FText& OutError);
 

@@ -1478,11 +1478,17 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 			}
 
 			TArray<FVerseOperatorSignature> FunctionSignatures;
-			auto AddFunctionSignature = [&](TArray<FString> OperandNames, FString ResultName)
+			auto AddFunctionSignature = [&](
+				TArray<FString> OperandNames,
+				FString ResultName,
+				TArray<const uLang::CTypeBase*> OperandTypes,
+				const uLang::CTypeBase* ResultType)
 			{
 				FVerseOperatorSignature Signature;
 				Signature.OperandTypeNames = MoveTemp(OperandNames);
 				Signature.ResultTypeName = MoveTemp(ResultName);
+				Signature.OperandTypes = MoveTemp(OperandTypes);
+				Signature.ResultType = ResultType;
 				Signature.DisplayText = FString::Join(
 					Signature.OperandTypeNames, TEXT(" x "));
 				if (!bOmitResult)
@@ -1515,6 +1521,7 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 				if (Concrete != nullptr)
 				{
 					TArray<FString> OperandNames;
+					TArray<const uLang::CTypeBase*> OperandTypes;
 					bool bConcrete = true;
 					for (int32 Index = 0; Index < OperandCount; ++Index)
 					{
@@ -1534,6 +1541,7 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 						if (Name.IsSet())
 						{
 							OperandNames.Add(Name.GetValue());
+							OperandTypes.Add(Parameter);
 						}
 					}
 					const TOptional<FString> ResultName =
@@ -1554,7 +1562,9 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 					}
 					if (bConcrete && ResultName.IsSet())
 					{
-						AddFunctionSignature(MoveTemp(OperandNames), ResultName.GetValue());
+						AddFunctionSignature(
+							MoveTemp(OperandNames), ResultName.GetValue(),
+							MoveTemp(OperandTypes), &Concrete->GetReturnType());
 					}
 				}
 			}
@@ -1662,6 +1672,7 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 						}
 					}
 					TArray<FString> OperandNames;
+					TArray<const uLang::CTypeBase*> OperandTypes;
 					// The complete argument tuple is the concrete source signature selected
 					// by inference. Some constrained declarations intentionally retain their
 					// abstract formal (for example, `comparable`) even after a concrete tuple
@@ -1675,8 +1686,11 @@ TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSi
 							return;
 						}
 						OperandNames.Add(Name.GetValue());
+						OperandTypes.Add(Type->Type);
 					}
-					AddFunctionSignature(MoveTemp(OperandNames), ResultName.GetValue());
+					AddFunctionSignature(
+						MoveTemp(OperandNames), ResultName.GetValue(),
+						MoveTemp(OperandTypes), &ResolvedResult);
 				};
 				Enumerate(0);
 			}

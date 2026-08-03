@@ -6,6 +6,7 @@
 #include "VerseVisualTile.generated.h"
 
 class FVerseSemanticSnapshot;
+class FVerseDocument;
 namespace uLang
 {
 	class CDataDefinition;
@@ -435,6 +436,16 @@ struct FVerseVisualTile
 	bool bIsProvisional = false;
 };
 
+/** Value-wire constraints surrounding one operator in a function graph. */
+struct FVerseOperatorConnectionConstraints
+{
+	TArray<TOptional<FVerseVisualSocket>> ConnectedOperands;
+	TArray<FVerseVisualSocket> OutputConsumers;
+
+	TArray<const FVerseVisualSocket*> GetConnectedOperandPointers() const;
+	TArray<const FVerseVisualSocket*> GetOutputConsumerPointers() const;
+};
+
 class FVerseVisualTileBuilder
 {
 public:
@@ -447,6 +458,10 @@ public:
 	static void FinalizeSocketTopology(TArray<FVerseVisualTile>& GraphTiles);
 	static TArray<FVerseVisualConnection> BuildConnections(
 		TConstArrayView<FVerseVisualTile> GraphTiles);
+	static FVerseOperatorConnectionConstraints BuildOperatorConnectionConstraints(
+		TConstArrayView<FVerseVisualTile> GraphTiles,
+		const FVerseVisualTile& Operator,
+		const FVerseDocument& Document);
 	static TArray<FVerseGraphRenderScope> BuildRenderScopes(
 		TConstArrayView<FVerseVisualTile> GraphTiles);
 	static bool IsSocketConnected(

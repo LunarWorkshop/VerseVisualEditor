@@ -44,6 +44,7 @@
 #include "Document/VerseDocumentSession.h"
 #include "Slate/VerseDefinitionIcon.h"
 #include "Editing/VerseExpressionActions.h"
+#include "Semantics/VerseSemanticCandidates.h"
 #include "Document/VerseExternalChange.h"
 #include "VisualModel/VerseFunctionNavigation.h"
 #include "Editing/VerseIdentifier.h"
@@ -629,7 +630,145 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 				? SocketDrag->SemanticScopeRange
 				: SocketDrag->TileRange,
 			ActiveDocument->FilePath, SemanticSnapshots);
-	const FString SocketType = bClauseInsertion
+	bool bCompatibleOperatorOperandSearch = false;
+	TArray<FString> CompatibleOperandTypes;
+	if (!bClauseInsertion
+		&& !SocketDrag->bOutput
+		&& SourceTile != nullptr
+		&& IsVerseOperatorExpression(SourceTile->ExpressionKind)
+		&& SourceTile->GetValueInputs().IsValidIndex(SocketDrag->Endpoint.Socket.Index)
+		&& Algo::AllOf(
+			SourceTile->GetValueInputs(),
+			[](const FVerseVisualSocket& Input)
+			{
+				return Input.InlineLiteralRange.IsSet();
+			}))
+	{
+		const int32 OperandIndex = SocketDrag->Endpoint.Socket.Index;
+		const FVerseOperatorConnectionConstraints Constraints =
+			FVerseVisualTileBuilder::BuildOperatorConnectionConstraints(
+				Tab.GraphTiles, *SourceTile, Document);
+		const TArray<const FVerseVisualSocket*> OutputConsumers =
+			Constraints.GetOutputConsumerPointers();
+		const TArray<FVerseOperatorSignature> Signatures =
+			FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+				SemanticSnapshots, ActiveDocument->FilePath,
+				SourceTile->Range.BeginByte, Document,
+				SourceTile->OperatorSpelling,
+				SourceTile->GetValueInputs().Num(), {}, OutputConsumers);
+
+		struct FRankedAction
+		{
+			TSharedPtr<FVerseExpressionAction> Action;
+			int32 HomogeneousPenalty = 0;
+			int32 LiteralChangeCount = 0;
+			int32 MissingDefaultCount = 0;
+			FString SignatureText;
+		};
+		TMap<FString, FRankedAction> RankedActions;
+		for (const FVerseOperatorSignature& Signature : Signatures)
+		{
+			if (!Signature.OperandTypeNames.IsValidIndex(OperandIndex)
+				|| !Signature.OperandTypes.IsValidIndex(OperandIndex)
+				|| Signature.OperandTypes[OperandIndex] == nullptr
+				|| !Signature.Snapshot.IsValid())
+			{
+				continue;
+			}
+			CompatibleOperandTypes.AddUnique(Signature.OperandTypeNames[OperandIndex]);
+			FVerseVisualSocket ConcreteSocket = *SourceSocket;
+			ConcreteSocket.SemanticType = Signature.OperandTypes[OperandIndex];
+			ConcreteSocket.SemanticSnapshot = Signature.Snapshot;
+			ConcreteSocket.SemanticTypeName = Signature.OperandTypeNames[OperandIndex];
+			ConcreteSocket.InlineLiteralKind = EVerseLiteralKind::None;
+			TArray<TSharedPtr<FVerseExpressionAction>> SignatureActions =
+				FVerseExpressionActionQuery::Build(
+					Tab.Parameters, ConcreteSocket, false, Document,
+					SocketDrag->SemanticScopeRange.IsSet()
+						? SocketDrag->SemanticScopeRange
+						: SocketDrag->TileRange,
+					ActiveDocument->FilePath, SemanticSnapshots);
+
+			FVerseOperatorRetargetRecipe Recipe;
+			Recipe.OperatorRange = SourceTile->Range;
+			Recipe.OperatorSpelling = SourceTile->OperatorSpelling;
+			Recipe.OperandCount = SourceTile->GetValueInputs().Num();
+			Recipe.ReplacedOperandIndex = OperandIndex;
+			Recipe.SignatureDisplayText = Signature.DisplayText;
+			Recipe.OperandTypeNames = Signature.OperandTypeNames;
+			for (const FVerseVisualSocket& Input : SourceTile->GetValueInputs())
+			{
+				Recipe.InlineLiteralRanges.Add(
+					Input.InlineLiteralRange);
+			}
+
+			const bool bHomogeneous = Signature.OperandTypeNames.IsEmpty()
+				|| Algo::AllOf(
+					Signature.OperandTypeNames,
+					[&Signature](const FString& Type)
+					{
+						return Type == Signature.OperandTypeNames[0];
+					});
+			int32 ChangeCount = 0;
+			int32 MissingDefaults = 0;
+			for (int32 Index = 0; Index < Recipe.OperandCount; ++Index)
+			{
+				if (Index == OperandIndex)
+				{
+					continue;
+				}
+				const TOptional<FString> Default =
+					GetDefaultVerseLiteralSourceForType(
+						Signature.OperandTypeNames[Index]);
+				const FString ExistingSource = Document.DecodeOriginalRange(
+					Recipe.InlineLiteralRanges[Index]).TrimStartAndEnd();
+				ChangeCount += ExistingSource == Default.Get(TEXT("0")) ? 0 : 1;
+				MissingDefaults += Default.IsSet() ? 0 : 1;
+			}
+			for (TSharedPtr<FVerseExpressionAction>& Action : SignatureActions)
+			{
+				Action->OperatorRetarget = Recipe;
+				const FString Key = FString::Printf(
+					TEXT("%d|%s|%s|%s|%s|%d"),
+					static_cast<int32>(Action->SourceForm),
+					*Action->SourceSpelling, *Action->ResultTypeName,
+					*FString::Join(Action->InputTypeNames, TEXT(",")),
+					*Action->ModuleCategory.ToString(), Action->BoundInputIndex);
+				FRankedAction Candidate{
+					Action, bHomogeneous ? 0 : 1, ChangeCount,
+					MissingDefaults, Signature.DisplayText};
+				FRankedAction* Existing = RankedActions.Find(Key);
+				const bool bBetter = Existing == nullptr
+					|| Candidate.HomogeneousPenalty < Existing->HomogeneousPenalty
+					|| (Candidate.HomogeneousPenalty == Existing->HomogeneousPenalty
+						&& Candidate.LiteralChangeCount < Existing->LiteralChangeCount)
+					|| (Candidate.HomogeneousPenalty == Existing->HomogeneousPenalty
+						&& Candidate.LiteralChangeCount == Existing->LiteralChangeCount
+						&& Candidate.MissingDefaultCount < Existing->MissingDefaultCount)
+					|| (Candidate.HomogeneousPenalty == Existing->HomogeneousPenalty
+						&& Candidate.LiteralChangeCount == Existing->LiteralChangeCount
+						&& Candidate.MissingDefaultCount == Existing->MissingDefaultCount
+						&& Candidate.SignatureText < Existing->SignatureText);
+				if (bBetter)
+				{
+					RankedActions.Add(Key, MoveTemp(Candidate));
+				}
+			}
+		}
+		if (!RankedActions.IsEmpty())
+		{
+			ExpressionActions.Reset();
+			for (TPair<FString, FRankedAction>& Pair : RankedActions)
+			{
+				ExpressionActions.Add(MoveTemp(Pair.Value.Action));
+			}
+			bCompatibleOperatorOperandSearch = true;
+		}
+	}
+	const FString SocketType = bCompatibleOperatorOperandSearch
+		&& CompatibleOperandTypes.Num() == 1
+		? CompatibleOperandTypes[0]
+		: bClauseInsertion
 		? FString()
 		: GetVisualTypeName(
 			SourceSocket->TypeRange,
@@ -638,6 +777,10 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 			SourceSocket->SemanticTypeName);
 	const FText ContextDescription = bClauseInsertion
 		? LOCTEXT("ExpressionInsertionContext", "All expressions")
+		: bCompatibleOperatorOperandSearch && CompatibleOperandTypes.Num() > 1
+			? LOCTEXT(
+				"ExpressionCompatibleOperandContext",
+				"Actions providing a compatible operand")
 		: FText::Format(
 			SocketDrag->bOutput
 				? LOCTEXT("ExpressionConsumerTypeContext", "Actions taking {0}")
@@ -651,6 +794,8 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 		.Actions(ExpressionActions)
 		.ContextDescription(ContextDescription)
 		.ContextTypeColor(bClauseInsertion
+			|| (bCompatibleOperatorOperandSearch
+				&& CompatibleOperandTypes.Num() > 1)
 			? FLinearColor::White
 			: GetBlueprintPinColor(SocketType))
 		.ContextTypeIcon(ContextTypeIcon)
@@ -776,6 +921,11 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 			*Action,
 			Error);
 	}
+	else if (Action->OperatorRetarget.IsSet())
+	{
+		bApplied = TryApplyVerseOperatorOperandAction(
+			*ActiveDocument->Session, *Action, Error);
+	}
 	else
 	{
 		bApplied = TryApplyVerseExpressionAction(
@@ -789,6 +939,19 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		ActiveDocument->LoadError = Error;
 		bLocalCompilePanelOpen = true;
 		return;
+	}
+	if (Action->OperatorRetarget.IsSet())
+	{
+		const FVerseOperatorRetargetRecipe& Recipe =
+			Action->OperatorRetarget.GetValue();
+		ActiveDocument->PendingOperatorSignatureText =
+			Recipe.SignatureDisplayText;
+		ActiveDocument->PendingOperatorSpelling =
+			Recipe.OperatorSpelling;
+		ActiveDocument->PendingOperatorSignatureBeginByte =
+			Recipe.OperatorRange.BeginByte;
+		ActiveDocument->ProvisionalTiles.AdoptContaining(
+			Recipe.OperatorRange);
 	}
 	if (bReplaceProvisional)
 	{

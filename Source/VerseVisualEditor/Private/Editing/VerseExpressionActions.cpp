@@ -895,6 +895,126 @@ bool TryApplyVerseExpressionAction(
 		Session, ExpressionRange, Replacement, RequiredKind, OutError);
 }
 
+bool TryApplyVerseOperatorOperandAction(
+	FVerseDocumentSession& Session,
+	const FVerseExpressionAction& Action,
+	FText& OutError)
+{
+	if (!Action.OperatorRetarget.IsSet())
+	{
+		OutError = LOCTEXT(
+			"MissingOperatorRetargetRecipe",
+			"The selected expression has no operator signature recipe.");
+		return false;
+	}
+	const FVerseOperatorRetargetRecipe& Recipe = Action.OperatorRetarget.GetValue();
+	if (Recipe.OperatorRange.Revision != Session.GetRevision()
+		|| !Recipe.InlineLiteralRanges.IsValidIndex(Recipe.ReplacedOperandIndex)
+		|| Recipe.OperandTypeNames.Num() != Recipe.OperandCount
+		|| Recipe.InlineLiteralRanges.Num() != Recipe.OperandCount)
+	{
+		OutError = LOCTEXT(
+			"StaleOperatorRetargetRecipe",
+			"The operator signature choice belongs to an obsolete graph revision.");
+		return false;
+	}
+
+	FString ProviderSource;
+	if (!BuildVerseExpressionActionSource(Action, FStringView(), ProviderSource, OutError))
+	{
+		return false;
+	}
+	TArray<FVerseDocumentEdit> Edits;
+	for (int32 Index = 0; Index < Recipe.OperandCount; ++Index)
+	{
+		const FVerseTextRange Range = Recipe.InlineLiteralRanges[Index];
+		if (!Range.IsSet())
+		{
+			OutError = LOCTEXT(
+				"MissingOperatorLiteralRange",
+				"The operator no longer has replaceable literal operands.");
+			return false;
+		}
+		const FString Replacement = Index == Recipe.ReplacedOperandIndex
+			? ProviderSource
+			: GetDefaultVerseLiteralSourceForType(
+				Recipe.OperandTypeNames[Index]).Get(TEXT("0"));
+		Edits.Add({Range, FUtf8String(Replacement)});
+	}
+
+	// Validate the entire proposed transaction before changing the authoritative
+	// session. This prevents one operand replacement and the accompanying
+	// signature retarget from ever becoming separate revisions.
+	TArray<FVerseDocumentEdit> Ascending(Edits);
+	Ascending.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
+	{
+		return Left.Range.BeginByte < Right.Range.BeginByte;
+	});
+	const FUtf8String& Current = Session.GetCurrentUtf8();
+	FUtf8String Candidate;
+	int32 Cursor = 0;
+	for (const FVerseDocumentEdit& Edit : Ascending)
+	{
+		if (Edit.Range.BeginByte < Cursor || Edit.Range.EndByte() > Current.Len())
+		{
+			OutError = LOCTEXT(
+				"InvalidOperatorRetargetRanges",
+				"The operator's replacement ranges are no longer valid.");
+			return false;
+		}
+		Candidate.Append(FUtf8StringView(*Current + Cursor, Edit.Range.BeginByte - Cursor));
+		Candidate.Append(Edit.Replacement);
+		Cursor = Edit.Range.EndByte();
+	}
+	Candidate.Append(FUtf8StringView(*Current + Cursor, Current.Len() - Cursor));
+	const TConstArrayView<uint8> CandidateBytes(
+		reinterpret_cast<const uint8*>(*Candidate), Candidate.Len());
+	TSharedPtr<const FVerseDocument> CandidateDocument =
+		FVerseDocument::CreateFromBytes(CandidateBytes, OutError);
+	if (!CandidateDocument.IsValid())
+	{
+		return false;
+	}
+	const FVerseParseSnapshot CandidateSnapshot =
+		FVerseParseSnapshotBuilder::Build(CandidateDocument.ToSharedRef());
+	const TArray<FVerseVisualTile> CandidateTiles =
+		FVerseVisualTileBuilder::Build(CandidateSnapshot);
+	const TArray<FVerseFunctionNavigationItem> CandidateFunctions =
+		FVerseFunctionNavigationBuilder::Build(
+			CandidateTiles, CandidateSnapshot);
+	TFunction<const FVerseVisualTile*(TConstArrayView<FVerseVisualTile>)> FindOperator;
+	FindOperator = [&](TConstArrayView<FVerseVisualTile> Tiles) -> const FVerseVisualTile*
+		{
+			for (const FVerseVisualTile& Tile : Tiles)
+			{
+				if (Tile.Range.BeginByte == Recipe.OperatorRange.BeginByte
+					&& Tile.OperatorSpelling == Recipe.OperatorSpelling
+					&& Tile.GetValueInputs().Num() == Recipe.OperandCount)
+				{
+					return &Tile;
+				}
+				if (const FVerseVisualTile* Found = FindOperator(Tile.Children))
+				{
+					return Found;
+				}
+			}
+			return nullptr;
+		};
+	const bool bOperatorPreserved = CandidateFunctions.ContainsByPredicate(
+		[&](const FVerseFunctionNavigationItem& Function)
+		{
+			return FindOperator(Function.GraphTiles) != nullptr;
+		});
+	if (!bOperatorPreserved)
+	{
+		OutError = LOCTEXT(
+			"OperatorRetargetRejected",
+			"The expression would not preserve the selected operator structure.");
+		return false;
+	}
+	return Session.ReplaceMany(Edits, OutError);
+}
+
 bool TryMaterializeVerseNamedInput(
 	FVerseDocumentSession& Session,
 	FVerseTextRange CallRange,

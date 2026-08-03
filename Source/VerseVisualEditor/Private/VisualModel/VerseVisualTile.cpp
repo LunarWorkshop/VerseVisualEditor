@@ -1,10 +1,29 @@
 #include "VisualModel/VerseVisualTile.h"
 
+#include "VerseDocument.h"
 #include "VerseParseSnapshotBuilder.h"
 #include "uLang/Semantics/SemanticProgram.h"
 
 namespace
 {
+	const FVerseVisualTile* FindTileById(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		FVerseVisualTileId Id)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.Id == Id)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Nested = FindTileById(Tile.Children, Id))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
 	bool IsWhitespace(FUtf8StringView Text)
 	{
 		for (const UTF8CHAR Character : Text)
@@ -1679,4 +1698,90 @@ bool FVerseVisualTileBuilder::IsSocketConnected(
 			return Connection.Source == EndpointToFind
 				|| Connection.Target == EndpointToFind;
 		});
+}
+
+TArray<const FVerseVisualSocket*>
+FVerseOperatorConnectionConstraints::GetConnectedOperandPointers() const
+{
+	TArray<const FVerseVisualSocket*> Result;
+	Result.Reserve(ConnectedOperands.Num());
+	for (const TOptional<FVerseVisualSocket>& Operand : ConnectedOperands)
+	{
+		Result.Add(Operand.IsSet() ? &Operand.GetValue() : nullptr);
+	}
+	return Result;
+}
+
+TArray<const FVerseVisualSocket*>
+FVerseOperatorConnectionConstraints::GetOutputConsumerPointers() const
+{
+	TArray<const FVerseVisualSocket*> Result;
+	Result.Reserve(OutputConsumers.Num());
+	for (const FVerseVisualSocket& Consumer : OutputConsumers)
+	{
+		Result.Add(&Consumer);
+	}
+	return Result;
+}
+
+FVerseOperatorConnectionConstraints
+FVerseVisualTileBuilder::BuildOperatorConnectionConstraints(
+	TConstArrayView<FVerseVisualTile> GraphTiles,
+	const FVerseVisualTile& Operator,
+	const FVerseDocument& Document)
+{
+	FVerseOperatorConnectionConstraints Result;
+	Result.ConnectedOperands.SetNum(Operator.GetValueInputs().Num());
+	for (const FVerseVisualConnection& Connection : BuildConnections(GraphTiles))
+	{
+		if (Connection.Terminal != EVerseVisualConnectionTerminal::Socket)
+		{
+			continue;
+		}
+		if (Connection.Target.Tile == Operator.Id
+			&& Connection.Target.Socket.Role == EVerseVisualSocketRole::Value
+			&& Result.ConnectedOperands.IsValidIndex(Connection.Target.Socket.Index))
+		{
+			if (const FVerseVisualTile* SourceTile =
+				FindTileById(GraphTiles, Connection.Source.Tile))
+			{
+				if (const FVerseVisualSocket* Source =
+					SourceTile->FindSocket(Connection.Source.Socket))
+				{
+					Result.ConnectedOperands[Connection.Target.Socket.Index] = *Source;
+				}
+			}
+		}
+		if (Connection.Source.Tile == Operator.Id
+			&& Connection.Source.Socket.Role == EVerseVisualSocketRole::Value)
+		{
+			const FVerseVisualTile* ConsumerTile =
+				FindTileById(GraphTiles, Connection.Target.Tile);
+			const FVerseVisualSocket* Consumer = ConsumerTile != nullptr
+				? ConsumerTile->FindSocket(Connection.Target.Socket)
+				: nullptr;
+			if (Consumer == nullptr)
+			{
+				continue;
+			}
+			FVerseVisualSocket CurrentConsumer = *Consumer;
+			// A freshly edited declaration is authoritative while semantic analysis
+			// may still describe the preceding document revision.
+			if (ConsumerTile->Kind == EVerseVisualTileKind::Definition
+				&& ConsumerTile->TypeRange.IsSet())
+			{
+				const FString DeclaredType =
+					Document.DecodeOriginalRange(ConsumerTile->TypeRange);
+				if (!DeclaredType.IsEmpty()
+					&& DeclaredType != CurrentConsumer.SemanticTypeName)
+				{
+					CurrentConsumer.SemanticTypeName = DeclaredType;
+					CurrentConsumer.SemanticType = nullptr;
+					CurrentConsumer.SemanticSnapshot.Reset();
+				}
+			}
+			Result.OutputConsumers.Add(MoveTemp(CurrentConsumer));
+		}
+	}
+	return Result;
 }

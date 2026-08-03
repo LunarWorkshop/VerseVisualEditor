@@ -884,69 +884,23 @@ void SVerseVisualEditor::RebuildProperties()
 			{
 				const FVerseVisualTile& SelectedTile =
 					ActiveDocument->SelectedTile.GetValue();
-				TArray<const FVerseVisualSocket*> OutputConsumers;
-				TArray<TSharedPtr<FVerseVisualSocket>> OutputConsumerStorage;
-				TArray<const FVerseVisualSocket*> ConnectedOperands;
-				ConnectedOperands.SetNumZeroed(SelectedTile.GetValueInputs().Num());
+				FVerseOperatorConnectionConstraints Constraints;
 				for (const FOpenVerseFunctionTab& Tab : ActiveDocument->FunctionTabs)
 				{
 					if (FindVisualTileById(Tab.GraphTiles, SelectedTile.Id) == nullptr)
 					{
 						continue;
 					}
-					const TArray<FVerseVisualConnection> Connections =
-						FVerseVisualTileBuilder::BuildConnections(Tab.GraphTiles);
-					for (const FVerseVisualConnection& Connection : Connections)
-					{
-						if (Connection.Target.Tile == SelectedTile.Id
-							&& Connection.Target.Socket.Role == EVerseVisualSocketRole::Value)
-						{
-							if (ConnectedOperands.IsValidIndex(Connection.Target.Socket.Index))
-							{
-								if (const FVerseVisualTile* SourceTile =
-									FindVisualTileById(Tab.GraphTiles, Connection.Source.Tile))
-								{
-									ConnectedOperands[Connection.Target.Socket.Index] =
-										SourceTile->FindSocket(Connection.Source.Socket);
-								}
-							}
-						}
-						if (Connection.Source.Tile == SelectedTile.Id
-							&& Connection.Source.Socket.Role == EVerseVisualSocketRole::Value)
-						{
-							if (const FVerseVisualTile* ConsumerTile =
-								FindVisualTileById(Tab.GraphTiles, Connection.Target.Tile))
-							{
-								if (const FVerseVisualSocket* Consumer =
-									ConsumerTile->FindSocket(Connection.Target.Socket))
-								{
-									TSharedPtr<FVerseVisualSocket> CurrentConsumer =
-										MakeShared<FVerseVisualSocket>(*Consumer);
-									// The source annotation is authoritative immediately after
-									// a Details edit; the semantic snapshot may still describe
-									// the preceding revision for one analysis cycle.
-									if (ConsumerTile->Kind == EVerseVisualTileKind::Definition
-										&& ConsumerTile->TypeRange.IsSet())
-									{
-										const FString DeclaredType = ActiveDocument->Session
-											->GetParseSnapshot().GetDocument()
-											->DecodeOriginalRange(ConsumerTile->TypeRange);
-										if (!DeclaredType.IsEmpty()
-											&& DeclaredType != CurrentConsumer->SemanticTypeName)
-										{
-											CurrentConsumer->SemanticTypeName = DeclaredType;
-											CurrentConsumer->SemanticType = nullptr;
-											CurrentConsumer->SemanticSnapshot.Reset();
-										}
-									}
-									OutputConsumers.Add(CurrentConsumer.Get());
-									OutputConsumerStorage.Add(MoveTemp(CurrentConsumer));
-								}
-							}
-						}
-					}
+					Constraints =
+						FVerseVisualTileBuilder::BuildOperatorConnectionConstraints(
+							Tab.GraphTiles, SelectedTile,
+							*ActiveDocument->Session->GetParseSnapshot().GetDocument());
 					break;
 				}
+				const TArray<const FVerseVisualSocket*> ConnectedOperands =
+					Constraints.GetConnectedOperandPointers();
+				const TArray<const FVerseVisualSocket*> OutputConsumers =
+					Constraints.GetOutputConsumerPointers();
 				int32 ConnectedOperandCount = 0;
 				for (const FVerseVisualSocket* Socket : ConnectedOperands)
 				{

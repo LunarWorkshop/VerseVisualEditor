@@ -48,6 +48,9 @@ struct FVerseOperatorSignature
 	FString DisplayText;
 	TArray<FString> OperandTypeNames;
 	FString ResultTypeName;
+	/** Compiler-owned concrete types; Snapshot owns their lifetime. */
+	TArray<const uLang::CTypeBase*> OperandTypes;
+	const uLang::CTypeBase* ResultType = nullptr;
 	TSharedPtr<const FVerseSemanticSnapshot> Snapshot;
 };
 

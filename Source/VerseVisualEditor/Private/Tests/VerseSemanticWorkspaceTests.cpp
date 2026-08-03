@@ -726,6 +726,16 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				return Signature.DisplayText == TEXT("int x int")
 					&& Signature.ResultTypeName == TEXT("int");
 			}));
+		TestTrue(TEXT("Resolved signatures retain snapshot-owned compiler types"),
+			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
+			{
+				return Signature.DisplayText == TEXT("float x float")
+					&& Signature.Snapshot.IsValid()
+					&& Signature.ResultType != nullptr
+					&& Signature.OperandTypes.Num() == 2
+					&& Signature.OperandTypes[0] != nullptr
+					&& Signature.OperandTypes[1] != nullptr;
+			}));
 		TestFalse(TEXT("No compiler-internal type enters a resolved signature"),
 			Signatures.ContainsByPredicate([](const FVerseOperatorSignature& Signature)
 			{
@@ -1659,6 +1669,83 @@ bool FVerseUnhandledStatementFailureTest::RunTest(const FString& Parameters)
 			{
 				return Connection.Terminal == EVerseVisualConnectionTerminal::RedX;
 			}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseOperatorOperandRetargetTransactionTest,
+	"VerseVisualEditor.Editing.OperatorOperandRetargetIsAtomic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseOperatorOperandRetargetTransactionTest::RunTest(const FString& Parameters)
+{
+	const FUtf8String Source(UTF8TEXT(
+		"Retarget(Input : float)<decides> : float = 0 <> 0\n"));
+	FText Error;
+	const TSharedPtr<const FVerseDocument> Document = FVerseDocument::CreateFromBytes(
+		MakeArrayView(
+			reinterpret_cast<const uint8*>(*Source), Source.Len()),
+		Error);
+	if (!TestTrue(TEXT("Retarget fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	if (!TestTrue(TEXT("Retarget fixture has one function"), Functions.Num() == 1))
+	{
+		return false;
+	}
+	TFunction<const FVerseVisualTile*(TConstArrayView<FVerseVisualTile>)> FindOperator;
+	FindOperator = [&](TConstArrayView<FVerseVisualTile> Tiles) -> const FVerseVisualTile*
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			if (Tile.OperatorSpelling == TEXT("<>")
+				&& Tile.GetValueInputs().Num() == 2)
+			{
+				return &Tile;
+			}
+			if (const FVerseVisualTile* Found = FindOperator(Tile.Children))
+			{
+				return Found;
+			}
+		}
+		return nullptr;
+	};
+	const FVerseVisualTile* Operator = FindOperator(Functions[0].GraphTiles);
+	if (!TestNotNull(TEXT("Retarget fixture contains equality"), Operator)
+		|| !TestTrue(TEXT("Both equality operands are inline literals"),
+			Operator->GetValueInputs().Num() == 2
+			&& Operator->GetValueInputs()[0].InlineLiteralRange.IsSet()
+			&& Operator->GetValueInputs()[1].InlineLiteralRange.IsSet()))
+	{
+		return false;
+	}
+
+	FVerseExpressionAction Action;
+	Action.SourceForm = EVerseExpressionSourceForm::IdentifierReference;
+	Action.SourceSpelling = TEXT("Input");
+	FVerseOperatorRetargetRecipe Recipe;
+	Recipe.OperatorRange = Operator->Range;
+	Recipe.OperatorSpelling = Operator->OperatorSpelling;
+	Recipe.OperandCount = 2;
+	Recipe.ReplacedOperandIndex = 0;
+	Recipe.SignatureDisplayText = TEXT("float x float");
+	Recipe.OperandTypeNames = {TEXT("float"), TEXT("float")};
+	Recipe.InlineLiteralRanges = {
+		Operator->GetValueInputs()[0].InlineLiteralRange,
+		Operator->GetValueInputs()[1].InlineLiteralRange};
+	Action.OperatorRetarget = MoveTemp(Recipe);
+	TestTrue(TEXT("Provider insertion and default retarget apply as one edit"),
+		TryApplyVerseOperatorOperandAction(Session, Action, Error));
+	TestTrue(TEXT("Selected provider replaces the dragged operand"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(
+			TEXT("Input <> 0.0")));
+	TestEqual(TEXT("Atomic retarget creates exactly one revision"),
+		Session.GetRevision().Value, uint64(1));
 	return true;
 }
 
