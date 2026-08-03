@@ -45,6 +45,8 @@ void SVerseExpressionLayoutPanel::Construct(const FArguments& InArgs)
 {
 	HorizontalGap = InArgs._HorizontalGap;
 	VerticalGap = InArgs._VerticalGap;
+	Presentation = InArgs._Presentation;
+	bKeepOperandsBelowExecutionLane = InArgs._KeepOperandsBelowExecutionLane;
 }
 
 void SVerseExpressionLayoutPanel::AddChild(const TSharedRef<SWidget>& Widget)
@@ -104,7 +106,15 @@ SVerseExpressionLayoutPanel::ComputeLayout() const
 
 	float RootY = FMath::Max(0.0f, (OperandStackHeight - RootSize.Y) * 0.5f);
 	float OperandY = FMath::Max(0.0f, (RootSize.Y - OperandStackHeight) * 0.5f);
-	if (Operands.Num() == 1 && Operands[0].Root.IsValid())
+	if (Presentation == EVerseFunctionGraphPresentation::HorizontalExecution
+		&& bKeepOperandsBelowExecutionLane)
+	{
+		// The execution wire crosses the top of a statement. Reserve a full pin row
+		// plus breathing room before any part of its input expression tree begins.
+		RootY = 0.0f;
+		OperandY = 44.0f;
+	}
+	else if (Operands.Num() == 1 && Operands[0].Root.IsValid())
 	{
 		Operands[0].Root->SlatePrepass();
 		const FVector2D OperandRootPosition = Operands[0].RootPosition
@@ -140,6 +150,15 @@ SVerseExpressionLayoutPanel::ComputeLayout() const
 FVector2D SVerseExpressionLayoutPanel::GetRootPosition() const
 {
 	return ComputeLayout().RootPosition;
+}
+
+FVector2D SVerseExpressionLayoutPanel::GetOperandPosition(int32 OperandIndex) const
+{
+	const FComputedLayout Layout = ComputeLayout();
+	const int32 ChildIndex = OperandIndex + 1;
+	return Layout.Positions.IsValidIndex(ChildIndex)
+		? Layout.Positions[ChildIndex]
+		: FVector2D::ZeroVector;
 }
 
 FVector2D SVerseExpressionLayoutPanel::ComputeDesiredSize(float) const

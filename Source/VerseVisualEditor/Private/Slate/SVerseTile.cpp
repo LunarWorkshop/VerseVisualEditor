@@ -464,6 +464,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	FunctionGraphPresentation = InArgs._FunctionGraphPresentation;
 	const bool bHorizontalExecution = FunctionGraphPresentation
 		!= EVerseFunctionGraphPresentation::VerticalExecution;
+	const bool bHorizontalExecutionLayout = FunctionGraphPresentation
+		== EVerseFunctionGraphPresentation::HorizontalExecution;
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	TSharedPtr<SVerseTileExecutionPin> ExecutionInputPin;
@@ -499,6 +501,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control
 		&& Tile.ControlKind == EVerseControlKind::If;
+	const bool bHorizontalImplicitReturnSource = bHorizontalExecutionLayout
+		&& Tile.bImplicitReturnValue;
+	const bool bHorizontalImplicitReturnTile = bHorizontalExecutionLayout
+		&& Tile.Kind == EVerseVisualTileKind::FunctionReturn;
+	const bool bHorizontalFailureTerminal = bHorizontalExecutionLayout
+		&& Tile.StatementFailure != EVerseStatementFailureDisposition::None;
 	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
 	TSharedRef<SWidget> BodyContent = InArgs._BodyContent.Widget;
 	if (Tile.ExpressionKind == EVerseExpressionKind::Literal
@@ -573,8 +581,33 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				];
 		}
 		TSharedRef<SWidget> FailureChain = SNullWidget::NullWidget;
-		if (bHorizontalExecution)
+		if (bHorizontalExecutionLayout)
 		{
+			constexpr float HorizontalBodyTopPadding = 36.0f;
+			const float EntryPinTopPadding = InArgs._ClauseInsertionBodySpineX.IsSet()
+				? FMath::Max(0.0f,
+					HorizontalBodyTopPadding
+					+ InArgs._ClauseInsertionBodySpineX.GetValue()
+					- 12.0f)
+				: HorizontalBodyTopPadding;
+			FailureChain =
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+				.Padding(FMargin(0.0f, EntryPinTopPadding, 0.0f, 0.0f))
+				[
+					EntryPinButton.IsValid()
+						? EntryPinButton.ToSharedRef()
+						: SNullWidget::NullWidget
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				.Padding(FMargin(0.0f, HorizontalBodyTopPadding, 116.0f, 32.0f))
+				[
+					BodyContent
+				];
+		}
+		else if (bHorizontalExecution)
+		{
+			// Track presentation retains its compact horizontal failable-body layout.
 			FailureChain =
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -672,13 +705,16 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				.Color(GetVerseFailureDecorationColor())
 				.Connected(ConnectedSockets.Contains(FailureOutputId))
 				.Visibility(EVisibility::HitTestInvisible)
-				.RenderTransform(FSlateRenderTransform(FVector2D(5.5f, 0.0f)));
+				.RenderTransform(FSlateRenderTransform(
+					bHorizontalFailureTerminal
+						? FVector2D::ZeroVector
+						: FVector2D(5.5f, 0.0f)));
 		SocketAnchors.Add(FailureOutputId, Pin);
 		FailureContextOutputWidget = Pin;
 	}
 	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.GetValueOutputs(), true);
 	TSharedRef<SWidget> HeaderOutputGroup = ValueOutputWidget;
-	if (bHasFailureOutput)
+	if (bHasFailureOutput && !bHorizontalFailureTerminal)
 	{
 		HeaderOutputGroup =
 			SNew(SVerticalBox)
@@ -719,7 +755,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				];
 		}
 	}
-	if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
+	if (Tile.StatementFailure != EVerseStatementFailureDisposition::None
+		&& !bHorizontalFailureTerminal)
 	{
 		HeaderOutputGroup =
 			SNew(SBox)
@@ -869,7 +906,11 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				HeaderSurface
+				SNew(SBox)
+				.MinDesiredWidth(bIfTile && bHorizontalExecutionLayout ? 220.0f : 0.0f)
+				[
+					HeaderSurface
+				]
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -971,6 +1012,80 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				: 0.0f)
 		]
 	];
+	auto AddFloatingValuePin = [this, &TileAndOutput](
+		const FVerseVisualSocket& Socket,
+		bool bOutput,
+		EHorizontalAlignment Horizontal,
+		EVerticalAlignment Vertical,
+		FVector2D Offset)
+	{
+		const FString Type = !Socket.SemanticTypeName.IsEmpty()
+			? Socket.SemanticTypeName
+			: Socket.TypeRange.IsSet()
+			? Decode(Socket.TypeRange).ToString()
+			: Socket.IntrinsicTypeName.ToString();
+		const bool bFailable = Socket.Outcome == EVerseExpressionOutcome::FailableValue
+			|| Socket.Outcome == EVerseExpressionOutcome::FailureOnly;
+		TSharedPtr<SWidget> Pin;
+		if (bFailable)
+		{
+			Pin = SNew(SVerseFailableValuePin)
+				.Color(Socket.Outcome == EVerseExpressionOutcome::FailureOnly
+					? GetVerseFailureDecorationColor()
+					: GetVerseTilePinColor(Type))
+				.Connected(ConnectedSockets.Contains(Socket.Id))
+				.Visibility(EVisibility::HitTestInvisible);
+		}
+		else
+		{
+			Pin = SNew(SImage)
+				.Image(GetVerseTilePinBrush(Type, ConnectedSockets.Contains(Socket.Id)))
+				.ColorAndOpacity(GetVerseTilePinColor(Type))
+				.Visibility(EVisibility::HitTestInvisible)
+				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
+		}
+		SocketAnchors.Add(Socket.Id, Pin);
+		TileAndOutput->AddSlot()
+		.HAlign(Horizontal)
+		.VAlign(Vertical)
+		[
+			SNew(SBorder)
+			.BorderImage(nullptr)
+			.Padding(0.0f)
+			.RenderTransform(FSlateRenderTransform(Offset))
+			.OnMouseButtonDown(
+				this, &SVerseTile::HandleSocketMouseButtonDown,
+				Pin, Socket, bOutput, 0)
+			[
+				Pin.ToSharedRef()
+			]
+		];
+	};
+	if (bHorizontalImplicitReturnSource && !Tile.GetValueOutputs().IsEmpty())
+	{
+		AddFloatingValuePin(
+			Tile.GetValueOutputs()[0], true,
+			HAlign_Center, VAlign_Top, FVector2D(0.0f, -5.5f));
+	}
+	if (bHorizontalImplicitReturnTile && !Tile.GetValueInputs().IsEmpty())
+	{
+		AddFloatingValuePin(
+			Tile.GetValueInputs()[0], false,
+			HAlign_Center, VAlign_Bottom, FVector2D(0.0f, 5.5f));
+	}
+	if (bHorizontalFailureTerminal && bHasFailureOutput)
+	{
+		TileAndOutput->AddSlot()
+		.HAlign(HAlign_Center)
+		.VAlign(VAlign_Top)
+		[
+			SNew(SBox)
+			.RenderTransform(FSlateRenderTransform(FVector2D(0.0f, -5.5f)))
+			[
+				FailureContextOutputWidget
+			]
+		];
+	}
 
 	if (!bHorizontalExecution && Tile.FindSocket({EVerseVisualSocketDirection::Output,
 		EVerseVisualSocketRole::Execution, 0}) != nullptr)
@@ -1360,6 +1475,15 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	for (int32 SocketIndex = 0; SocketIndex < Sockets.Num(); ++SocketIndex)
 	{
 		const FVerseVisualSocket& Socket = Sockets[SocketIndex];
+		const bool bHorizontalExecution = FunctionGraphPresentation
+			== EVerseFunctionGraphPresentation::HorizontalExecution;
+		if (bHorizontalExecution
+			&& SocketIndex == 0
+			&& ((bOutput && Tile.bImplicitReturnValue)
+				|| (!bOutput && Tile.Kind == EVerseVisualTileKind::FunctionReturn)))
+		{
+			continue;
+		}
 		const FString Type = !Socket.SemanticTypeName.IsEmpty()
 			? Socket.SemanticTypeName
 			: Socket.TypeRange.IsSet()

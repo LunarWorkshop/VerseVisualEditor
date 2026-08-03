@@ -134,9 +134,14 @@ namespace
 		FVector2D End,
 		EVerseGraphConnectionAxis Axis)
 	{
-		return Axis == EVerseGraphConnectionAxis::Vertical
-			? FVector2D(0.0f, FMath::Max(24.0f, FMath::Abs(End.Y - Start.Y) * 0.5f))
-			: FVector2D(GetDefault<UGraphEditorSettings>()->ComputeSplineTangent(Start, End));
+		if (Axis == EVerseGraphConnectionAxis::Vertical)
+		{
+			const float Direction = End.Y >= Start.Y ? 1.0f : -1.0f;
+			return FVector2D(
+				0.0f,
+				Direction * FMath::Max(24.0f, FMath::Abs(End.Y - Start.Y) * 0.5f));
+		}
+		return FVector2D(GetDefault<UGraphEditorSettings>()->ComputeSplineTangent(Start, End));
 	}
 
 	void DrawSpline(
@@ -197,7 +202,8 @@ namespace
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId,
 		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints,
-		TOptional<float> RenderScopeRight = {})
+		TOptional<float> RenderScopeRight = {},
+		TOptional<float> RenderScopeTop = {})
 	{
 		if (!Connection.EndpointRegistry.IsValid())
 		{
@@ -262,12 +268,24 @@ namespace
 		}
 		else
 		{
-			const float EndX =
-				Connection.Terminal == EVerseVisualConnectionTerminal::RenderScopeRightBoundary
-					&& RenderScopeRight.IsSet()
-					? RenderScopeRight.GetValue()
-					: Start.Value.X + 96.0f;
-			End = FVersePaintPoint(FVector2D(FMath::Max(Start.Value.X, EndX), Start.Value.Y));
+			if (Connection.TerminalEdge == EVerseGraphTerminalEdge::Top)
+			{
+				const float EndY = RenderScopeTop.IsSet()
+					? RenderScopeTop.GetValue()
+					: Start.Value.Y - 96.0f;
+				End = FVersePaintPoint(FVector2D(
+					Start.Value.X, FMath::Min(Start.Value.Y, EndY)));
+			}
+			else
+			{
+				const float EndX =
+					Connection.Terminal == EVerseVisualConnectionTerminal::RenderScopeRightBoundary
+						&& RenderScopeRight.IsSet()
+						? RenderScopeRight.GetValue()
+						: Start.Value.X + 96.0f;
+				End = FVersePaintPoint(FVector2D(
+					FMath::Max(Start.Value.X, EndX), Start.Value.Y));
+			}
 		}
 		const TSharedPtr<SVerseGraphMotionWidget> SourceMotion =
 			SourceBinding->MotionOwner.Pin();
@@ -460,7 +478,8 @@ int32 SVerseGraphRenderScope::OnPaint(
 			OutDrawElements,
 			ConnectionLayer,
 			ArrangedEndpoints,
-			AllottedGeometry.GetRenderBoundingRect().Right - 2.0f);
+			AllottedGeometry.GetRenderBoundingRect().Right - 2.0f,
+			AllottedGeometry.GetRenderBoundingRect().Top + 2.0f);
 	}
 	const int32 ContentLayer = SCompoundWidget::OnPaint(
 		Args,

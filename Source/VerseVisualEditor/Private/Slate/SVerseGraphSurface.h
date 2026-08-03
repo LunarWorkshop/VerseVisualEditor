@@ -20,6 +20,12 @@ enum class EVerseGraphConnectionAxis : uint8
 	Vertical,
 };
 
+enum class EVerseGraphTerminalEdge : uint8
+{
+	Right,
+	Top,
+};
+
 /** Applies a prototype presentation to an otherwise presentation-neutral wire. */
 EVerseGraphConnectionAxis GetVersePresentedConnectionAxis(
 	EVerseVisualConnectionAxis ModelAxis,
@@ -37,6 +43,7 @@ struct FVerseGraphConnection
 	int32 ExtraBlankLineMarkers = 0;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
 	EVerseVisualConnectionTerminal Terminal = EVerseVisualConnectionTerminal::Socket;
+	EVerseGraphTerminalEdge TerminalEdge = EVerseGraphTerminalEdge::Right;
 };
 
 struct FVerseGraphEndpointBinding

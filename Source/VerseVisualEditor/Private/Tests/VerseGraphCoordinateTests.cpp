@@ -643,6 +643,29 @@ bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Multiple operands fan around the consuming root"),
 		RootPosition.Y > 0.0f);
 
+	const TSharedRef<SVerseExpressionLayoutPanel> HorizontalExpression =
+		SNew(SVerseExpressionLayoutPanel)
+		.HorizontalGap(72.0f)
+		.VerticalGap(18.0f)
+		.Presentation(EVerseFunctionGraphPresentation::HorizontalExecution)
+		.KeepOperandsBelowExecutionLane(true);
+	const TSharedRef<SVerseTile> HorizontalRoot = MakeTile(90.0f, 50.0f);
+	const TSharedRef<SVerseTile> HorizontalFirstOperand = MakeTile(120.0f, 80.0f);
+	const TSharedRef<SVerseTile> HorizontalSecondOperand = MakeTile(70.0f, 120.0f);
+	HorizontalExpression->SetRoot(HorizontalRoot);
+	HorizontalExpression->AddOperand(
+		HorizontalFirstOperand, HorizontalFirstOperand,
+		[]() { return FVector2D::ZeroVector; }, 0);
+	HorizontalExpression->AddOperand(
+		HorizontalSecondOperand, HorizontalSecondOperand,
+		[]() { return FVector2D::ZeroVector; }, 1);
+	HorizontalExpression->SlatePrepass();
+	TestEqual(TEXT("Horizontal statement root remains on the execution lane"),
+		HorizontalExpression->GetRootPosition().Y, 0.0);
+	TestTrue(TEXT("Horizontal operands begin below the execution lane"),
+		HorizontalExpression->GetOperandPosition(0).Y >= 44.0f
+			&& HorizontalExpression->GetOperandPosition(1).Y >= 44.0f);
+
 	const TSharedRef<SVerseStatementLayoutPanel> Statements =
 		SNew(SVerseStatementLayoutPanel)
 		.Presentation(EVerseFunctionGraphPresentation::VerticalExecution)
@@ -663,6 +686,26 @@ bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
 		SecondPosition.X + 80.0f + 24.0f);
 	TestTrue(TEXT("A statement reserves its entire subtree before the next one"),
 		SecondPosition.Y >= FirstPosition.Y + FirstBounds->GetDesiredSize().Y + 12.0f);
+
+	const TSharedRef<SVerseStatementLayoutPanel> HorizontalStatements =
+		SNew(SVerseStatementLayoutPanel)
+		.Presentation(EVerseFunctionGraphPresentation::HorizontalExecution)
+		.StatementGap(72.0f);
+	HorizontalStatements->AddStatement(
+		FirstBounds, Root, []() { return FVector2D(0.0f, 80.0f); });
+	HorizontalStatements->AddStatement(
+		SecondBounds, SecondOperand, []() { return FVector2D(0.0f, 12.0f); });
+	HorizontalStatements->SlatePrepass();
+	const FVector2D FirstHorizontalPosition =
+		HorizontalStatements->GetStatementPosition(0);
+	const FVector2D SecondHorizontalPosition =
+		HorizontalStatements->GetStatementPosition(1);
+	TestEqual(TEXT("Horizontal execution spines align"),
+		FirstHorizontalPosition.Y + 80.0f + 16.0f,
+		SecondHorizontalPosition.Y + 12.0f + 16.0f);
+	TestTrue(TEXT("Horizontal statements reserve complete subtree width"),
+		SecondHorizontalPosition.X
+			>= FirstHorizontalPosition.X + FirstBounds->GetDesiredSize().X + 72.0f);
 	return true;
 }
 

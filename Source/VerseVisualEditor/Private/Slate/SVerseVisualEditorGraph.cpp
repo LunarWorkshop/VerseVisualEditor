@@ -320,6 +320,19 @@ namespace
 				Model.Axis,
 				Model.Source.Socket.Role,
 				Presentation);
+			if (Model.Terminal != EVerseVisualConnectionTerminal::Socket
+				&& Presentation == EVerseFunctionGraphPresentation::HorizontalExecution)
+			{
+				Connection.Axis = EVerseGraphConnectionAxis::Vertical;
+				Connection.TerminalEdge = EVerseGraphTerminalEdge::Top;
+			}
+			else if (Presentation == EVerseFunctionGraphPresentation::HorizontalExecution
+				&& TargetWidget != nullptr
+				&& (*SourceWidget)->GetTile().bImplicitReturnValue
+				&& (*TargetWidget)->GetTile().Kind == EVerseVisualTileKind::FunctionReturn)
+			{
+				Connection.Axis = EVerseGraphConnectionAxis::Vertical;
+			}
 			Connection.Color = Color;
 			Connection.Thickness =
 				Model.Source.Socket.Role == EVerseVisualSocketRole::Execution
@@ -641,6 +654,58 @@ namespace
 			const float ExecutionSpineOffset = PredicateColumnWidth + OperandWireSpace;
 			const float BranchLeftPadding =
 				ExecutionSpineOffset + RootTile->GetDesiredSize().X + 24.0f;
+			if (Presentation == EVerseFunctionGraphPresentation::HorizontalExecution)
+			{
+				// Horizontal execution owns the top lane. The condition and both
+				// branch subgraphs live below that lane, with True stacked above False.
+				constexpr float ConditionTopPadding = 44.0f;
+				constexpr float BranchTopPadding = 34.0f;
+				constexpr float BranchHorizontalGap = 40.0f;
+				constexpr float BranchVerticalGap = 28.0f;
+				return FinishRow({
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						SNew(SBox)
+						.MinDesiredWidth(OperandColumnWidth)
+						.Padding(FMargin(0.0f, ConditionTopPadding, 0.0f, 0.0f))
+						.HAlign(HAlign_Right)
+						[
+							PredicatePresentation
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(OperandWireSpace)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					[
+						RootTile
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[
+						SNew(SBox).WidthOverride(BranchHorizontalGap)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+					.Padding(FMargin(0.0f, BranchTopPadding, 0.0f, 0.0f))
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							TrueBranch
+						]
+						+ SVerticalBox::Slot().AutoHeight()
+						.Padding(FMargin(0.0f, BranchVerticalGap, 0.0f, 0.0f))
+						[
+							FalseBranch
+						]
+					],
+					RootTile,
+					[ExecutionSpineOffset]()
+					{
+						return FVector2D(ExecutionSpineOffset, 0.0f);
+					}});
+			}
 			return FinishRow({
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
@@ -871,7 +936,11 @@ namespace
 		TSharedRef<SVerseExpressionLayoutPanel> ExpressionLayout =
 			SNew(SVerseExpressionLayoutPanel)
 			.HorizontalGap(OperandWireSpace)
-			.VerticalGap(18.0f);
+			.VerticalGap(18.0f)
+			.Presentation(Presentation)
+			.KeepOperandsBelowExecutionLane(
+				Tile.bStatementLevel
+				&& Presentation == EVerseFunctionGraphPresentation::HorizontalExecution);
 		ExpressionLayout->SetRoot(RootTile);
 		for (int32 Index = 0; Index < Tile.Children.Num(); ++Index)
 		{
@@ -1130,29 +1199,64 @@ void SVerseVisualEditor::RefreshActiveDocument(
 				ReturnRoot->SetMotionTarget(ReturnMotion);
 				GraphRow.RootTile->SlatePrepass();
 				ReturnRoot->SlatePrepass();
-				const float ReturnTopPadding =
-					GraphRow.RootTile->GetValueSocketCenterY(0, true)
-					- ReturnRoot->GetValueSocketCenterY(0, false);
-				const TSharedRef<SWidget> PairWidget =
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
-					[
-						GraphRow.Widget
-					]
-					+ SHorizontalBox::Slot().AutoWidth()
-					[
-						SNew(SBox).WidthOverride(96.0f)
-					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
-					[
-						SNew(SBox)
-						.Padding(FMargin(0.0f, ReturnTopPadding, 0.0f, 0.0f))
+				TSharedRef<SWidget> PairWidget = SNullWidget::NullWidget;
+				TFunction<FVector2D()> PairRootPosition = GraphRow.RootPosition;
+				if (FunctionGraphPresentation
+					== EVerseFunctionGraphPresentation::HorizontalExecution)
+				{
+					const FVector2D SourceRootPosition = GraphRow.GetRootPosition();
+					const float ReturnLeftPadding = FMath::Max(
+						0.0f,
+						SourceRootPosition.X
+						+ (GraphRow.RootTile->GetDesiredSize().X
+							- ReturnRoot->GetDesiredSize().X) * 0.5f);
+					const float ReturnRowHeight = ReturnRoot->GetDesiredSize().Y + 42.0f;
+					PairWidget =
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)
 						[
-							ReturnMotion
+							SNew(SBox)
+							.Padding(FMargin(ReturnLeftPadding, 0.0f, 0.0f, 42.0f))
+							[
+								ReturnMotion
+							]
 						]
-					];
+						+ SVerticalBox::Slot().AutoHeight()
+						[
+							GraphRow.Widget
+						];
+					PairRootPosition = [GraphRow, ReturnRowHeight]()
+					{
+						return GraphRow.GetRootPosition()
+							+ FVector2D(0.0f, ReturnRowHeight);
+					};
+				}
+				else
+				{
+					const float ReturnTopPadding =
+						GraphRow.RootTile->GetValueSocketCenterY(0, true)
+						- ReturnRoot->GetValueSocketCenterY(0, false);
+					PairWidget =
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+						[
+							GraphRow.Widget
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							SNew(SBox).WidthOverride(96.0f)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+						[
+							SNew(SBox)
+							.Padding(FMargin(0.0f, ReturnTopPadding, 0.0f, 0.0f))
+							[
+								ReturnMotion
+							]
+						];
+				}
 				AddRootPresentation(
-					{PairWidget, GraphRow.RootTile, GraphRow.RootPosition},
+					{PairWidget, GraphRow.RootTile, MoveTemp(PairRootPosition)},
 					LeadingStatementSpace);
 				++Index;
 				continue;

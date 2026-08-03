@@ -15,6 +15,9 @@ public:
 	SLATE_BEGIN_ARGS(SVerseExpressionLayoutPanel) {}
 		SLATE_ARGUMENT(float, HorizontalGap)
 		SLATE_ARGUMENT(float, VerticalGap)
+		SLATE_ARGUMENT(EVerseFunctionGraphPresentation, Presentation)
+		/** Keep a statement's complete input tree below its horizontal execution lane. */
+		SLATE_ARGUMENT(bool, KeepOperandsBelowExecutionLane)
 	SLATE_END_ARGS()
 
 	SVerseExpressionLayoutPanel();
@@ -28,6 +31,7 @@ public:
 		int32 InputSocketIndex);
 
 	FVector2D GetRootPosition() const;
+	FVector2D GetOperandPosition(int32 OperandIndex) const;
 
 	virtual void OnArrangeChildren(
 		const FGeometry& AllottedGeometry,
@@ -62,6 +66,9 @@ private:
 	TSharedPtr<SVerseTile> Root;
 	float HorizontalGap = 72.0f;
 	float VerticalGap = 18.0f;
+	EVerseFunctionGraphPresentation Presentation =
+		EVerseFunctionGraphPresentation::VerticalExecution;
+	bool bKeepOperandsBelowExecutionLane = false;
 };
 
 /**
