@@ -118,6 +118,44 @@ namespace
 		return nullptr;
 	}
 
+	FString RebaseMultilineSource(
+		FString Source,
+		FStringView LineEnding,
+		FStringView StatementIndent)
+	{
+		Source.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+		Source.ReplaceInline(TEXT("\r"), TEXT("\n"));
+		Source.ReplaceInline(
+			TEXT("\n"), *(FString(LineEnding) + FString(StatementIndent)));
+		return Source;
+	}
+
+	bool BuildDestinationExpressionSource(
+		const FVerseExpressionAction& Action,
+		FStringView BoundExpressionSource,
+		const FVerseFormattingStyleProfile& Style,
+		FString& OutSource,
+		FText& OutError)
+	{
+		if (Action.StructuralKind != EVerseStructuralExpressionKind::If)
+		{
+			return BuildVerseExpressionActionSource(
+				Action, BoundExpressionSource, OutSource, OutError);
+		}
+		if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+		{
+			OutSource = Style.bSpaceInsideParentheses
+				? TEXT("if ( true? ) { }") : TEXT("if (true?) {}");
+		}
+		else
+		{
+			OutSource = TEXT("if (true?):")
+				+ FVerseSyntaxEmitter::LineEnding(Style)
+				+ Style.IndentationUnit + TEXT("false");
+		}
+		return true;
+	}
+
 	const FVerseVisualTile* FindIfWithElse(
 		TConstArrayView<FVerseVisualTile> Tiles,
 		int32 OpeningByte)
@@ -370,16 +408,16 @@ bool FVerseClauseEditing::InsertExpression(
 		OutError = LOCTEXT("InvalidClauseInsertion", "The insertion point is no longer valid.");
 		return false;
 	}
-	FString ExpressionSource;
-	if (!BuildVerseExpressionActionSource(Action, BoundExpressionSource, ExpressionSource, OutError))
-	{
-		return false;
-	}
-
 	const FUtf8StringView Source(*Session.GetCurrentUtf8(), Session.GetCurrentUtf8().Len());
 	const FVerseFormattingStyleProfile Style = FVerseFormattingStyleResolver::Resolve(
 		*Session.GetParseSnapshot().GetDocument(), Session.GetParseSnapshot(), Clause);
 	const FString LineEnding = FVerseSyntaxEmitter::LineEnding(Style);
+	FString ExpressionSource;
+	if (!BuildDestinationExpressionSource(
+		Action, BoundExpressionSource, Style, ExpressionSource, OutError))
+	{
+		return false;
+	}
 	const EVerseSeparatorToken SeparatorToken = Clause.bRequiresFailablePlaceholder
 		? Style.FailureSeparatorToken : Style.StatementSeparatorToken;
 	const EVerseSeparatorLayout SeparatorLayout = Clause.bRequiresFailablePlaceholder
@@ -387,6 +425,7 @@ bool FVerseClauseEditing::InsertExpression(
 	int32 InsertionByte = Clause.EmptyBodyInsertionAnchor.IsSet()
 		? Clause.EmptyBodyInsertionAnchor.BeginByte
 		: Clause.InteriorRange.BeginByte;
+	FVerseByteRange EditedRange(InsertionByte, 0);
 	FString Replacement;
 	int32 ExpressionOffsetCharacters = 0;
 	if (!Clause.Items.IsEmpty())
@@ -394,33 +433,41 @@ bool FVerseClauseEditing::InsertExpression(
 		if (InsertIndex < Clause.Items.Num())
 		{
 			InsertionByte = Clause.Items[InsertIndex].Expression.Range.BeginByte;
+			EditedRange = FVerseByteRange(InsertionByte, 0);
+			const FString StatementIndent = IndentationAt(Source, InsertionByte);
+			ExpressionSource = RebaseMultilineSource(
+				MoveTemp(ExpressionSource), LineEnding, StatementIndent);
 			if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
 				|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 			{
-				Replacement = ExpressionSource + LineEnding + IndentationAt(Source, InsertionByte);
+				Replacement = ExpressionSource + LineEnding + StatementIndent;
 			}
 			else
 			{
 				Replacement = ExpressionSource + FVerseSyntaxEmitter::Separator(
 					SeparatorToken, SeparatorLayout, 0, Style,
-					IndentationAt(Source, InsertionByte));
+					StatementIndent);
 			}
 		}
 		else
 		{
 			InsertionByte = Clause.Items.Last().Expression.Range.EndByte();
+			EditedRange = FVerseByteRange(InsertionByte, 0);
+			const FString StatementIndent = IndentationAt(
+				Source, Clause.Items.Last().Expression.Range.BeginByte);
+			ExpressionSource = RebaseMultilineSource(
+				MoveTemp(ExpressionSource), LineEnding, StatementIndent);
 			if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
 				|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 			{
-				Replacement = LineEnding + IndentationAt(
-					Source, Clause.Items.Last().Expression.Range.BeginByte) + ExpressionSource;
+				Replacement = LineEnding + StatementIndent + ExpressionSource;
 				ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 			}
 			else
 			{
 				Replacement = FVerseSyntaxEmitter::Separator(
 					SeparatorToken, SeparatorLayout, 0, Style,
-					IndentationAt(Source, Clause.Items.Last().Expression.Range.BeginByte))
+					StatementIndent)
 					+ ExpressionSource;
 				ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 			}
@@ -429,20 +476,49 @@ bool FVerseClauseEditing::InsertExpression(
 	else if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
 		|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 	{
-		const int32 HeaderByte = Clause.OpeningPunctuationRange.IsSet()
-			? Clause.OpeningPunctuationRange.BeginByte
-			: Clause.InteriorRange.BeginByte;
-		Replacement = LineEnding + IndentationAt(Source, HeaderByte)
-			+ Style.IndentationUnit + ExpressionSource;
+		const FString StatementIndent = Clause.Syntax.IndentationPrefix
+			+ (Clause.Syntax.IndentationUnit.IsEmpty()
+				? Style.IndentationUnit : Clause.Syntax.IndentationUnit);
+		ExpressionSource = RebaseMultilineSource(
+			MoveTemp(ExpressionSource), LineEnding, StatementIndent);
+		EditedRange = Clause.Syntax.LeadingWhitespaceRange.IsSet()
+			? FVerseByteRange(
+				Clause.Syntax.LeadingWhitespaceRange.BeginByte,
+				Clause.Syntax.LeadingWhitespaceRange.NumBytes)
+			: FVerseByteRange(InsertionByte, 0);
+		InsertionByte = EditedRange.BeginByte;
+		Replacement = LineEnding + StatementIndent + ExpressionSource;
 		ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 	}
 	else
 	{
-		Replacement = ExpressionSource;
+		const bool bMultiline = Clause.Syntax.Layout == EVerseSyntaxLayout::Multiline;
+		const FString StatementIndent = Clause.Syntax.IndentationPrefix
+			+ (Clause.Syntax.IndentationUnit.IsEmpty()
+				? Style.IndentationUnit : Clause.Syntax.IndentationUnit);
+		ExpressionSource = RebaseMultilineSource(
+			MoveTemp(ExpressionSource), LineEnding, StatementIndent);
+		EditedRange = Clause.Syntax.LeadingWhitespaceRange.IsSet()
+			? FVerseByteRange(
+				Clause.Syntax.LeadingWhitespaceRange.BeginByte,
+				Clause.Syntax.LeadingWhitespaceRange.NumBytes)
+			: FVerseByteRange(InsertionByte, 0);
+		InsertionByte = EditedRange.BeginByte;
+		if (bMultiline)
+		{
+			Replacement = LineEnding + StatementIndent + ExpressionSource
+				+ LineEnding + Clause.Syntax.IndentationPrefix;
+			ExpressionOffsetCharacters = LineEnding.Len() + StatementIndent.Len();
+		}
+		else
+		{
+			Replacement = TEXT(" ") + ExpressionSource + TEXT(" ");
+			ExpressionOffsetCharacters = 1;
+		}
 	}
 
 	const FVerseDocumentEdit Edit = MakeEdit(
-		Session.GetRevision(), FVerseByteRange(InsertionByte, 0), Replacement);
+		Session.GetRevision(), EditedRange, Replacement);
 	if (!ValidateCandidate(Session, Clause, MakeArrayView(&Edit, 1), Clause.Items.Num() + 1, OutError))
 	{
 		return false;

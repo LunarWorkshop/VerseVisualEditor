@@ -33,6 +33,13 @@ enum class EVerseProvisionalContentTarget : uint8
 	FirstConditionExpression,
 };
 
+/** Editor-owned structural recipe materialized against its destination clause. */
+enum class EVerseStructuralExpressionKind : uint8
+{
+	None,
+	If,
+};
+
 /** One expression creation choice which is valid at a particular typed socket. */
 struct FVerseExpressionAction
 {
@@ -46,6 +53,7 @@ struct FVerseExpressionAction
 	FVerseTextRange IdentifierNameRange;
 	/** Direct source spelling for compiler-discovered identifiers and callables. */
 	FString SourceSpelling;
+	EVerseStructuralExpressionKind StructuralKind = EVerseStructuralExpressionKind::None;
 	EVerseProvisionalContentTarget ProvisionalContentTarget =
 		EVerseProvisionalContentTarget::None;
 	bool bUsesFailureCallSyntax = false;

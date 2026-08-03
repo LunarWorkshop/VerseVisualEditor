@@ -595,6 +595,7 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 		FVerseFormattingStyleResolver::ResolveDefaults();
 	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
 	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	IfAction->StructuralKind = EVerseStructuralExpressionKind::If;
 	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
 	{
 		IfAction->SourceSpelling = Style.bSpaceInsideParentheses

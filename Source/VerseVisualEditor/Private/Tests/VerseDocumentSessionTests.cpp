@@ -467,7 +467,7 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FVerseDocument> EmptyDocument = MakeDocument(
 		*this,
-		UTF8TEXTVIEW("EmptyFunction()<computes> : void = {}\n"));
+		UTF8TEXTVIEW("EmptyFunction()<computes> : void = {\n}\n"));
 	if (TestTrue(TEXT("Empty function fixture parses"), EmptyDocument.IsValid()))
 	{
 		FVerseDocumentSession EmptySession(EmptyDocument.ToSharedRef());
@@ -478,23 +478,33 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 			});
 		if (TestNotNull(TEXT("Empty function exposes its editable clause"), EmptyFunction))
 		{
-			FVerseExpressionAction IfAction;
-			IfAction.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
-			IfAction.SourceSpelling = TEXT("if (true?) {}");
+			const TArray<TSharedPtr<FVerseExpressionAction>> Actions =
+				FVerseExpressionActionQuery::BuildAll(
+					{}, *EmptyDocument, EmptyFunction->Range, FString(), {});
+			const TSharedPtr<FVerseExpressionAction>* IfAction = Actions.FindByPredicate(
+				[](const TSharedPtr<FVerseExpressionAction>& Action)
+				{
+					return Action.IsValid()
+						&& Action->StructuralKind == EVerseStructuralExpressionKind::If;
+				});
 			FVerseTextRange InsertedIfRange;
 			TestTrue(
 				TEXT("An empty if with a valid default condition inserts into an empty function"),
-				FVerseClauseEditing::InsertExpression(
+				IfAction != nullptr && FVerseClauseEditing::InsertExpression(
 					EmptySession,
 					EmptyFunction->BodyClause,
 					0,
-					IfAction,
+					**IfAction,
 					Error,
 					&InsertedIfRange));
 			TestEqual(
 				TEXT("Clause insertion reports the exact generated expression range"),
 				EmptySession.GetParseSnapshot().GetDocument()->DecodeOriginalRange(InsertedIfRange),
 				FString(TEXT("if (true?) {}")));
+			TestEqual(
+				TEXT("Empty multiline clause insertion is rebased between its braces"),
+				FString(UTF8_TO_TCHAR(*EmptySession.GetCurrentUtf8())),
+				FString(TEXT("EmptyFunction()<computes> : void = {\n    if (true?) {}\n}\n")));
 			const FVerseVisualTile* RebuiltEmptyFunction =
 				EmptySession.GetTiles().FindByPredicate(
 					[](const FVerseVisualTile& Tile)
