@@ -49,6 +49,13 @@ FString BuildVerseGraphMotionKeyBase(
 		*Identity);
 }
 
+FVector2D ComputeVerseAnchorRelativeGraphPosition(
+	FVector2D SurfaceLocalPosition,
+	FVector2D AnchorSurfaceLocalPosition)
+{
+	return SurfaceLocalPosition - AnchorSurfaceLocalPosition;
+}
+
 void FVerseGraphMotionController::BeginBuild(bool bAnimateChanges)
 {
 	PreviousPoses = Poses;
@@ -65,11 +72,35 @@ FString FVerseGraphMotionController::AllocateKey(const FString& BaseKey)
 
 void FVerseGraphMotionController::SetSurfaceGeometry(
 	const FGeometry& InGeometry,
-	float InZoom)
+	float InZoom,
+	bool bInRequiresCurrentAnchor)
 {
 	SurfaceGeometry = InGeometry;
 	Zoom = FMath::Max(InZoom, UE_SMALL_NUMBER);
 	bHasSurfaceGeometry = true;
+	bRequiresCurrentAnchor = bInRequiresCurrentAnchor;
+	bHasCurrentGraphOrigin = !bRequiresCurrentAnchor;
+	if (!bRequiresCurrentAnchor)
+	{
+		GraphOrigin = FVector2D::ZeroVector;
+	}
+}
+
+void FVerseGraphMotionController::EstablishCurrentAnchor(
+	FVector2D AnchorDesktopPosition)
+{
+	if (!bHasSurfaceGeometry || !bRequiresCurrentAnchor)
+	{
+		return;
+	}
+	GraphOrigin = SurfaceGeometry.AbsoluteToLocal(AnchorDesktopPosition);
+	bHasCurrentGraphOrigin = true;
+}
+
+void FVerseGraphMotionController::InvalidateSurfaceGeometry()
+{
+	bHasSurfaceGeometry = false;
+	bHasCurrentGraphOrigin = false;
 }
 
 TOptional<FVerseGraphMotionPose> FVerseGraphMotionController::FindPreviousPose(
@@ -102,7 +133,8 @@ void FVerseGraphMotionController::PublishPose(
 FVector2D FVerseGraphMotionController::DesktopToGraph(FVector2D DesktopPosition) const
 {
 	return bHasSurfaceGeometry
-		? SurfaceGeometry.AbsoluteToLocal(DesktopPosition)
+		? ComputeVerseAnchorRelativeGraphPosition(
+			SurfaceGeometry.AbsoluteToLocal(DesktopPosition), GraphOrigin)
 		: FVector2D::ZeroVector;
 }
 
@@ -112,6 +144,7 @@ void SVerseGraphMotionWidget::Construct(const FArguments& InArgs)
 	MotionKey = InArgs._MotionKey;
 	ParentMotionKey = InArgs._ParentMotionKey;
 	Entrance = InArgs._Entrance;
+	bIsGraphAnchor = InArgs._IsGraphAnchor;
 	SetCanTick(true);
 	ChildSlot[InArgs._Content.Widget];
 }
@@ -177,6 +210,16 @@ void SVerseGraphMotionWidget::Tick(
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 	if (!Controller.IsValid())
+	{
+		return;
+	}
+	if (bIsGraphAnchor)
+	{
+		// The surface ticks before its descendants, so cached anchor geometry belongs
+		// to the preceding layout epoch. The anchor's allotted geometry is current.
+		Controller->EstablishCurrentAnchor(AllottedGeometry.GetAbsolutePosition());
+	}
+	if (!Controller->CanResolveGraphPositions())
 	{
 		return;
 	}

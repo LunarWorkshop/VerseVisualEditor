@@ -33,8 +33,7 @@ void SVerseFunctionCanvas::RefreshContent(
 {
 	if (Surface.IsValid())
 	{
-		Surface->SetContent(InContent);
-		Surface->SetInitialAnchor(MoveTemp(InInitialAnchor));
+		Surface->SetContentAndAnchor(InContent, MoveTemp(InInitialAnchor));
 		Surface->SetConnections(MoveTemp(InConnections));
 	}
 }

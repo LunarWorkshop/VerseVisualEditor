@@ -930,6 +930,7 @@ namespace
 		TSharedRef<SWidget> Widget;
 		TSharedRef<SVerseTile> RootTile;
 		TFunction<FVector2D()> RootPosition;
+		TSharedPtr<SVerseGraphMotionWidget> MotionWidget;
 
 		FVector2D GetRootPosition() const
 		{
@@ -965,7 +966,10 @@ namespace
 			? MotionController->AllocateKey(
 				BuildVerseGraphMotionKeyBase(Tile, *Document))
 			: FString();
-		auto FinishRow = [MotionController, MotionKey, ParentMotionKey, Presentation](
+		const bool bIsGraphAnchor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
+			&& ParentMotionKey.IsEmpty();
+		auto FinishRow = [MotionController, MotionKey, ParentMotionKey, Presentation,
+			bIsGraphAnchor](
 			FBuiltFunctionGraphRow Row)
 		{
 			if (!MotionController.IsValid())
@@ -980,10 +984,12 @@ namespace
 				.Entrance(Presentation == EVerseFunctionGraphPresentation::VerticalExecution
 					? EVerseGraphMotionEntrance::FromRight
 					: EVerseGraphMotionEntrance::FromTop)
+				.IsGraphAnchor(bIsGraphAnchor)
 				[
 					Row.Widget
 				];
 			Row.RootTile->SetMotionTarget(MotionWidget);
+			Row.MotionWidget = MotionWidget;
 			Row.Widget = MotionWidget;
 			return Row;
 		};
@@ -4450,7 +4456,12 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			AddRootPresentation(GraphRow, LeadingStatementSpace);
 			if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
 			{
-				FunctionEntryAnchor = GraphRow.RootTile;
+				// Motion positions are measured from the outer motion wrapper, so the
+				// wrapper itself must define graph-space zero. Anchoring to the inner
+				// tile introduces its padding as a false function-entry displacement.
+				FunctionEntryAnchor = GraphRow.MotionWidget.IsValid()
+					? StaticCastSharedPtr<SWidget>(GraphRow.MotionWidget)
+					: StaticCastSharedRef<SWidget>(GraphRow.RootTile).ToSharedPtr();
 			}
 		}
 

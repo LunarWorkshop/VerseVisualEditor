@@ -24,6 +24,11 @@ FString BuildVerseGraphMotionKeyBase(
 	const FVerseVisualTile& Tile,
 	const FVerseDocument& Document);
 
+/** Converts surface-local positions into the graph space anchored at the function entry. */
+FVector2D ComputeVerseAnchorRelativeGraphPosition(
+	FVector2D SurfaceLocalPosition,
+	FVector2D AnchorSurfaceLocalPosition);
+
 struct FVerseGraphMotionPose
 {
 	FVector2D TargetGraphPosition = FVector2D::ZeroVector;
@@ -40,7 +45,17 @@ class FVerseGraphMotionController final
 public:
 	void BeginBuild(bool bAnimateChanges);
 	FString AllocateKey(const FString& BaseKey);
-	void SetSurfaceGeometry(const FGeometry& InGeometry, float InZoom);
+	void SetSurfaceGeometry(
+		const FGeometry& InGeometry,
+		float InZoom,
+		bool bInRequiresCurrentAnchor = false);
+	/** Establishes graph-space zero from the anchor's current-frame allotted geometry. */
+	void EstablishCurrentAnchor(FVector2D AnchorDesktopPosition);
+	void InvalidateSurfaceGeometry();
+	bool CanResolveGraphPositions() const
+	{
+		return bHasSurfaceGeometry && bHasCurrentGraphOrigin;
+	}
 	TOptional<FVerseGraphMotionPose> FindPreviousPose(const FString& Key) const;
 	TOptional<FVerseGraphMotionPose> FindCurrentPose(const FString& Key) const;
 	void PublishPose(const FString& Key, const FVerseGraphMotionPose& Pose);
@@ -53,8 +68,11 @@ private:
 	TMap<FString, FVerseGraphMotionPose> Poses;
 	TMap<FString, FVerseGraphMotionPose> PreviousPoses;
 	FGeometry SurfaceGeometry;
+	FVector2D GraphOrigin = FVector2D::ZeroVector;
 	float Zoom = 1.0f;
 	bool bHasSurfaceGeometry = false;
+	bool bRequiresCurrentAnchor = false;
+	bool bHasCurrentGraphOrigin = false;
 	bool bAnimateCurrentBuild = false;
 };
 
@@ -67,6 +85,7 @@ public:
 		SLATE_ARGUMENT(FString, MotionKey)
 		SLATE_ARGUMENT(FString, ParentMotionKey)
 		SLATE_ARGUMENT(EVerseGraphMotionEntrance, Entrance)
+		SLATE_ARGUMENT(bool, IsGraphAnchor)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
 
@@ -90,6 +109,7 @@ private:
 	FString MotionKey;
 	FString ParentMotionKey;
 	EVerseGraphMotionEntrance Entrance = EVerseGraphMotionEntrance::FromRight;
+	bool bIsGraphAnchor = false;
 	FVector2D ReflowStartOffset = FVector2D::ZeroVector;
 	FVector2D ReflowOffset = FVector2D::ZeroVector;
 	FVector2D DragStartDesktop = FVector2D::ZeroVector;

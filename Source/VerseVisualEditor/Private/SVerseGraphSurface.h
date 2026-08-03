@@ -109,6 +109,12 @@ TArray<FVector2D> BuildVerseSplineMarkerCenters(
 	FVector2D EndTangent,
 	float Spacing = 72.0f);
 
+/** Adjusts scrolling so a rebuilt graph anchor remains in the same viewport position. */
+FVector2D ComputeVerseAnchorLockedScrollOffset(
+	FVector2D CurrentScrollOffset,
+	FVector2D PreviousAnchorDesktopPosition,
+	FVector2D CurrentAnchorDesktopPosition);
+
 DECLARE_DELEGATE_TwoParams(
 	FOnVerseGraphConnectionDropped,
 	const FVerseSocketDragStart&,
@@ -141,6 +147,9 @@ public:
 	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
 	void EndConnectionPreview();
 	void SetContent(TSharedRef<SWidget> InContent);
+	void SetContentAndAnchor(
+		TSharedRef<SWidget> InContent,
+		TSharedPtr<SWidget> InAnchor);
 	void SetInitialAnchor(TSharedPtr<SWidget> InAnchor);
 	void SetConnections(TArray<FVerseGraphConnection> InConnections);
 	TSharedRef<FVerseGraphMotionController> GetMotionController() const
@@ -208,6 +217,7 @@ private:
 	TSharedPtr<SScaleBox> ScaleBox;
 	TSharedPtr<SBox> ContentHost;
 	TWeakPtr<SWidget> InitialAnchor;
+	TOptional<FVector2D> PendingAnchorDesktopPosition;
 	TArray<FVerseGraphConnection> Connections;
 	TOptional<FVerseSocketDragStart> ConnectionDrag;
 	TSharedPtr<FVerseGraphMotionController> MotionController;

@@ -59,6 +59,16 @@ TArray<FVector2D> BuildVerseSplineMarkerCenters(
 	return Result;
 }
 
+FVector2D ComputeVerseAnchorLockedScrollOffset(
+	FVector2D CurrentScrollOffset,
+	FVector2D PreviousAnchorDesktopPosition,
+	FVector2D CurrentAnchorDesktopPosition)
+{
+	return CurrentScrollOffset
+		+ CurrentAnchorDesktopPosition
+		- PreviousAnchorDesktopPosition;
+}
+
 namespace
 {
 	constexpr float MinimumZoom = 0.5f;
@@ -544,6 +554,31 @@ void SVerseGraphSurface::SetContent(TSharedRef<SWidget> InContent)
 	}
 }
 
+void SVerseGraphSurface::SetContentAndAnchor(
+	TSharedRef<SWidget> InContent,
+	TSharedPtr<SWidget> InAnchor)
+{
+	const TSharedPtr<SWidget> PreviousAnchor = InitialAnchor.Pin();
+	if (PreviousAnchor.IsValid()
+		&& PreviousAnchor->GetTickSpaceGeometry().GetLocalSize().GetMin() > 0.0f)
+	{
+		PendingAnchorDesktopPosition =
+			PreviousAnchor->GetTickSpaceGeometry().GetAbsolutePosition();
+	}
+	else
+	{
+		PendingAnchorDesktopPosition.Reset();
+	}
+	InitialAnchor = MoveTemp(InAnchor);
+	if (MotionController.IsValid())
+	{
+		// The replacement anchor has not been arranged yet. Do not let new motion
+		// widgets record poses in the old anchor's coordinate space.
+		MotionController->InvalidateSurfaceGeometry();
+	}
+	SetContent(InContent);
+}
+
 void SVerseGraphSurface::SetInitialAnchor(TSharedPtr<SWidget> InAnchor)
 {
 	InitialAnchor = MoveTemp(InAnchor);
@@ -561,10 +596,32 @@ void SVerseGraphSurface::Tick(
 	float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	const TSharedPtr<SWidget> Anchor = InitialAnchor.Pin();
+	if (PendingAnchorDesktopPosition.IsSet()
+		&& Anchor.IsValid()
+		&& Anchor->GetTickSpaceGeometry().GetLocalSize().GetMin() > 0.0f
+		&& HorizontalScrollBox.IsValid()
+		&& VerticalScrollBox.IsValid())
+	{
+		const FVector2D LockedScrollOffset = ComputeVerseAnchorLockedScrollOffset(
+			FVector2D(
+				HorizontalScrollBox->GetScrollOffset(),
+				VerticalScrollBox->GetScrollOffset()),
+			PendingAnchorDesktopPosition.GetValue(),
+			Anchor->GetTickSpaceGeometry().GetAbsolutePosition());
+		HorizontalScrollBox->SetScrollOffset(FMath::Clamp(
+			LockedScrollOffset.X, 0.0f, HorizontalScrollBox->GetScrollOffsetOfEnd()));
+		VerticalScrollBox->SetScrollOffset(FMath::Clamp(
+			LockedScrollOffset.Y, 0.0f, VerticalScrollBox->GetScrollOffsetOfEnd()));
+		PendingAnchorDesktopPosition.Reset();
+	}
 	if (MotionController.IsValid() && ContentHost.IsValid())
 	{
+		// Descendant cached geometry is from the preceding layout epoch here. An
+		// anchored graph becomes resolvable when its anchor ticks with current
+		// AllottedGeometry; unanchored file graphs are immediately resolvable.
 		MotionController->SetSurfaceGeometry(
-			ContentHost->GetTickSpaceGeometry(), Zoom);
+			ContentHost->GetTickSpaceGeometry(), Zoom, InitialAnchor.IsValid());
 	}
 	if (ConnectionDrag.IsSet() && ConnectionDrag->bScopedToNestedRenderScope)
 	{
@@ -580,16 +637,16 @@ void SVerseGraphSurface::Tick(
 	{
 		return;
 	}
-	const TSharedPtr<SWidget> Anchor = InitialAnchor.IsValid() ? InitialAnchor.Pin() : ScaleBox;
-	if (Anchor.IsValid()
-		&& Anchor->GetTickSpaceGeometry().GetLocalSize().GetMin() > 0.0f
+	const TSharedPtr<SWidget> CenterAnchor = InitialAnchor.IsValid() ? InitialAnchor.Pin() : ScaleBox;
+	if (CenterAnchor.IsValid()
+		&& CenterAnchor->GetTickSpaceGeometry().GetLocalSize().GetMin() > 0.0f
 		&& HorizontalScrollBox->GetScrollOffsetOfEnd() > 0.0f
 		&& VerticalScrollBox->GetScrollOffsetOfEnd() > 0.0f)
 	{
 		HorizontalScrollBox->ScrollDescendantIntoView(
-			Anchor, false, EDescendantScrollDestination::Center, 0.0f);
+			CenterAnchor, false, EDescendantScrollDestination::Center, 0.0f);
 		VerticalScrollBox->ScrollDescendantIntoView(
-			Anchor, false, EDescendantScrollDestination::TopOrLeft, 48.0f);
+			CenterAnchor, false, EDescendantScrollDestination::TopOrLeft, 48.0f);
 		bPendingInitialCenter = false;
 	}
 }

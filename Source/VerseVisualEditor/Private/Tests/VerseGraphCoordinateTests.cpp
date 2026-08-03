@@ -32,6 +32,38 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseGraphMotionMathTest::RunTest(const FString& Parameters)
 {
+	TestEqual(TEXT("The motion anchor is graph-space zero"),
+		ComputeVerseAnchorRelativeGraphPosition(
+			FVector2D(410.0f, 275.0f), FVector2D(410.0f, 275.0f)),
+		FVector2D::ZeroVector);
+	TestEqual(TEXT("Anchor-relative positions ignore whole-graph displacement"),
+		ComputeVerseAnchorRelativeGraphPosition(
+			FVector2D(610.0f, 355.0f), FVector2D(410.0f, 275.0f)),
+		ComputeVerseAnchorRelativeGraphPosition(
+			FVector2D(905.0f, 510.0f), FVector2D(705.0f, 430.0f)));
+	const FGeometry SurfaceGeometry = FGeometry::MakeRoot(
+		FVector2D(800.0f, 600.0f),
+		FSlateLayoutTransform(1.0f, FVector2D(100.0f, 250.0f)));
+	FVerseGraphMotionController AnchoredController;
+	AnchoredController.SetSurfaceGeometry(SurfaceGeometry, 1.0f, true);
+	TestFalse(TEXT("An anchored layout waits for current anchor geometry"),
+		AnchoredController.CanResolveGraphPositions());
+	const FVector2D CurrentAnchorDesktop =
+		SurfaceGeometry.LocalToAbsolute(FVector2D(10.0f, 20.0f));
+	AnchoredController.EstablishCurrentAnchor(CurrentAnchorDesktop);
+	TestTrue(TEXT("The current anchor makes graph positions resolvable"),
+		AnchoredController.CanResolveGraphPositions());
+	TestEqual(TEXT("The current anchor is exactly graph-space zero"),
+		AnchoredController.DesktopToGraph(CurrentAnchorDesktop), FVector2D::ZeroVector);
+	AnchoredController.SetSurfaceGeometry(SurfaceGeometry, 1.0f, true);
+	TestFalse(TEXT("A new layout epoch cannot reuse the preceding anchor"),
+		AnchoredController.CanResolveGraphPositions());
+	TestEqual(TEXT("Anchor lock offsets scrolling by the rebuilt anchor displacement"),
+		ComputeVerseAnchorLockedScrollOffset(
+			FVector2D(100.0f, 200.0f),
+			FVector2D(300.0f, 400.0f),
+			FVector2D(450.0f, 375.0f)),
+		FVector2D(250.0f, 175.0f));
 	auto RadiusAfterResistance = [](float Radius, FVector2D Direction)
 	{
 		return ApplyVerseGraphDragResistance(Direction.GetSafeNormal() * Radius).Size();
