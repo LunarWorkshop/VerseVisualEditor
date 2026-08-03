@@ -389,6 +389,17 @@ bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
 			EVerseVisualSocketRole::Value,
 			EVerseFunctionGraphPresentation::Tracks),
 		EVerseGraphConnectionAxis::Horizontal);
+	TestEqual(TEXT("Vertical home-plate previews ease vertically"),
+		GetVerseExecutionPreviewAxis(
+			EVerseFunctionGraphPresentation::VerticalExecution),
+		EVerseVisualConnectionAxis::Vertical);
+	TestEqual(TEXT("Horizontal home-plate previews ease horizontally"),
+		GetVerseExecutionPreviewAxis(
+			EVerseFunctionGraphPresentation::HorizontalExecution),
+		EVerseVisualConnectionAxis::Horizontal);
+	TestEqual(TEXT("Lane home-plate previews ease horizontally"),
+		GetVerseExecutionPreviewAxis(EVerseFunctionGraphPresentation::Tracks),
+		EVerseVisualConnectionAxis::Horizontal);
 	return true;
 }
 

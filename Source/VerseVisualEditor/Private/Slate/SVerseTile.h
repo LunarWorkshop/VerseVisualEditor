@@ -35,6 +35,10 @@ FVector2D GetVerseExecutionPinDesiredSize(
 	EVerseFunctionGraphPresentation Presentation =
 		EVerseFunctionGraphPresentation::VerticalExecution);
 
+/** Spline orientation used while dragging from an execution home plate. */
+EVerseVisualConnectionAxis GetVerseExecutionPreviewAxis(
+	EVerseFunctionGraphPresentation Presentation);
+
 struct FVerseSocketDragStart
 {
 	enum class EPurpose : uint8
@@ -62,6 +66,8 @@ struct FVerseSocketDragStart
 	FVerseDesktopPoint DesktopPosition;
 	FLinearColor WireColor = FLinearColor::White;
 	EVerseExpressionOutcome Outcome = EVerseExpressionOutcome::Unresolved;
+	/** Presentation-resolved spline orientation for the live preview. */
+	EVerseVisualConnectionAxis PreviewAxis = EVerseVisualConnectionAxis::Horizontal;
 	bool bOutput = false;
 	/** Starting this drag adopts the source tile and clears its provisional state. */
 	bool bAdoptsProvisionalTile = false;

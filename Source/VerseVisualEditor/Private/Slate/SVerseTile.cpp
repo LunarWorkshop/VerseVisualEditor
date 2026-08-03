@@ -152,6 +152,14 @@ FVector2D GetVerseExecutionPinDesiredSize(
 		: FVector2D(24.0f, bCompact ? 20.0f : 48.0f);
 }
 
+EVerseVisualConnectionAxis GetVerseExecutionPreviewAxis(
+	EVerseFunctionGraphPresentation Presentation)
+{
+	return Presentation == EVerseFunctionGraphPresentation::VerticalExecution
+		? EVerseVisualConnectionAxis::Vertical
+		: EVerseVisualConnectionAxis::Horizontal;
+}
+
 namespace
 {
 	float GetVerseGraphMajorGridWidth()
@@ -1716,6 +1724,7 @@ FReply SVerseTile::HandleClauseInsertionMouseButtonDown(
 	DragStart.ClauseInsertionIndex = InsertIndex;
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = FLinearColor::White;
+	DragStart.PreviewAxis = GetVerseExecutionPreviewAxis(FunctionGraphPresentation);
 	DragStart.bOutput = true;
 	if (DragStart.bAdoptsProvisionalTile)
 	{

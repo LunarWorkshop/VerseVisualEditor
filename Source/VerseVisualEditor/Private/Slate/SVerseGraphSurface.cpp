@@ -875,11 +875,13 @@ void SVerseGraphSurface::PaintPreviewConnection(
 		ConnectionDrag->AnchorCoordinate);
 	const FVersePaintPoint Start = ConnectionDrag->bOutput ? Fixed : Free;
 	const FVersePaintPoint End = ConnectionDrag->bOutput ? Free : Fixed;
+	const EVerseGraphConnectionAxis PreviewAxis =
+		ConnectionDrag->PreviewAxis == EVerseVisualConnectionAxis::Vertical
+			? EVerseGraphConnectionAxis::Vertical
+			: EVerseGraphConnectionAxis::Horizontal;
 	DrawSpline(
 		OutDrawElements, LayerId, Start, End,
-		ConnectionDrag->Purpose == FVerseSocketDragStart::EPurpose::ClauseInsertion
-			? EVerseGraphConnectionAxis::Vertical
-			: EVerseGraphConnectionAxis::Horizontal,
+		PreviewAxis,
 		2.0f,
 		ConnectionDrag->WireColor);
 	if (ConnectionDrag->Outcome == EVerseExpressionOutcome::FailableValue
@@ -890,7 +892,7 @@ void SVerseGraphSurface::PaintPreviewConnection(
 			LayerId,
 			Start,
 			End,
-			EVerseGraphConnectionAxis::Horizontal);
+			PreviewAxis);
 	}
 }
 
