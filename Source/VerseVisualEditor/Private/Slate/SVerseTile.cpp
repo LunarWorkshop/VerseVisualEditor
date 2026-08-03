@@ -1871,7 +1871,7 @@ FSlateColor SVerseTile::GetOutlineColor() const
 {
 	if (IsSelected.Get(false))
 	{
-		return FLinearColor(1.0f, 0.82f, 0.05f, 1.0f);
+		return VerseVisualEditorStyle::Get().GetColor(TEXT("Color.Selection"));
 	}
 	return Tile.StatementFailure != EVerseStatementFailureDisposition::None
 		? GetVerseFailureDecorationColor()

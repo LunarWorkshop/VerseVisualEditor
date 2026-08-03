@@ -90,8 +90,11 @@ namespace VerseVisualEditorStyle
 			FLinearColor(0.0f, 0.0f, 0.0f, 0.14f));
 		Style->Set(TEXT("Color.Shadow"),
 			FLinearColor(0.0f, 0.0f, 0.0f, 0.34f));
+		Style->Set(TEXT("Color.Selection"),
+			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("3da5ff"))));
 		Style->Set(TEXT("Color.SelectedShadow"),
-			FLinearColor(1.0f, 0.58f, 0.04f, 0.25f));
+			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("3da5ff")))
+			.CopyWithNewOpacity(0.25f));
 		Style->Set(TEXT("Color.FailureGlass"),
 			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14")))
 			.CopyWithNewOpacity(0.72f));
