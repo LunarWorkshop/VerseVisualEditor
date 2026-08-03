@@ -1,10 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseDocument.h"
-#include "VerseDocumentSession.h"
-#include "VerseExpressionActions.h"
-#include "VerseFunctionNavigation.h"
-#include "VerseIntrinsicPresentation.h"
+#include "Document/VerseDocumentSession.h"
+#include "Editing/VerseExpressionActions.h"
+#include "VisualModel/VerseFunctionNavigation.h"
+#include "Editing/VerseIntrinsicPresentation.h"
 
 #include "Misc/AutomationTest.h"
 #include "Containers/StringConv.h"

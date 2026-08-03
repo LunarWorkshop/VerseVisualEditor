@@ -1,6 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseOrderedTilePacking.h"
+#include "Slate/VerseOrderedTilePacking.h"
 
 #include "Misc/AutomationTest.h"
 

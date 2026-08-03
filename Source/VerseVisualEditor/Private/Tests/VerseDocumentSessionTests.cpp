@@ -1,10 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseDocumentSession.h"
-#include "VerseClauseEditing.h"
-#include "VerseExpressionActions.h"
-#include "VerseExternalChange.h"
-#include "VerseIdentifier.h"
+#include "Document/VerseDocumentSession.h"
+#include "Editing/VerseClauseEditing.h"
+#include "Editing/VerseExpressionActions.h"
+#include "Document/VerseExternalChange.h"
+#include "Editing/VerseIdentifier.h"
 
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"

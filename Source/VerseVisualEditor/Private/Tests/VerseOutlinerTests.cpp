@@ -1,15 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseOutliner.h"
+#include "VisualModel/VerseOutliner.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 #include "VerseDocument.h"
-#include "VerseDefinitionIcon.h"
-#include "VerseFunctionNavigation.h"
+#include "Slate/VerseDefinitionIcon.h"
+#include "VisualModel/VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseVisualTile.h"
+#include "VisualModel/VerseVisualTile.h"
 
 namespace VerseOutlinerTests
 {

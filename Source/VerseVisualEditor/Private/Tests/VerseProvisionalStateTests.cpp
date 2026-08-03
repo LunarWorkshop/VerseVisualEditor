@@ -1,6 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseProvisionalState.h"
+#include "Editing/VerseProvisionalState.h"
 
 #include "Misc/AutomationTest.h"
 

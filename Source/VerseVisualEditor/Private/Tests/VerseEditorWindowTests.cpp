@@ -1,6 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseEditorFileTree.h"
+#include "Document/VerseEditorFileTree.h"
 
 #include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"

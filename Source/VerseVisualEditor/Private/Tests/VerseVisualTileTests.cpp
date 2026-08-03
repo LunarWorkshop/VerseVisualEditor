@@ -1,9 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseTileProperties.h"
-#include "VerseTileSelection.h"
-#include "VerseVisualTile.h"
+#include "VisualModel/VerseTileProperties.h"
+#include "Slate/VerseTileSelection.h"
+#include "VisualModel/VerseVisualTile.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"

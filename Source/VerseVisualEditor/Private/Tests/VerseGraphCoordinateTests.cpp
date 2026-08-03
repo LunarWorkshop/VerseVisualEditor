@@ -1,11 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "SVerseGraphSurface.h"
-#include "SVerseFunctionGraphLayout.h"
-#include "SVerseTile.h"
-#include "VerseGraphCoordinates.h"
-#include "VerseGraphMotion.h"
-#include "VerseVisualEditorStyle.h"
+#include "Slate/SVerseGraphSurface.h"
+#include "Slate/SVerseFunctionGraphLayout.h"
+#include "Slate/SVerseTile.h"
+#include "Slate/VerseGraphCoordinates.h"
+#include "Slate/VerseGraphMotion.h"
+#include "Slate/VerseVisualEditorStyle.h"
 
 #include "GraphEditorSettings.h"
 #include "Misc/AutomationTest.h"

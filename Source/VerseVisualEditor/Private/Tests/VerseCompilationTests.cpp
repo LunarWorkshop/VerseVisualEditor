@@ -1,8 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseCompilation.h"
-#include "VerseDocumentSession.h"
-#include "VerseVisualTile.h"
+#include "Semantics/VerseCompilation.h"
+#include "Document/VerseDocumentSession.h"
+#include "VisualModel/VerseVisualTile.h"
 
 #include "Misc/AutomationTest.h"
 #include "SolBuildResults.h"

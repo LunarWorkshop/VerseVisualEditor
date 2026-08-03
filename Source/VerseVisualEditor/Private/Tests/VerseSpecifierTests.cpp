@@ -1,10 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseSpecifier.h"
+#include "Editing/VerseSpecifier.h"
 
 #include "Misc/AutomationTest.h"
 #include "VerseDocument.h"
-#include "VerseDocumentSession.h"
+#include "Document/VerseDocumentSession.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseSpecifierValidationTest,

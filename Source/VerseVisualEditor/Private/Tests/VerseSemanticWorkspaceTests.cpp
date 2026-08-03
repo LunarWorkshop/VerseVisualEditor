@@ -1,13 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "VerseSemanticWorkspace.h"
+#include "Semantics/VerseSemanticWorkspace.h"
 #include "VerseDocument.h"
-#include "VerseDocumentSession.h"
-#include "VerseExpressionActions.h"
-#include "VerseFunctionNavigation.h"
+#include "Document/VerseDocumentSession.h"
+#include "Editing/VerseExpressionActions.h"
+#include "VisualModel/VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
-#include "VerseSemanticCandidates.h"
-#include "VerseVisualTile.h"
+#include "Semantics/VerseSemanticCandidates.h"
+#include "VisualModel/VerseVisualTile.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
