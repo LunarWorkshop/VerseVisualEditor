@@ -721,7 +721,7 @@ bool FVerseSocketSourceEditingTest::RunTest(const FString& Parameters)
 		FVerseClauseEditing::AddElseExpression(
 			BranchSession,
 			MissingElse->OwnerExpressionRange,
-			MissingElse->Clause.PunctuationStyle,
+			MissingElse->Clause.Syntax.Delimiter,
 			ElseAction,
 			Error));
 	TestTrue(TEXT("False branch insertion writes an else body"),

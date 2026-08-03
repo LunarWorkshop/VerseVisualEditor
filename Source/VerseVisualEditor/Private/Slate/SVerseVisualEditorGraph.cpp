@@ -706,13 +706,27 @@ namespace
 					RegionName = LOCTEXT("ControlBodyRegion", "Body");
 					break;
 				}
-				const FText StyleName = Region.PunctuationStyle
-					== EVerseClausePunctuationStyle::Braces
-					? LOCTEXT("BracesBodyStyle", "Braces")
-					: Region.PunctuationStyle
-						== EVerseClausePunctuationStyle::ColonOrIndentation
-						? LOCTEXT("IndentedBodyStyle", "Indented")
-						: FText::GetEmpty();
+				FText StyleName;
+				switch (Region.Syntax.Delimiter)
+				{
+				case EVerseClauseDelimiter::Braces:
+					StyleName = LOCTEXT("BracesBodyStyle", "Braces");
+					break;
+				case EVerseClauseDelimiter::Colon:
+					StyleName = LOCTEXT("ColonBodyStyle", "Colon");
+					break;
+				case EVerseClauseDelimiter::BareIndentation:
+					StyleName = LOCTEXT("IndentedBodyStyle", "Indented");
+					break;
+				case EVerseClauseDelimiter::Parentheses:
+					StyleName = LOCTEXT("ParenthesizedBodyStyle", "Parenthesized");
+					break;
+				case EVerseClauseDelimiter::Dot:
+					StyleName = LOCTEXT("DotBodyStyle", "Dot");
+					break;
+				default:
+					break;
+				}
 				TSharedRef<SVerticalBox> RegionContent = SNew(SVerticalBox);
 				bool bHasRegionTile = false;
 				for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)

@@ -23,7 +23,7 @@ public:
 	static bool AddElseExpression(
 		FVerseDocumentSession& Session,
 		FVerseTextRange IfExpressionRange,
-		EVerseClausePunctuationStyle BodyStyle,
+		EVerseClauseDelimiter BodyStyle,
 		const FVerseExpressionAction& Action,
 		FText& OutError,
 		FVerseTextRange* OutInsertedRange = nullptr,

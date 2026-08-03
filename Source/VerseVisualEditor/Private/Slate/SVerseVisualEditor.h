@@ -18,6 +18,7 @@
 
 struct FFileChangeData;
 struct FOpenVerseDocument;
+enum class EVerseSyntaxControlKind : uint8;
 
 enum class EVerseProjectBuildState : uint8
 {
@@ -138,6 +139,13 @@ private:
 		ESelectInfo::Type SelectInfo,
 		TSharedPtr<FOpenVerseDocument> OpenDocument,
 		FVerseVisualTile OperatorTile);
+	void HandleSyntaxControlSelected(
+		TSharedPtr<FString> NewValue,
+		ESelectInfo::Type SelectInfo,
+		TSharedPtr<FOpenVerseDocument> OpenDocument,
+		FVerseVisualTile Tile,
+		EVerseSyntaxControlKind Control,
+		int32 ControlRegionIndex);
 	void HandleSpecifiersCommitted(
 		const FText& NewText,
 		ETextCommit::Type CommitType,
@@ -221,9 +229,11 @@ private:
 	TSharedPtr<SDockTab> DetailsTab;
 	TSharedPtr<SSearchBox> PropertyFilter;
 	TSharedPtr<SVerticalBox> PropertyRows;
+	bool bWhitespaceDetailsExpanded = false;
 	TArray<TSharedPtr<FString>> TypeOptions;
 	TArray<TSharedPtr<FString>> OperatorSignatureOptions;
 	TArray<FVerseOperatorSignature> OperatorSignatures;
+	TArray<TSharedPtr<TArray<TSharedPtr<FString>>>> SyntaxOptionSets;
 	FString PropertyFilterText;
 
 	FString WatchedDirectory;

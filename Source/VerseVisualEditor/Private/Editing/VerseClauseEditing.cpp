@@ -3,6 +3,7 @@
 #include "Internationalization/Text.h"
 #include "Document/VerseDocumentSession.h"
 #include "Editing/VerseExpressionActions.h"
+#include "Editing/VerseFormattingStyle.h"
 #include "VisualModel/VerseFunctionNavigation.h"
 #include "VerseParseSnapshotBuilder.h"
 
@@ -376,7 +377,13 @@ bool FVerseClauseEditing::InsertExpression(
 	}
 
 	const FUtf8StringView Source(*Session.GetCurrentUtf8(), Session.GetCurrentUtf8().Len());
-	const FString LineEnding = DetectLineEnding(Source);
+	const FVerseFormattingStyleProfile Style = FVerseFormattingStyleResolver::Resolve(
+		*Session.GetParseSnapshot().GetDocument(), Session.GetParseSnapshot(), Clause);
+	const FString LineEnding = FVerseSyntaxEmitter::LineEnding(Style);
+	const EVerseSeparatorToken SeparatorToken = Clause.bRequiresFailablePlaceholder
+		? Style.FailureSeparatorToken : Style.StatementSeparatorToken;
+	const EVerseSeparatorLayout SeparatorLayout = Clause.bRequiresFailablePlaceholder
+		? Style.FailureSeparatorLayout : Style.StatementSeparatorLayout;
 	int32 InsertionByte = Clause.EmptyBodyInsertionAnchor.IsSet()
 		? Clause.EmptyBodyInsertionAnchor.BeginByte
 		: Clause.InteriorRange.BeginByte;
@@ -387,19 +394,23 @@ bool FVerseClauseEditing::InsertExpression(
 		if (InsertIndex < Clause.Items.Num())
 		{
 			InsertionByte = Clause.Items[InsertIndex].Expression.Range.BeginByte;
-			if (Clause.PunctuationStyle == EVerseClausePunctuationStyle::ColonOrIndentation)
+			if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
+				|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 			{
 				Replacement = ExpressionSource + LineEnding + IndentationAt(Source, InsertionByte);
 			}
 			else
 			{
-				Replacement = ExpressionSource + TEXT("; ");
+				Replacement = ExpressionSource + FVerseSyntaxEmitter::Separator(
+					SeparatorToken, SeparatorLayout, 0, Style,
+					IndentationAt(Source, InsertionByte));
 			}
 		}
 		else
 		{
 			InsertionByte = Clause.Items.Last().Expression.Range.EndByte();
-			if (Clause.PunctuationStyle == EVerseClausePunctuationStyle::ColonOrIndentation)
+			if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
+				|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 			{
 				Replacement = LineEnding + IndentationAt(
 					Source, Clause.Items.Last().Expression.Range.BeginByte) + ExpressionSource;
@@ -407,16 +418,22 @@ bool FVerseClauseEditing::InsertExpression(
 			}
 			else
 			{
-				Replacement = TEXT("; ") + ExpressionSource;
+				Replacement = FVerseSyntaxEmitter::Separator(
+					SeparatorToken, SeparatorLayout, 0, Style,
+					IndentationAt(Source, Clause.Items.Last().Expression.Range.BeginByte))
+					+ ExpressionSource;
+				ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 			}
 		}
 	}
-	else if (Clause.PunctuationStyle == EVerseClausePunctuationStyle::ColonOrIndentation)
+	else if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
+		|| Clause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 	{
 		const int32 HeaderByte = Clause.OpeningPunctuationRange.IsSet()
 			? Clause.OpeningPunctuationRange.BeginByte
 			: Clause.InteriorRange.BeginByte;
-		Replacement = LineEnding + IndentationAt(Source, HeaderByte) + TEXT("    ") + ExpressionSource;
+		Replacement = LineEnding + IndentationAt(Source, HeaderByte)
+			+ Style.IndentationUnit + ExpressionSource;
 		ExpressionOffsetCharacters = Replacement.Len() - ExpressionSource.Len();
 	}
 	else
@@ -488,7 +505,7 @@ bool FVerseClauseEditing::ReplaceExpression(
 bool FVerseClauseEditing::AddElseExpression(
 	FVerseDocumentSession& Session,
 	FVerseTextRange IfExpressionRange,
-	EVerseClausePunctuationStyle BodyStyle,
+	EVerseClauseDelimiter BodyStyle,
 	const FVerseExpressionAction& Action,
 	FText& OutError,
 	FVerseTextRange* OutInsertedRange,
@@ -508,13 +525,15 @@ bool FVerseClauseEditing::AddElseExpression(
 	}
 
 	const FUtf8StringView Source(*Session.GetCurrentUtf8(), Session.GetCurrentUtf8().Len());
-	const FString LineEnding = DetectLineEnding(Source);
+	const FVerseFormattingStyleProfile Style = FVerseFormattingStyleResolver::Resolve(
+		*Session.GetParseSnapshot().GetDocument(), Session.GetParseSnapshot());
+	const FString LineEnding = FVerseSyntaxEmitter::LineEnding(Style);
 	const FString Indentation = IndentationAt(Source, IfExpressionRange.BeginByte);
-	const bool bBraces = BodyStyle == EVerseClausePunctuationStyle::Braces;
+	const bool bBraces = BodyStyle == EVerseClauseDelimiter::Braces;
 	const FString Replacement = bBraces
 		? FString::Printf(TEXT(" else { %s }"), *ExpressionSource)
 		: LineEnding + Indentation + TEXT("else:") + LineEnding
-			+ Indentation + TEXT("    ") + ExpressionSource;
+			+ Indentation + Style.IndentationUnit + ExpressionSource;
 	const int32 ExpressionOffsetCharacters = bBraces
 		? FString(TEXT(" else { ")).Len()
 		: Replacement.Len() - ExpressionSource.Len();
@@ -610,7 +629,8 @@ bool FVerseClauseEditing::DeleteExpression(
 
 	// Remove only a separator token. Trivia and VST-owned/ambiguous comments stay fixed.
 	if (Clause.Items.Num() > 1
-		&& Clause.PunctuationStyle != EVerseClausePunctuationStyle::ColonOrIndentation)
+		&& Clause.Syntax.Delimiter != EVerseClauseDelimiter::Colon
+		&& Clause.Syntax.Delimiter != EVerseClauseDelimiter::BareIndentation)
 	{
 		const bool bUseTrailing = ItemIndex + 1 < Clause.Items.Num();
 		const FVerseTextRange Trivia = bUseTrailing

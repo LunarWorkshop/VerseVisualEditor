@@ -108,6 +108,41 @@ namespace
 		}
 	}
 
+	FVerseVisualExpressionDescriptor::FControlRegion::FSyntax MakeVisualSyntax(
+		const FVerseClauseSyntaxDescriptor& Syntax,
+		FVerseDocumentRevision Revision)
+	{
+		FVerseVisualExpressionDescriptor::FControlRegion::FSyntax Result;
+		Result.Delimiter = Syntax.Delimiter;
+		Result.Keyword = Syntax.Keyword;
+		Result.Layout = Syntax.Layout;
+		Result.BracePlacement = Syntax.BracePlacement;
+		Result.LineEnding = Syntax.LineEnding;
+		Result.IndentationPrefix = Syntax.IndentationPrefix;
+		Result.IndentationUnit = Syntax.IndentationUnit;
+		Result.KeywordRange = MakeTextRange(Revision, Syntax.KeywordRange);
+		Result.OpeningRange = MakeTextRange(Revision, Syntax.OpeningRange);
+		Result.ClosingRange = MakeTextRange(Revision, Syntax.ClosingRange);
+		Result.LeadingWhitespaceRange = MakeTextRange(Revision, Syntax.LeadingWhitespaceRange);
+		Result.TrailingWhitespaceRange = MakeTextRange(Revision, Syntax.TrailingWhitespaceRange);
+		Result.bHasCustomWhitespace = Syntax.bHasCustomWhitespace;
+		return Result;
+	}
+
+	FVerseVisualSeparatorDescriptor MakeVisualSeparator(
+		const FVerseSeparatorDescriptor& Separator,
+		FVerseDocumentRevision Revision)
+	{
+		FVerseVisualSeparatorDescriptor Result;
+		Result.TokenRange = MakeTextRange(Revision, Separator.TokenRange);
+		Result.WhitespaceRange = MakeTextRange(Revision, Separator.WhitespaceRange);
+		Result.Token = Separator.Token;
+		Result.Layout = Separator.Layout;
+		Result.BlankLineCount = Separator.BlankLineCount;
+		Result.bIsEndOfClause = Separator.bIsEndOfClause;
+		return Result;
+	}
+
 	FVerseVisualExpressionDescriptor MakeVisualExpressionDescriptor(
 		const FVerseExpressionDescriptor& Expression,
 		FVerseDocumentRevision Revision)
@@ -127,6 +162,13 @@ namespace
 		Result.TypeRange = MakeTextRange(Revision, Expression.Type.SourceRange);
 		Result.IntrinsicTypeName = Expression.Type.IntrinsicName;
 		Result.TypeProvenance = Expression.Type.Provenance;
+		for (const FVerseGroupingLayer& Layer : Expression.GroupingLayers)
+		{
+			auto& VisualLayer = Result.GroupingLayers.AddDefaulted_GetRef();
+			VisualLayer.Range = MakeTextRange(Revision, Layer.Range);
+			VisualLayer.OpeningRange = MakeTextRange(Revision, Layer.OpeningRange);
+			VisualLayer.ClosingRange = MakeTextRange(Revision, Layer.ClosingRange);
+		}
 		for (const FVerseExpressionDescriptor& Operand : Expression.Operands)
 		{
 			Result.Operands.Add(MakeVisualExpressionDescriptor(Operand, Revision));
@@ -142,7 +184,7 @@ namespace
 			VisualRegion.ClosingPunctuationRange =
 				MakeTextRange(Revision, Region.ClosingPunctuationRange);
 			VisualRegion.Kind = Region.Kind;
-			VisualRegion.PunctuationStyle = Region.PunctuationStyle;
+			VisualRegion.Syntax = MakeVisualSyntax(Region.Syntax, Revision);
 			if (Region.EmptyBodyInsertionByte != INDEX_NONE)
 			{
 				VisualRegion.EmptyBodyInsertionAnchor = FVerseTextRange(
@@ -162,7 +204,7 @@ namespace
 					MakeTextRange(Revision, Item.LeadingTriviaRange);
 				VisualItem.TrailingTriviaRange =
 					MakeTextRange(Revision, Item.TrailingTriviaRange);
-				VisualItem.Separator = Item.Separator;
+				VisualItem.Separator = MakeVisualSeparator(Item.Separator, Revision);
 			}
 		}
 		return Result;
@@ -176,7 +218,7 @@ namespace
 		Result.InteriorRange = MakeTextRange(Revision, Descriptor.InteriorRange);
 		Result.OpeningPunctuationRange = MakeTextRange(Revision, Descriptor.OpeningPunctuationRange);
 		Result.ClosingPunctuationRange = MakeTextRange(Revision, Descriptor.ClosingPunctuationRange);
-		Result.PunctuationStyle = Descriptor.PunctuationStyle;
+		Result.Syntax = MakeVisualSyntax(Descriptor.Syntax, Revision);
 		if (Descriptor.EmptyBodyInsertionByte != INDEX_NONE)
 		{
 			Result.EmptyBodyInsertionAnchor = FVerseTextRange(
@@ -191,7 +233,7 @@ namespace
 			VisualItem.Expression = MakeVisualExpressionDescriptor(Item.Expression, Revision);
 			VisualItem.LeadingTriviaRange = MakeTextRange(Revision, Item.LeadingTriviaRange);
 			VisualItem.TrailingTriviaRange = MakeTextRange(Revision, Item.TrailingTriviaRange);
-			VisualItem.Separator = Item.Separator;
+			VisualItem.Separator = MakeVisualSeparator(Item.Separator, Revision);
 			VisualItem.ExtraBlankLineCount = Item.ExtraBlankLineCount;
 			VisualItem.bIsFinalValuePosition = Item.bIsFinalValuePosition;
 		}
@@ -206,7 +248,7 @@ namespace
 		Result.InteriorRange = Region.InteriorRange;
 		Result.OpeningPunctuationRange = Region.OpeningPunctuationRange;
 		Result.ClosingPunctuationRange = Region.ClosingPunctuationRange;
-		Result.PunctuationStyle = Region.PunctuationStyle;
+		Result.Syntax = Region.Syntax;
 		Result.EmptyBodyInsertionAnchor = Region.EmptyBodyInsertionAnchor;
 		for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
 		{
@@ -329,6 +371,7 @@ namespace
 		Tile.Range = Descriptor.Range;
 		Tile.OperatorRange = Descriptor.OperatorRange;
 		Tile.OperatorSpelling = Descriptor.OperatorSpelling;
+		Tile.GroupingLayers = Descriptor.GroupingLayers;
 		Tile.NameRange = Descriptor.Kind == EVerseExpressionKind::Identifier
 			|| Descriptor.Kind == EVerseExpressionKind::Call
 			? Descriptor.Range
@@ -539,7 +582,7 @@ private:
 		Clause.InteriorRange = Region.InteriorRange;
 		Clause.OpeningPunctuationRange = Region.OpeningPunctuationRange;
 		Clause.ClosingPunctuationRange = Region.ClosingPunctuationRange;
-		Clause.PunctuationStyle = Region.PunctuationStyle;
+		Clause.Syntax = Region.Syntax;
 		Clause.EmptyBodyInsertionAnchor = Region.EmptyBodyInsertionAnchor;
 		for (const auto& Item : Region.Items)
 		{

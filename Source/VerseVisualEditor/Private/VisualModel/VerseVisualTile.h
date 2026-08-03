@@ -206,6 +206,16 @@ private:
 	friend class FVerseVisualTopologyBuilder;
 };
 
+struct FVerseVisualSeparatorDescriptor
+{
+	FVerseTextRange TokenRange;
+	FVerseTextRange WhitespaceRange;
+	EVerseSeparatorToken Token = EVerseSeparatorToken::None;
+	EVerseSeparatorLayout Layout = EVerseSeparatorLayout::None;
+	int32 BlankLineCount = 0;
+	bool bIsEndOfClause = false;
+};
+
 struct FVerseVisualExpressionDescriptor
 {
 	FVerseTextRange Range;
@@ -222,6 +232,13 @@ struct FVerseVisualExpressionDescriptor
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
+	struct FGroupingLayer
+	{
+		FVerseTextRange Range;
+		FVerseTextRange OpeningRange;
+		FVerseTextRange ClosingRange;
+	};
+	TArray<FGroupingLayer> GroupingLayers;
 	FString SemanticTypeName;
 	TArray<FString> SemanticInputNames;
 	TArray<FString> SemanticInputTypeNames;
@@ -237,7 +254,7 @@ struct FVerseVisualExpressionDescriptor
 			FVerseTextRange ExpressionRange;
 			FVerseTextRange LeadingTriviaRange;
 			FVerseTextRange TrailingTriviaRange;
-			EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+			FVerseVisualSeparatorDescriptor Separator;
 		};
 
 		FVerseTextRange Range;
@@ -245,7 +262,23 @@ struct FVerseVisualExpressionDescriptor
 		FVerseTextRange OpeningPunctuationRange;
 		FVerseTextRange ClosingPunctuationRange;
 		EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
-		EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+		struct FSyntax
+		{
+			EVerseClauseDelimiter Delimiter = EVerseClauseDelimiter::None;
+			EVerseClauseKeyword Keyword = EVerseClauseKeyword::None;
+			EVerseSyntaxLayout Layout = EVerseSyntaxLayout::Inline;
+			EVerseBracePlacement BracePlacement = EVerseBracePlacement::NotApplicable;
+			EVerseLineEnding LineEnding = EVerseLineEnding::None;
+			FString IndentationPrefix;
+			FString IndentationUnit;
+			FVerseTextRange KeywordRange;
+			FVerseTextRange OpeningRange;
+			FVerseTextRange ClosingRange;
+			FVerseTextRange LeadingWhitespaceRange;
+			FVerseTextRange TrailingWhitespaceRange;
+			bool bHasCustomWhitespace = false;
+		};
+		FSyntax Syntax;
 		FVerseTextRange EmptyBodyInsertionAnchor;
 		int32 FirstOperandIndex = 0;
 		int32 OperandCount = 0;
@@ -259,7 +292,7 @@ struct FVerseVisualClauseItemDescriptor
 	FVerseVisualExpressionDescriptor Expression;
 	FVerseTextRange LeadingTriviaRange;
 	FVerseTextRange TrailingTriviaRange;
-	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+	FVerseVisualSeparatorDescriptor Separator;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;
 };
@@ -269,7 +302,7 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange InteriorRange;
 	FVerseTextRange OpeningPunctuationRange;
 	FVerseTextRange ClosingPunctuationRange;
-	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	FVerseVisualExpressionDescriptor::FControlRegion::FSyntax Syntax;
 	FVerseTextRange EmptyBodyInsertionAnchor;
 	/** This clause must retain one source-safe failable expression. */
 	bool bRequiresFailablePlaceholder = false;
@@ -317,6 +350,7 @@ struct FVerseVisualTile
 	uint8 VstTag = 0;
 	FVerseTextRange OperatorRange;
 	FString OperatorSpelling;
+	TArray<FVerseVisualExpressionDescriptor::FGroupingLayer> GroupingLayers;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
 	FVerseTextRange TypeRange;

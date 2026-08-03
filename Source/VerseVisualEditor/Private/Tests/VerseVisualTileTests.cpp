@@ -235,7 +235,7 @@ bool FVerseNestedModulePresentationTest::RunTest(const FString& Parameters)
 	}
 	if (TestNotNull(TEXT("Brace-style nested module tile exists"), Nested))
 	{
-		TestEqual(TEXT("Nested module retains brace punctuation"), Nested->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::Braces);
+		TestEqual(TEXT("Nested module retains brace punctuation"), Nested->BodyClause.Syntax.Delimiter, EVerseClauseDelimiter::Braces);
 		TestEqual(TEXT("Nested module has one VST specifier"), Nested->SpecifierRanges.Num(), 1);
 		if (Nested->SpecifierRanges.Num() == 1)
 		{
@@ -696,8 +696,8 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 					&& Predicate.Children.Num() == 2
 					&& Predicate.ControlRegions.Num() == 1
 					&& Predicate.ControlRegions[0].Items.Num() == 2
-					&& Predicate.ControlRegions[0].Items[0].Separator
-						== EVerseClauseItemSeparator::Semicolon);
+					&& Predicate.ControlRegions[0].Items[0].Separator.Token
+						== EVerseSeparatorToken::Semicolon);
 			TestTrue(TEXT("Predicate execution wires inherit the predicate render scope"),
 				Connections.ContainsByPredicate(
 					[&](const FVerseVisualConnection& Connection)
@@ -726,7 +726,7 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 				: nullptr;
 		TestTrue(TEXT("Brace-form if survives into the revision-specific tile tree"),
 			Body != nullptr
-				&& Body->PunctuationStyle == EVerseClausePunctuationStyle::Braces
+				&& Body->Syntax.Delimiter == EVerseClauseDelimiter::Braces
 				&& Body->OpeningPunctuationRange.Revision == Graph[1].Range.Revision);
 	}
 

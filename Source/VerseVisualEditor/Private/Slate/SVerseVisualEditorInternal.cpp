@@ -1,3 +1,5 @@
+#include "Slate/SVerseVisualEditorInternal.h"
+
 #include "Slate/SVerseVisualEditor.h"
 
 #include "Slate/SVerseLiteralEditor.h"
@@ -73,8 +75,6 @@
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
-
-#include "Slate/SVerseVisualEditorInternal.h"
 
 #define LOCTEXT_NAMESPACE "SVerseVisualEditor"
 

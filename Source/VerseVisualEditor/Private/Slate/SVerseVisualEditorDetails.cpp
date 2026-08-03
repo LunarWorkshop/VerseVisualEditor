@@ -34,6 +34,8 @@
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "SGraphActionMenu.h"
 #include "SGraphPalette.h"
 #include "UnrealEdGlobals.h"
@@ -44,6 +46,7 @@
 #include "Document/VerseDocumentSession.h"
 #include "Slate/VerseDefinitionIcon.h"
 #include "Editing/VerseExpressionActions.h"
+#include "Editing/VerseFormattingEdit.h"
 #include "Document/VerseExternalChange.h"
 #include "VisualModel/VerseFunctionNavigation.h"
 #include "Editing/VerseIdentifier.h"
@@ -130,10 +133,15 @@ namespace
 	{
 		for (const FVerseVisualTile& Tile : Tiles)
 		{
-			if (Tile.Kind == PreviousTile.Kind
+			if ((Tile.Kind == PreviousTile.Kind
 				&& Tile.DefinitionKind == PreviousTile.DefinitionKind
 				&& Tile.NameRange.IsSet()
 				&& Tile.NameRange.BeginByte == PreviousTile.NameRange.BeginByte)
+				|| (Tile.Kind == PreviousTile.Kind
+					&& Tile.ExpressionKind == PreviousTile.ExpressionKind
+					&& Tile.ControlKind == PreviousTile.ControlKind
+					&& Tile.OperatorSpelling == PreviousTile.OperatorSpelling
+					&& Tile.Range.BeginByte == PreviousTile.Range.BeginByte))
 			{
 				return &Tile;
 			}
@@ -544,6 +552,72 @@ void SVerseVisualEditor::HandleOperatorSignatureSelected(
 	}
 }
 
+void SVerseVisualEditor::HandleSyntaxControlSelected(
+	TSharedPtr<FString> NewValue,
+	ESelectInfo::Type SelectInfo,
+	TSharedPtr<FOpenVerseDocument> OpenDocument,
+	FVerseVisualTile Tile,
+	EVerseSyntaxControlKind Control,
+	int32 ControlRegionIndex)
+{
+	if (!NewValue.IsValid()
+		|| SelectInfo == ESelectInfo::Direct
+		|| !OpenDocument.IsValid()
+		|| !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
+	FText EditError;
+	if (!FVerseFormattingEditService::Apply(
+		*OpenDocument->Session, Tile, Control, *NewValue, EditError, ControlRegionIndex))
+	{
+		OpenDocument->PropertyValidationMessage = EditError;
+		if (OpenDocument == ActiveDocument)
+		{
+			RebuildProperties();
+		}
+		return;
+	}
+
+	OpenDocument->ProvisionalTiles.AdoptContaining(Tile.Range);
+	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
+	OpenDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(OpenDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(OpenDocument, true);
+	}
+
+	OpenDocument->SelectedTile.Reset();
+	if (const FVerseVisualTile* Replacement = FindReplacementTile(
+		OpenDocument->Session->GetTiles(), Tile))
+	{
+		OpenDocument->SelectedTile = *Replacement;
+	}
+	else
+	{
+		ReconcileFunctionTabs(
+			*OpenDocument,
+			FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument));
+		for (const FOpenVerseFunctionTab& Tab : OpenDocument->FunctionTabs)
+		{
+			if (const FVerseVisualTile* GraphReplacement = FindReplacementTile(
+				Tab.GraphTiles, Tile))
+			{
+				OpenDocument->SelectedTile = *GraphReplacement;
+				break;
+			}
+		}
+	}
+	RebuildDocumentTabs();
+	if (OpenDocument == ActiveDocument)
+	{
+		RefreshActiveDocument();
+	}
+}
+
 void SVerseVisualEditor::HandleSpecifiersCommitted(
 	const FText& NewText,
 	ETextCommit::Type CommitType,
@@ -748,7 +822,10 @@ void SVerseVisualEditor::RebuildProperties()
 	TypeOptions.Reset();
 	OperatorSignatureOptions.Reset();
 	OperatorSignatures.Reset();
+	SyntaxOptionSets.Reset();
 	int32 VisiblePropertyCount = 0;
+	int32 VisibleSyntaxPropertyCount = 0;
+	TSharedRef<SVerticalBox> SyntaxRows = SNew(SVerticalBox);
 	for (const FVerseTileProperty& Property : Properties)
 	{
 		if (!FVerseTileProperties::MatchesFilter(Property, PropertyFilterText))
@@ -940,6 +1017,65 @@ void SVerseVisualEditor::RebuildProperties()
 						SNew(STextBlock).Text(FText::FromString(CurrentSignature))
 					];
 			}
+			else if (Property.EditKind == EVerseTilePropertyEditKind::Syntax)
+			{
+				if (Property.SyntaxControl == EVerseSyntaxControlKind::GroupingLayers)
+				{
+					ValueWidget = SNew(SCheckBox)
+						.IsChecked(Property.Value == TEXT("1")
+							? ECheckBoxState::Checked
+							: ECheckBoxState::Unchecked)
+						.OnCheckStateChanged_Lambda(
+							[this,
+							 OpenDocument = ActiveDocument,
+							 Tile = ActiveDocument->SelectedTile.GetValue(),
+							 Control = Property.SyntaxControl,
+							 RegionIndex = Property.SyntaxRegionIndex](ECheckBoxState NewState)
+							{
+								HandleSyntaxControlSelected(
+									MakeShared<FString>(NewState == ECheckBoxState::Checked
+										? TEXT("1") : TEXT("0")),
+									ESelectInfo::OnMouseClick,
+									OpenDocument,
+									Tile,
+									Control,
+									RegionIndex);
+							});
+				}
+				else
+				{
+					const TSharedRef<TArray<TSharedPtr<FString>>> Options =
+						MakeShared<TArray<TSharedPtr<FString>>>();
+					for (const FString& Option : Property.Options)
+					{
+						Options->Add(MakeShared<FString>(Option));
+					}
+					SyntaxOptionSets.Add(Options);
+					const TSharedPtr<FString>* Selected = Options->FindByPredicate(
+						[&Property](const TSharedPtr<FString>& Option)
+						{
+							return Option.IsValid() && *Option == Property.Value;
+						});
+					ValueWidget = SNew(SSearchableComboBox)
+						.OptionsSource(&Options.Get())
+						.InitiallySelectedItem(Selected ? *Selected : nullptr)
+						.OnGenerateWidget_Lambda([](TSharedPtr<FString> Option)
+						{
+							return SNew(STextBlock).Text(Option.IsValid()
+								? FText::FromString(*Option) : FText::GetEmpty());
+						})
+						.OnSelectionChanged(
+							this,
+							&SVerseVisualEditor::HandleSyntaxControlSelected,
+							ActiveDocument,
+							ActiveDocument->SelectedTile.GetValue(),
+							Property.SyntaxControl,
+							Property.SyntaxRegionIndex)
+						[
+							SNew(STextBlock).Text(FText::FromString(Property.Value))
+						];
+				}
+			}
 			else if (Property.EditKind == EVerseTilePropertyEditKind::Literal)
 			{
 				ValueWidget = SNew(SVerseLiteralEditor)
@@ -978,7 +1114,61 @@ void SVerseVisualEditor::RebuildProperties()
 						ActiveDocument->SelectedTile->NameRange);
 			}
 		}
-		PropertyRows->AddSlot()
+		const TSharedRef<SVerticalBox> TargetRows = Property.EditKind == EVerseTilePropertyEditKind::Syntax
+			? SyntaxRows
+			: PropertyRows.ToSharedRef();
+		if (Property.EditKind == EVerseTilePropertyEditKind::Syntax)
+		{
+			++VisibleSyntaxPropertyCount;
+		}
+		TSharedRef<SVerticalBox> PropertyContent = SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Property.Name))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 2.0f, 0.0f, 0.0f)
+			[
+				ValueWidget
+			];
+		if (!Property.Example.IsEmpty())
+		{
+			PropertyContent->AddSlot()
+			.AutoHeight()
+			.Padding(0.0f, 5.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.Padding(6.0f, 4.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("SyntaxExampleLabel", "Example"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 2.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Property.Example))
+						.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					]
+				]
+			];
+		}
+
+		TargetRows->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 4.0f)
 		[
@@ -986,21 +1176,29 @@ void SVerseVisualEditor::RebuildProperties()
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 			.Padding(6.0f, 4.0f)
 			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Property.Name))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-				[
-					ValueWidget
-				]
+				PropertyContent
+			]
+		];
+	}
+
+	if (VisibleSyntaxPropertyCount > 0)
+	{
+		PropertyRows->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 2.0f, 0.0f, 4.0f)
+		[
+			SNew(SExpandableArea)
+			.AreaTitle(LOCTEXT("WhitespaceDetailsSection", "Whitespace and Syntax"))
+			.InitiallyCollapsed(PropertyFilterText.IsEmpty()
+				? !bWhitespaceDetailsExpanded
+				: false)
+			.OnAreaExpansionChanged_Lambda([this](bool bExpanded)
+			{
+				bWhitespaceDetailsExpanded = bExpanded;
+			})
+			.BodyContent()
+			[
+				SyntaxRows
 			]
 		];
 	}

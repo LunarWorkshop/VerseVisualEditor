@@ -84,6 +84,59 @@ namespace VerseParseSnapshotBuilder
 		return Node;
 	}
 
+	const Verse::Vst::Node* UnwrapSingleClauseAndCollectGrouping(
+		const Verse::Vst::Node* Node,
+		const FSourceIndex& SourceIndex,
+		TArray<FVerseGroupingLayer>& OutLayers)
+	{
+		const FUtf8StringView Source = SourceIndex.GetSource();
+		while (Node != nullptr
+			&& (Node->IsA<Verse::Vst::Clause>() || Node->IsA<Verse::Vst::Parens>())
+			&& Node->GetChildCount() == 1)
+		{
+			const FVerseByteRange Range = SourceIndex.ToRange(Node->Whence());
+			if (Range.IsSet())
+			{
+				int32 Left = Range.BeginByte;
+				int32 Right = Range.EndByte() - 1;
+				while (Left <= Right && (Source[Left] == static_cast<UTF8CHAR>(' ')
+					|| Source[Left] == static_cast<UTF8CHAR>('\t')
+					|| Source[Left] == static_cast<UTF8CHAR>('\r')
+					|| Source[Left] == static_cast<UTF8CHAR>('\n')))
+				{
+					++Left;
+				}
+				while (Right >= Left && (Source[Right] == static_cast<UTF8CHAR>(' ')
+					|| Source[Right] == static_cast<UTF8CHAR>('\t')
+					|| Source[Right] == static_cast<UTF8CHAR>('\r')
+					|| Source[Right] == static_cast<UTF8CHAR>('\n')))
+				{
+					--Right;
+				}
+				while (Left < Right
+					&& Source[Left] == static_cast<UTF8CHAR>('(')
+					&& Source[Right] == static_cast<UTF8CHAR>(')'))
+				{
+					const int32 Opening = Left++;
+					const int32 Closing = Right--;
+					if (!OutLayers.ContainsByPredicate(
+						[Opening](const FVerseGroupingLayer& Layer)
+						{
+							return Layer.OpeningRange.BeginByte == Opening;
+						}))
+					{
+						OutLayers.Add({FVerseByteRange::FromBounds(Opening, Closing + 1),
+							{Opening, 1}, {Closing, 1}});
+					}
+					while (Left < Right && FChar::IsWhitespace(static_cast<TCHAR>(Source[Left]))) ++Left;
+					while (Right > Left && FChar::IsWhitespace(static_cast<TCHAR>(Source[Right]))) --Right;
+				}
+			}
+			Node = Node->GetChildren()[0].Get();
+		}
+		return Node;
+	}
+
 	const Verse::Vst::Clause* FindPunctuatedClauseThroughSingleChildWrappers(
 		const Verse::Vst::Node* Node)
 	{
@@ -162,19 +215,155 @@ namespace VerseParseSnapshotBuilder
 		return FVerseByteRange::FromBounds(Begin, End);
 	}
 
-	EVerseClausePunctuationStyle ToClausePunctuationStyle(
+	EVerseClauseDelimiter ToClauseDelimiter(
 		Verse::Vst::Clause::EPunctuation Punctuation)
 	{
 		switch (Punctuation)
 		{
 		case Verse::Vst::Clause::EPunctuation::Braces:
-			return EVerseClausePunctuationStyle::Braces;
+			return EVerseClauseDelimiter::Braces;
 		case Verse::Vst::Clause::EPunctuation::Colon:
+			return EVerseClauseDelimiter::Colon;
 		case Verse::Vst::Clause::EPunctuation::Indentation:
-			return EVerseClausePunctuationStyle::ColonOrIndentation;
+			return EVerseClauseDelimiter::BareIndentation;
 		default:
-			return EVerseClausePunctuationStyle::None;
+			return EVerseClauseDelimiter::None;
 		}
+	}
+
+	EVerseLineEnding DetectLineEnding(FUtf8StringView Text)
+	{
+		bool bLf = false;
+		bool bCrLf = false;
+		bool bCr = false;
+		for (int32 Index = 0; Index < Text.Len(); ++Index)
+		{
+			if (Text[Index] == static_cast<UTF8CHAR>('\r'))
+			{
+				if (Index + 1 < Text.Len()
+					&& Text[Index + 1] == static_cast<UTF8CHAR>('\n'))
+				{
+					bCrLf = true;
+					++Index;
+				}
+				else
+				{
+					bCr = true;
+				}
+			}
+			else if (Text[Index] == static_cast<UTF8CHAR>('\n'))
+			{
+				bLf = true;
+			}
+		}
+		const int32 Kinds = static_cast<int32>(bLf)
+			+ static_cast<int32>(bCrLf) + static_cast<int32>(bCr);
+		if (Kinds > 1) return EVerseLineEnding::Mixed;
+		if (bCrLf) return EVerseLineEnding::CrLf;
+		if (bLf) return EVerseLineEnding::Lf;
+		if (bCr) return EVerseLineEnding::Cr;
+		return EVerseLineEnding::None;
+	}
+
+	FString DecodeUtf8(FUtf8StringView Text)
+	{
+		if (Text.IsEmpty())
+		{
+			return FString();
+		}
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Text.GetData()), Text.Len());
+		return FString(Converted.Length(), Converted.Get());
+	}
+
+	FString IndentationAt(FUtf8StringView Source, int32 ByteOffset)
+	{
+		ByteOffset = FMath::Clamp(ByteOffset, 0, Source.Len());
+		int32 LineStart = ByteOffset;
+		while (LineStart > 0
+			&& Source[LineStart - 1] != static_cast<UTF8CHAR>('\n')
+			&& Source[LineStart - 1] != static_cast<UTF8CHAR>('\r'))
+		{
+			--LineStart;
+		}
+		int32 End = LineStart;
+		while (End < Source.Len()
+			&& (Source[End] == static_cast<UTF8CHAR>(' ')
+				|| Source[End] == static_cast<UTF8CHAR>('\t')))
+		{
+			++End;
+		}
+		return DecodeUtf8(Source.Mid(LineStart, End - LineStart));
+	}
+
+	void FinalizeClauseSyntax(
+		FVerseClauseDescriptor& Descriptor,
+		FUtf8StringView Source,
+		FVerseByteRange DefinitionRange,
+		int32 FirstChildByte,
+		int32 LastChildByte)
+	{
+		FVerseClauseSyntaxDescriptor& Syntax = Descriptor.Syntax;
+		Syntax.OpeningRange = Descriptor.OpeningPunctuationRange;
+		Syntax.ClosingRange = Descriptor.ClosingPunctuationRange;
+		const int32 InteriorBegin = Descriptor.InteriorRange.IsSet()
+			? Descriptor.InteriorRange.BeginByte : DefinitionRange.EndByte();
+		const int32 InteriorEnd = Descriptor.InteriorRange.IsSet()
+			? Descriptor.InteriorRange.EndByte() : InteriorBegin;
+		const int32 ContentBegin = FMath::Clamp(FirstChildByte, InteriorBegin, InteriorEnd);
+		const int32 ContentEnd = FMath::Clamp(LastChildByte, ContentBegin, InteriorEnd);
+		Syntax.LeadingWhitespaceRange = FVerseByteRange::FromBounds(InteriorBegin, ContentBegin);
+		Syntax.TrailingWhitespaceRange = FVerseByteRange::FromBounds(ContentEnd, InteriorEnd);
+		const FUtf8StringView Interior = Source.Mid(InteriorBegin, InteriorEnd - InteriorBegin);
+		Syntax.LineEnding = DetectLineEnding(Interior);
+		Syntax.Layout = Syntax.LineEnding == EVerseLineEnding::None
+			? EVerseSyntaxLayout::Inline : EVerseSyntaxLayout::Multiline;
+		Syntax.IndentationPrefix = IndentationAt(Source, DefinitionRange.BeginByte);
+		if (ContentBegin < InteriorEnd)
+		{
+			const FString ChildIndent = IndentationAt(Source, ContentBegin);
+			Syntax.IndentationUnit = ChildIndent.StartsWith(Syntax.IndentationPrefix)
+				? ChildIndent.Mid(Syntax.IndentationPrefix.Len()) : ChildIndent;
+		}
+		if (Syntax.Delimiter == EVerseClauseDelimiter::Braces)
+		{
+			const FUtf8StringView BeforeOpen = Source.Mid(
+				DefinitionRange.BeginByte,
+				FMath::Max(0, Descriptor.OpeningPunctuationRange.BeginByte
+					- DefinitionRange.BeginByte));
+			Syntax.BracePlacement = DetectLineEnding(BeforeOpen) == EVerseLineEnding::None
+				? EVerseBracePlacement::SameLine : EVerseBracePlacement::NextLine;
+		}
+		const int32 HeaderEnd = Syntax.OpeningRange.IsSet()
+			? Syntax.OpeningRange.BeginByte : ContentBegin;
+		const int32 HeaderBegin = FMath::Clamp(DefinitionRange.BeginByte, 0, HeaderEnd);
+		const FString HeaderText = DecodeUtf8(Source.Mid(
+			HeaderBegin, HeaderEnd - HeaderBegin));
+		auto RecordKeyword = [&](FStringView Keyword, EVerseClauseKeyword Kind)
+		{
+			const int32 Relative = HeaderText.Find(
+				FString(Keyword), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			if (Relative != INDEX_NONE)
+			{
+				Syntax.Keyword = Kind;
+				const FTCHARToUTF8 Utf8(*FString(Keyword));
+				Syntax.KeywordRange = {
+					HeaderBegin + FTCHARToUTF8(*HeaderText.Left(Relative)).Length(),
+					Utf8.Length()};
+				return true;
+			}
+			return false;
+		};
+		if (!RecordKeyword(TEXTVIEW("else"), EVerseClauseKeyword::Else)
+			&& !RecordKeyword(TEXTVIEW("then"), EVerseClauseKeyword::Then))
+		{
+			RecordKeyword(TEXTVIEW("do"), EVerseClauseKeyword::Do);
+		}
+		const FString Leading = DecodeUtf8(Source.Mid(
+			Syntax.LeadingWhitespaceRange.BeginByte,
+			Syntax.LeadingWhitespaceRange.NumBytes));
+		Syntax.bHasCustomWhitespace = Leading.Contains(TEXT("\t"))
+			&& Leading.Contains(TEXT(" "));
 	}
 
 	void AccumulateOwnedSourceBounds(
@@ -269,6 +458,7 @@ namespace VerseParseSnapshotBuilder
 		if (Descriptor.InteriorRange.IsSet())
 		{
 			Descriptor.EmptyBodyInsertionByte = Descriptor.InteriorRange.EndByte();
+			Descriptor.Syntax.Layout = EVerseSyntaxLayout::Inline;
 		}
 		return Descriptor;
 	}
@@ -313,11 +503,13 @@ namespace VerseParseSnapshotBuilder
 				DefinitionRange.EndByte());
 			if (OpenByte != INDEX_NONE && CloseByte != INDEX_NONE && OpenByte < CloseByte)
 			{
-				Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::Braces;
+				Descriptor.Syntax.Delimiter = EVerseClauseDelimiter::Braces;
 				Descriptor.OpeningPunctuationRange = {OpenByte, 1};
 				Descriptor.ClosingPunctuationRange = {CloseByte, 1};
 				Descriptor.InteriorRange = FVerseByteRange::FromBounds(OpenByte + 1, CloseByte);
 				Descriptor.EmptyBodyInsertionByte = OpenByte + 1;
+				FinalizeClauseSyntax(
+					Descriptor, Source, DefinitionRange, FirstChildByte, LastChildByte);
 				return Descriptor;
 			}
 		}
@@ -330,23 +522,64 @@ namespace VerseParseSnapshotBuilder
 				FirstChildByte);
 			if (ColonByte != INDEX_NONE)
 			{
-				Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::ColonOrIndentation;
+				Descriptor.Syntax.Delimiter = EVerseClauseDelimiter::Colon;
 				Descriptor.OpeningPunctuationRange = {ColonByte, 1};
 				Descriptor.InteriorRange = FVerseByteRange::FromBounds(ColonByte + 1, DefinitionRange.EndByte());
 				Descriptor.EmptyBodyInsertionByte = ColonByte + 1;
+				FinalizeClauseSyntax(
+					Descriptor, Source, DefinitionRange, FirstChildByte, LastChildByte);
 				return Descriptor;
 			}
 		}
 		else if (Punctuation == Verse::Vst::Clause::EPunctuation::Indentation)
 		{
-			Descriptor.PunctuationStyle = EVerseClausePunctuationStyle::ColonOrIndentation;
+			Descriptor.Syntax.Delimiter = EVerseClauseDelimiter::BareIndentation;
 		}
 
 		const FVerseByteRange ClauseRange = SourceIndex.ToRange(Clause.Whence());
+		if (Punctuation == Verse::Vst::Clause::EPunctuation::Unknown
+			&& ClauseRange.IsSet())
+		{
+			const int32 OpenParen = FindLastByte(
+				Source, static_cast<UTF8CHAR>('('),
+				ClauseRange.BeginByte, FirstChildByte);
+			const int32 CloseParen = FindLastByte(
+				Source, static_cast<UTF8CHAR>(')'),
+				FMath::Max(LastChildByte, OpenParen + 1), ClauseRange.EndByte());
+			if (OpenParen != INDEX_NONE && CloseParen != INDEX_NONE
+				&& OpenParen < CloseParen)
+			{
+				Descriptor.Syntax.Delimiter = EVerseClauseDelimiter::Parentheses;
+				Descriptor.OpeningPunctuationRange = {OpenParen, 1};
+				Descriptor.ClosingPunctuationRange = {CloseParen, 1};
+				Descriptor.InteriorRange = FVerseByteRange::FromBounds(
+					OpenParen + 1, CloseParen);
+				Descriptor.EmptyBodyInsertionByte = OpenParen + 1;
+				FinalizeClauseSyntax(
+					Descriptor, Source, DefinitionRange, FirstChildByte, LastChildByte);
+				return Descriptor;
+			}
+			const int32 Dot = FindLastByte(
+				Source, static_cast<UTF8CHAR>('.'),
+				ClauseRange.BeginByte, FirstChildByte);
+			if (Dot != INDEX_NONE)
+			{
+				Descriptor.Syntax.Delimiter = EVerseClauseDelimiter::Dot;
+				Descriptor.OpeningPunctuationRange = {Dot, 1};
+				Descriptor.InteriorRange = FVerseByteRange::FromBounds(
+					Dot + 1, ClauseRange.EndByte());
+				Descriptor.EmptyBodyInsertionByte = Dot + 1;
+				FinalizeClauseSyntax(
+					Descriptor, Source, DefinitionRange, FirstChildByte, LastChildByte);
+				return Descriptor;
+			}
+		}
 		Descriptor.InteriorRange = ClauseRange.IsSet()
 			? ClauseRange
 			: FVerseByteRange::FromBounds(DefinitionRange.EndByte(), DefinitionRange.EndByte());
 		Descriptor.EmptyBodyInsertionByte = Descriptor.InteriorRange.BeginByte;
+		FinalizeClauseSyntax(
+			Descriptor, Source, DefinitionRange, FirstChildByte, LastChildByte);
 		return Descriptor;
 	}
 
@@ -578,25 +811,67 @@ namespace VerseParseSnapshotBuilder
 		return Count;
 	}
 
-	EVerseClauseItemSeparator ClassifySeparator(FUtf8StringView Trivia, bool bIsFinal)
+	FVerseSeparatorDescriptor ClassifySeparator(
+		FUtf8StringView Source,
+		FVerseByteRange TriviaRange,
+		bool bIsFinal)
 	{
-		if (bIsFinal)
+		FVerseSeparatorDescriptor Result;
+		Result.bIsEndOfClause = bIsFinal;
+		if (!TriviaRange.IsSet())
 		{
-			return EVerseClauseItemSeparator::EndOfClause;
+			return Result;
 		}
-		const bool bHasSemicolon = Trivia.Find(UTF8TEXTVIEW(";")) != INDEX_NONE;
-		const bool bHasNewline = CountLineBreaks(Trivia) > 0;
-		if (bHasSemicolon && bHasNewline)
+		const FUtf8StringView Trivia = Source.Mid(
+			TriviaRange.BeginByte, TriviaRange.NumBytes);
+		int32 TokenOffset = INDEX_NONE;
+		for (int32 Index = 0; Index < Trivia.Len(); ++Index)
 		{
-			return EVerseClauseItemSeparator::Mixed;
+			if (Trivia[Index] == static_cast<UTF8CHAR>(';')
+				|| Trivia[Index] == static_cast<UTF8CHAR>(','))
+			{
+				TokenOffset = Index;
+				Result.Token = Trivia[Index] == static_cast<UTF8CHAR>(';')
+					? EVerseSeparatorToken::Semicolon
+					: EVerseSeparatorToken::Comma;
+				break;
+			}
 		}
-		if (bHasSemicolon)
+		if (TokenOffset != INDEX_NONE)
 		{
-			return EVerseClauseItemSeparator::Semicolon;
+			Result.TokenRange = {TriviaRange.BeginByte + TokenOffset, 1};
 		}
-		return bHasNewline
-			? EVerseClauseItemSeparator::Newline
-			: EVerseClauseItemSeparator::None;
+		const int32 WhitespaceBegin = TokenOffset == INDEX_NONE
+			? TriviaRange.BeginByte : TriviaRange.BeginByte + TokenOffset + 1;
+		Result.WhitespaceRange = FVerseByteRange::FromBounds(
+			WhitespaceBegin, TriviaRange.EndByte());
+		const FUtf8StringView Whitespace = Source.Mid(
+			Result.WhitespaceRange.BeginByte, Result.WhitespaceRange.NumBytes);
+		const int32 LineBreaks = CountLineBreaks(Whitespace);
+		Result.BlankLineCount = FMath::Max(0, LineBreaks - 1);
+		if (TokenOffset != INDEX_NONE)
+		{
+			Result.Layout = LineBreaks > 0
+				? EVerseSeparatorLayout::TokenAndNewline
+				: EVerseSeparatorLayout::TokenAndSpace;
+		}
+		else if (LineBreaks > 0)
+		{
+			Result.Layout = EVerseSeparatorLayout::Newline;
+		}
+		else if (!Whitespace.IsEmpty())
+		{
+			bool bSimpleHorizontal = true;
+			for (UTF8CHAR Byte : Whitespace)
+			{
+				bSimpleHorizontal &= Byte == static_cast<UTF8CHAR>(' ')
+					|| Byte == static_cast<UTF8CHAR>('\t');
+			}
+			Result.Layout = bSimpleHorizontal
+				? EVerseSeparatorLayout::HorizontalSpace
+				: EVerseSeparatorLayout::CustomPreserved;
+		}
+		return Result;
 	}
 
 	FVerseExpressionType FindIdentifierType(
@@ -621,6 +896,83 @@ namespace VerseParseSnapshotBuilder
 	FVerseExpressionDescriptor BuildExpressionDescriptor(
 		const Verse::Vst::Node& Node,
 		const FSourceIndex& SourceIndex,
+		TConstArrayView<FVerseFunctionParameter> Parameters);
+
+	FVerseExpressionDescriptor BuildWrappedExpressionDescriptor(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		TConstArrayView<FVerseFunctionParameter> Parameters)
+	{
+		TArray<FVerseGroupingLayer> GroupingLayers;
+		const Verse::Vst::Node* Unwrapped = UnwrapSingleClauseAndCollectGrouping(
+			&Node, SourceIndex, GroupingLayers);
+		FVerseExpressionDescriptor Result = BuildExpressionDescriptor(
+			Unwrapped != nullptr ? *Unwrapped : Node, SourceIndex, Parameters);
+		// Parenthesis wrappers are not consistently materialized as Parens nodes by
+		// the UE6 VST. Recover source-exact grouping immediately around the compiler
+		// expression, while excluding call/control delimiters (whose opening token is
+		// immediately preceded by an identifier/keyword).
+		if (Result.Range.IsSet())
+		{
+			const FUtf8StringView Source = SourceIndex.GetSource();
+			int32 InnerBegin = Result.Range.BeginByte;
+			int32 InnerEnd = Result.Range.EndByte();
+			for (;;)
+			{
+				int32 Open = InnerBegin - 1;
+				while (Open >= 0 && FChar::IsWhitespace(static_cast<TCHAR>(Source[Open]))) --Open;
+				int32 Close = InnerEnd;
+				while (Close < Source.Len() && FChar::IsWhitespace(static_cast<TCHAR>(Source[Close]))) ++Close;
+				if (Open < 0 || Close >= Source.Len()
+					|| Source[Open] != static_cast<UTF8CHAR>('(')
+					|| Source[Close] != static_cast<UTF8CHAR>(')'))
+				{
+					break;
+				}
+				int32 BeforeOpen = Open - 1;
+				while (BeforeOpen >= 0
+					&& FChar::IsWhitespace(static_cast<TCHAR>(Source[BeforeOpen]))) --BeforeOpen;
+				if (BeforeOpen >= 0)
+				{
+					const UTF8CHAR Before = Source[BeforeOpen];
+					const bool bCallOrKeywordDelimiter =
+						(Before >= static_cast<UTF8CHAR>('a') && Before <= static_cast<UTF8CHAR>('z'))
+						|| (Before >= static_cast<UTF8CHAR>('A') && Before <= static_cast<UTF8CHAR>('Z'))
+						|| (Before >= static_cast<UTF8CHAR>('0') && Before <= static_cast<UTF8CHAR>('9'))
+						|| Before == static_cast<UTF8CHAR>('_');
+					if (bCallOrKeywordDelimiter)
+					{
+						break;
+					}
+				}
+				if (!GroupingLayers.ContainsByPredicate(
+					[Open](const FVerseGroupingLayer& Layer)
+					{
+						return Layer.OpeningRange.BeginByte == Open;
+					}))
+				{
+					GroupingLayers.Add({FVerseByteRange::FromBounds(Open, Close + 1),
+						{Open, 1}, {Close, 1}});
+				}
+				InnerBegin = Open;
+				InnerEnd = Close + 1;
+			}
+		}
+		if (!GroupingLayers.IsEmpty())
+		{
+			GroupingLayers.Sort([](const FVerseGroupingLayer& Left, const FVerseGroupingLayer& Right)
+			{
+				return Left.OpeningRange.BeginByte < Right.OpeningRange.BeginByte;
+			});
+			Result.GroupingLayers = MoveTemp(GroupingLayers);
+			Result.Range = Result.GroupingLayers[0].Range;
+		}
+		return Result;
+	}
+
+	FVerseExpressionDescriptor BuildExpressionDescriptor(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
 		TConstArrayView<FVerseFunctionParameter> Parameters)
 	{
 		FVerseExpressionDescriptor Result;
@@ -639,7 +991,7 @@ namespace VerseParseSnapshotBuilder
 			Region.InteriorRange = ClauseDescriptor.InteriorRange;
 			Region.OpeningPunctuationRange = ClauseDescriptor.OpeningPunctuationRange;
 			Region.ClosingPunctuationRange = ClauseDescriptor.ClosingPunctuationRange;
-			Region.PunctuationStyle = ClauseDescriptor.PunctuationStyle;
+			Region.Syntax = ClauseDescriptor.Syntax;
 			Region.EmptyBodyInsertionByte = ClauseDescriptor.EmptyBodyInsertionByte;
 			Region.FirstOperandIndex = Result.Operands.Num();
 			for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Clause.GetChildren())
@@ -647,8 +999,8 @@ namespace VerseParseSnapshotBuilder
 				const Verse::Vst::Node* Expression = UnwrapSingleClause(Child.Get());
 				if (Expression != nullptr && !Expression->IsA<Verse::Vst::Comment>())
 				{
-					Result.Operands.Add(BuildExpressionDescriptor(
-						*Expression, SourceIndex, Parameters));
+					Result.Operands.Add(BuildWrappedExpressionDescriptor(
+						*Child, SourceIndex, Parameters));
 				}
 			}
 			Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;
@@ -683,7 +1035,7 @@ namespace VerseParseSnapshotBuilder
 						Item.TrailingTriviaRange.NumBytes)
 					: FUtf8StringView();
 				Item.Separator = ClassifySeparator(
-					Trivia,
+					SourceIndex.GetSource(), Item.TrailingTriviaRange,
 					Offset == Region.OperandCount - 1);
 			}
 		};
@@ -779,8 +1131,8 @@ namespace VerseParseSnapshotBuilder
 					Definition->GetOperandRight().Get());
 				if (Value != nullptr)
 				{
-					Result.Operands.Add(BuildExpressionDescriptor(
-						*Value, SourceIndex, Parameters));
+					Result.Operands.Add(BuildWrappedExpressionDescriptor(
+						*Definition->GetOperandRight(), SourceIndex, Parameters));
 				}
 				return Result;
 			}
@@ -864,7 +1216,7 @@ namespace VerseParseSnapshotBuilder
 				&& (Operator->GetSourceText()[0] == u'-' || Operator->GetSourceText()[0] == u'+'))
 			{
 				FVerseExpressionDescriptor SignedOperand =
-					BuildExpressionDescriptor(OperandNode, SourceIndex, Parameters);
+					BuildWrappedExpressionDescriptor(OperandNode, SourceIndex, Parameters);
 				if (SignedOperand.LiteralKind == EVerseLiteralKind::Integer
 					|| SignedOperand.LiteralKind == EVerseLiteralKind::Float)
 				{
@@ -889,16 +1241,10 @@ namespace VerseParseSnapshotBuilder
 			Result.Kind = EVerseExpressionKind::BinaryOperator;
 			Result.OperatorRange = TrimSourceWhitespace(SourceIndex.GetSource(), OperatorRange);
 			Result.OperatorSpelling = MoveTemp(OperatorSpelling);
-			const Verse::Vst::Node* UnwrappedLeft = UnwrapSingleClause(&Left);
-			const Verse::Vst::Node* UnwrappedRight = UnwrapSingleClause(&Right);
-			Result.Operands.Add(BuildExpressionDescriptor(
-				UnwrappedLeft != nullptr ? *UnwrappedLeft : Left,
-				SourceIndex,
-				Parameters));
-			Result.Operands.Add(BuildExpressionDescriptor(
-				UnwrappedRight != nullptr ? *UnwrappedRight : Right,
-				SourceIndex,
-				Parameters));
+			Result.Operands.Add(BuildWrappedExpressionDescriptor(
+				Left, SourceIndex, Parameters));
+			Result.Operands.Add(BuildWrappedExpressionDescriptor(
+				Right, SourceIndex, Parameters));
 		};
 
 		auto TryBuildTaggedBinary = [&](const Verse::Vst::BinaryOp* Binary) -> bool
@@ -1011,7 +1357,7 @@ namespace VerseParseSnapshotBuilder
 			Result.OperatorRange = TrimSourceWhitespace(
 				SourceIndex.GetSource(),
 				FVerseByteRange::FromBounds(Result.Range.BeginByte, OperandRange.BeginByte));
-			Result.Operands.Add(BuildExpressionDescriptor(Operand, SourceIndex, Parameters));
+			Result.Operands.Add(BuildWrappedExpressionDescriptor(Operand, SourceIndex, Parameters));
 			return Result;
 		}
 
@@ -1031,7 +1377,7 @@ namespace VerseParseSnapshotBuilder
 			}
 			Result.OperatorRange = TrimSourceWhitespace(
 				SourceIndex.GetSource(), SourceIndex.ToRange(OperatorNode.Whence()));
-			Result.Operands.Add(BuildExpressionDescriptor(Operand, SourceIndex, Parameters));
+			Result.Operands.Add(BuildWrappedExpressionDescriptor(Operand, SourceIndex, Parameters));
 			return Result;
 		}
 
@@ -1053,7 +1399,7 @@ namespace VerseParseSnapshotBuilder
 			const Verse::Vst::Node& Operand = *Query->GetChildren()[0];
 			const Verse::Vst::Node& Operator = *Query->GetChildren()[1];
 			FVerseExpressionDescriptor OperandDescriptor =
-				BuildExpressionDescriptor(Operand, SourceIndex, Parameters);
+				BuildWrappedExpressionDescriptor(Operand, SourceIndex, Parameters);
 			Result.Kind = EVerseExpressionKind::UnaryOperator;
 			Result.OperatorSpelling = TEXT("?");
 			Result.OperatorRange = TrimSourceWhitespace(
@@ -1103,7 +1449,7 @@ namespace VerseParseSnapshotBuilder
 					{
 						Value = Named->GetOperandRight().Get();
 					}
-					Result.Operands.Add(BuildExpressionDescriptor(*Value, SourceIndex, Parameters));
+					Result.Operands.Add(BuildWrappedExpressionDescriptor(*Value, SourceIndex, Parameters));
 				}
 			}
 			return Result;
@@ -1124,7 +1470,7 @@ namespace VerseParseSnapshotBuilder
 				const Verse::Vst::Node* Candidate = UnwrapSingleClause(Child.Get());
 				if (Candidate != nullptr && !Candidate->IsA<Verse::Vst::Comment>())
 				{
-					RootExpressions.Add(Candidate);
+					RootExpressions.Add(Child.Get());
 				}
 			}
 		}
@@ -1151,7 +1497,7 @@ namespace VerseParseSnapshotBuilder
 			}
 
 			FVerseClauseItemDescriptor& Item = OutRegion.BodyClause.Items.AddDefaulted_GetRef();
-			Item.Expression = BuildExpressionDescriptor(
+			Item.Expression = BuildWrappedExpressionDescriptor(
 				*Expression,
 				SourceIndex,
 				OutRegion.FunctionParameters);
@@ -1182,7 +1528,10 @@ namespace VerseParseSnapshotBuilder
 					Item.TrailingTriviaRange.NumBytes)
 				: FUtf8StringView();
 			Item.bIsFinalValuePosition = Index == Items.Num() - 1;
-			Item.Separator = ClassifySeparator(Trivia, Item.bIsFinalValuePosition);
+			Item.Separator = ClassifySeparator(
+				SourceIndex.GetSource(),
+				Item.TrailingTriviaRange,
+				Item.bIsFinalValuePosition);
 			Item.ExtraBlankLineCount = FMath::Max(0, CountLineBreaks(Trivia) - 1);
 
 		}

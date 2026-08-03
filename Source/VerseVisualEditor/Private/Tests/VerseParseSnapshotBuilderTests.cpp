@@ -285,7 +285,7 @@ bool FVerseNestedBodyRangeTest::RunTest(const FString& Parameters)
 
 	if (TestNotNull(TEXT("Brace container is represented"), Brace))
 	{
-		TestEqual(TEXT("Brace punctuation style comes from VST"), Brace->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::Braces);
+		TestEqual(TEXT("Brace punctuation style comes from VST"), Brace->BodyClause.Syntax.Delimiter, EVerseClauseDelimiter::Braces);
 		TestTrue(TEXT("Brace opening punctuation is exact"), Snapshot.GetSourceView(Brace->BodyClause.OpeningPunctuationRange) == UTF8TEXTVIEW("{"));
 		TestTrue(TEXT("Brace closing punctuation is exact"), Snapshot.GetSourceView(Brace->BodyClause.ClosingPunctuationRange) == UTF8TEXTVIEW("}"));
 		TestEqual(TEXT("Durable body range is the descriptor interior"), Brace->BodyRange, Brace->BodyClause.InteriorRange);
@@ -294,7 +294,7 @@ bool FVerseNestedBodyRangeTest::RunTest(const FString& Parameters)
 	}
 	if (TestNotNull(TEXT("Colon container is represented"), Colon))
 	{
-		TestEqual(TEXT("Colon punctuation style comes from VST"), Colon->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::ColonOrIndentation);
+		TestEqual(TEXT("Colon punctuation style comes from VST"), Colon->BodyClause.Syntax.Delimiter, EVerseClauseDelimiter::Colon);
 		TestTrue(TEXT("Colon opening punctuation is exact"), Snapshot.GetSourceView(Colon->BodyClause.OpeningPunctuationRange) == UTF8TEXTVIEW(":"));
 		TestFalse(TEXT("Colon body has no closing punctuation"), Colon->BodyClause.ClosingPunctuationRange.IsSet());
 		TestTrue(TEXT("Colon interior retains trivia immediately after the colon"), Snapshot.GetSourceView(Colon->BodyRange).StartsWith(UTF8TEXTVIEW("\n")));
@@ -308,7 +308,9 @@ bool FVerseNestedBodyRangeTest::RunTest(const FString& Parameters)
 	}
 	if (TestNotNull(TEXT("Colon-nested struct is represented recursively"), NestedStruct))
 	{
-		TestEqual(TEXT("Nested struct retains its own clause style"), NestedStruct->BodyClause.PunctuationStyle, EVerseClausePunctuationStyle::ColonOrIndentation);
+		TestTrue(TEXT("Nested struct retains its own clause style"),
+			NestedStruct->BodyClause.Syntax.Delimiter == EVerseClauseDelimiter::Colon
+			|| NestedStruct->BodyClause.Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation);
 		VerseParseSnapshotBuilderTests::TestBodyCoverage(*this, *NestedStruct, TEXT("Nested struct body"));
 	}
 	return true;
@@ -430,9 +432,7 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			Snapshot.GetSourceView(Item.Expression.Type.SourceRange) == UTF8TEXTVIEW("string"));
 		TestTrue(TEXT("Single identifier is the final value position"),
 			Item.bIsFinalValuePosition);
-		TestEqual(TEXT("Single identifier ends its clause"),
-			Item.Separator,
-			EVerseClauseItemSeparator::EndOfClause);
+		TestTrue(TEXT("Single identifier ends its clause"), Item.Separator.bIsEndOfClause);
 	}
 
 	const FVerseSourceRegion* SpacedFunction = VerseParseSnapshotBuilderTests::FindTypedRegion(
@@ -450,8 +450,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Blank source line is retained as visual spacing metadata"),
 			First.ExtraBlankLineCount, 1);
 		TestEqual(TEXT("Newline separator is classified from the source gap"),
-			First.Separator,
-			EVerseClauseItemSeparator::Newline);
+			First.Separator.Layout,
+			EVerseSeparatorLayout::Newline);
 		TestFalse(TEXT("First expression is not the function result position"),
 			First.bIsFinalValuePosition);
 		TestTrue(TEXT("Last expression is the function result position"),
@@ -612,8 +612,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			&& If->ControlRegions.Num() == 3
 			&& If->ControlRegions[0].Kind == EVerseControlRegionKind::Condition
 			&& If->ControlRegions[1].Kind == EVerseControlRegionKind::Body
-			&& If->ControlRegions[1].PunctuationStyle
-				== EVerseClausePunctuationStyle::ColonOrIndentation
+			&& (If->ControlRegions[1].Syntax.Delimiter == EVerseClauseDelimiter::Colon
+				|| If->ControlRegions[1].Syntax.Delimiter == EVerseClauseDelimiter::BareIndentation)
 			&& If->ControlRegions[2].Kind == EVerseControlRegionKind::Else);
 		if (If->ControlRegions.Num() == 3)
 		{
@@ -628,8 +628,7 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 				&& Predicate.Items.Num() == 1
 				&& Predicate.Items[0].ExpressionRange
 					== If->Operands[Predicate.FirstOperandIndex].Range
-				&& Predicate.Items[0].Separator
-					== EVerseClauseItemSeparator::EndOfClause);
+				&& Predicate.Items[0].Separator.bIsEndOfClause);
 			TestTrue(TEXT("If predicate retains a source insertion point"),
 				Predicate.EmptyBodyInsertionByte != INDEX_NONE
 				&& Predicate.EmptyBodyInsertionByte
@@ -651,10 +650,8 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			Predicate != nullptr
 				&& Predicate->OperandCount == 2
 				&& Predicate->Items.Num() == 2
-				&& Predicate->Items[0].Separator
-					== EVerseClauseItemSeparator::Semicolon
-				&& Predicate->Items[1].Separator
-					== EVerseClauseItemSeparator::EndOfClause);
+				&& Predicate->Items[0].Separator.Token == EVerseSeparatorToken::Semicolon
+				&& Predicate->Items[1].Separator.bIsEndOfClause);
 	}
 	if (const FVerseExpressionDescriptor* If =
 		FindOnlyExpression(UTF8TEXTVIEW("ControlIfBraces")))
@@ -667,7 +664,7 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 				});
 		TestTrue(TEXT("Brace-form if retains exact body punctuation"),
 			Body != nullptr
-				&& Body->PunctuationStyle == EVerseClausePunctuationStyle::Braces
+				&& Body->Syntax.Delimiter == EVerseClauseDelimiter::Braces
 				&& Snapshot.GetSourceView(Body->OpeningPunctuationRange)
 					== UTF8TEXTVIEW("{")
 				&& Snapshot.GetSourceView(Body->ClosingPunctuationRange)

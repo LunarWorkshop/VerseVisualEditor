@@ -2,6 +2,7 @@
 
 #include "Internationalization/Text.h"
 #include "Editing/VerseBlueprintCallablePresentation.h"
+#include "Editing/VerseFormattingStyle.h"
 #include "VerseDocument.h"
 #include "Document/VerseDocumentSession.h"
 #include "VisualModel/VerseFunctionNavigation.h"
@@ -590,9 +591,21 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 		}
 	}
 	AppendLiteralActions(Result);
+	const FVerseFormattingStyleProfile Style =
+		FVerseFormattingStyleResolver::ResolveDefaults();
 	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
 	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
-	IfAction->SourceSpelling = TEXT("if (true?) {}");
+	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+	{
+		IfAction->SourceSpelling = Style.bSpaceInsideParentheses
+			? TEXT("if ( true? ) { }") : TEXT("if (true?) {}");
+	}
+	else
+	{
+		const FString Newline = FVerseSyntaxEmitter::LineEnding(Style);
+		IfAction->SourceSpelling = TEXT("if (true?):") + Newline
+			+ Style.IndentationUnit + TEXT("false");
+	}
 	IfAction->ProvisionalContentTarget =
 		EVerseProvisionalContentTarget::FirstConditionExpression;
 	IfAction->DisplayName = LOCTEXT("CreateIfExpression", "If");
@@ -602,7 +615,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 
 	TSharedPtr<FVerseExpressionAction> VariableAction = MakeShared<FVerseExpressionAction>();
 	VariableAction->SourceForm = EVerseExpressionSourceForm::Definition;
-	VariableAction->SourceSpelling = TEXT("var NewVariable : int = 0");
+	VariableAction->SourceSpelling = FVerseSyntaxEmitter::Definition(
+		true, TEXTVIEW("NewVariable"), TEXTVIEW("int"), TEXTVIEW("0"), Style);
 	VariableAction->DisplayName = LOCTEXT("CreateVariableDefinition", "Variable Definition");
 	VariableAction->Category = LOCTEXT("VariablesCategory", "Variables");
 	VariableAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
@@ -610,7 +624,8 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 
 	TSharedPtr<FVerseExpressionAction> ConstantAction = MakeShared<FVerseExpressionAction>();
 	ConstantAction->SourceForm = EVerseExpressionSourceForm::Definition;
-	ConstantAction->SourceSpelling = TEXT("NewConstant : int = 0");
+	ConstantAction->SourceSpelling = FVerseSyntaxEmitter::Definition(
+		false, TEXTVIEW("NewConstant"), TEXTVIEW("int"), TEXTVIEW("0"), Style);
 	ConstantAction->DisplayName = LOCTEXT("CreateConstantDefinition", "Constant Definition");
 	ConstantAction->Category = LOCTEXT("VariablesCategory", "Variables");
 	ConstantAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
@@ -686,6 +701,8 @@ bool BuildVerseExpressionActionSource(
 	FString& OutSource,
 	FText& OutError)
 {
+	const FVerseFormattingStyleProfile Style =
+		FVerseFormattingStyleResolver::ResolveDefaults();
 	if (Action.SourceForm == EVerseExpressionSourceForm::IdentifierReference)
 	{
 		if (Action.SourceSpelling.IsEmpty())
@@ -758,18 +775,20 @@ bool BuildVerseExpressionActionSource(
 				? Action.InputNames[Index]
 				: FString();
 			Arguments.Add(bNamed && !Name.IsEmpty()
-				? FString::Printf(TEXT("?%s := %s"), *Name, *Inputs[Index])
+				? FString::Printf(TEXT("?%s%s:=%s%s"), *Name,
+					Style.bSpaceAroundOperators ? TEXT(" ") : TEXT(""),
+					Style.bSpaceAroundOperators ? TEXT(" ") : TEXT(""), *Inputs[Index])
 				: Inputs[Index]);
 		}
-		OutSource = Action.bUsesFailureCallSyntax
-			? FString::Printf(TEXT("%s[%s]"), *Action.SourceSpelling, *FString::Join(Arguments, TEXT(", ")))
-			: FString::Printf(TEXT("%s(%s)"), *Action.SourceSpelling, *FString::Join(Arguments, TEXT(", ")));
+		OutSource = Action.SourceSpelling
+			+ FVerseSyntaxEmitter::Arguments(Arguments, Action.bUsesFailureCallSyntax, Style);
 		return true;
 	}
 	case EVerseExpressionSourceForm::InfixOperator:
 		if (Inputs.Num() == 2)
 		{
-			OutSource = FString::Printf(TEXT("%s %s %s"), *Inputs[0], *Action.SourceSpelling, *Inputs[1]);
+			OutSource = FVerseSyntaxEmitter::Infix(
+				Inputs[0], Action.SourceSpelling, Inputs[1], Style);
 			return true;
 		}
 		OutError = LOCTEXT("InvalidInfixInputs", "An infix operator requires exactly two operands.");
@@ -777,7 +796,8 @@ bool BuildVerseExpressionActionSource(
 	case EVerseExpressionSourceForm::PrefixOperator:
 		if (Inputs.Num() == 1)
 		{
-			OutSource = FString::Printf(TEXT("%s %s"), *Action.SourceSpelling, *Inputs[0]);
+			OutSource = FVerseSyntaxEmitter::Prefix(
+				Action.SourceSpelling, Inputs[0], Style);
 			return true;
 		}
 		OutError = LOCTEXT("InvalidPrefixInputs", "A prefix operator requires exactly one operand.");

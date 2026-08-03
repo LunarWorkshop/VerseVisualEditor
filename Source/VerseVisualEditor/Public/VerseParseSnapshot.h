@@ -27,11 +27,52 @@ enum class EVerseCommentKind : uint8
 	Fragment,
 };
 
-enum class EVerseClausePunctuationStyle : uint8
+enum class EVerseClauseDelimiter : uint8
 {
 	None,
+	Parentheses,
 	Braces,
-	ColonOrIndentation,
+	Colon,
+	BareIndentation,
+	Dot,
+};
+
+enum class EVerseClauseKeyword : uint8
+{
+	None,
+	Then,
+	Do,
+	Else,
+};
+
+enum class EVerseSyntaxLayout : uint8
+{
+	Inline,
+	Multiline,
+};
+
+enum class EVerseBracePlacement : uint8
+{
+	NotApplicable,
+	SameLine,
+	NextLine,
+};
+
+enum class EVerseSeparatorToken : uint8
+{
+	None,
+	Comma,
+	Semicolon,
+};
+
+enum class EVerseSeparatorLayout : uint8
+{
+	None,
+	HorizontalSpace,
+	Newline,
+	TokenAndSpace,
+	TokenAndNewline,
+	CustomPreserved,
 };
 
 enum class EVerseExpressionKind : uint8
@@ -61,13 +102,41 @@ enum class EVerseControlRegionKind : uint8
 	Else,
 };
 
-enum class EVerseClauseItemSeparator : uint8
+/** One explicit grouping-parentheses wrapper retained from source. */
+struct VERSEVISUALEDITOR_API FVerseGroupingLayer
 {
-	None,
-	Newline,
-	Semicolon,
-	Mixed,
-	EndOfClause,
+	FVerseByteRange Range;
+	FVerseByteRange OpeningRange;
+	FVerseByteRange ClosingRange;
+};
+
+/** Source-exact separator and following layout between ordered clause items. */
+struct VERSEVISUALEDITOR_API FVerseSeparatorDescriptor
+{
+	FVerseByteRange TokenRange;
+	FVerseByteRange WhitespaceRange;
+	EVerseSeparatorToken Token = EVerseSeparatorToken::None;
+	EVerseSeparatorLayout Layout = EVerseSeparatorLayout::None;
+	int32 BlankLineCount = 0;
+	bool bIsEndOfClause = false;
+};
+
+/** Source-exact syntax and layout of one clause/body. */
+struct VERSEVISUALEDITOR_API FVerseClauseSyntaxDescriptor
+{
+	EVerseClauseDelimiter Delimiter = EVerseClauseDelimiter::None;
+	EVerseClauseKeyword Keyword = EVerseClauseKeyword::None;
+	EVerseSyntaxLayout Layout = EVerseSyntaxLayout::Inline;
+	EVerseBracePlacement BracePlacement = EVerseBracePlacement::NotApplicable;
+	EVerseLineEnding LineEnding = EVerseLineEnding::None;
+	FString IndentationPrefix;
+	FString IndentationUnit;
+	FVerseByteRange KeywordRange;
+	FVerseByteRange OpeningRange;
+	FVerseByteRange ClosingRange;
+	FVerseByteRange LeadingWhitespaceRange;
+	FVerseByteRange TrailingWhitespaceRange;
+	bool bHasCustomWhitespace = false;
 };
 
 /** Source-exact occurrence of one ordered expression inside a control clause. */
@@ -76,7 +145,7 @@ struct VERSEVISUALEDITOR_API FVerseExpressionControlItem
 	FVerseByteRange ExpressionRange;
 	FVerseByteRange LeadingTriviaRange;
 	FVerseByteRange TrailingTriviaRange;
-	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+	FVerseSeparatorDescriptor Separator;
 };
 
 struct VERSEVISUALEDITOR_API FVerseExpressionControlRegion
@@ -86,7 +155,7 @@ struct VERSEVISUALEDITOR_API FVerseExpressionControlRegion
 	FVerseByteRange OpeningPunctuationRange;
 	FVerseByteRange ClosingPunctuationRange;
 	EVerseControlRegionKind Kind = EVerseControlRegionKind::Body;
-	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	FVerseClauseSyntaxDescriptor Syntax;
 	int32 EmptyBodyInsertionByte = INDEX_NONE;
 	int32 FirstOperandIndex = 0;
 	int32 OperandCount = 0;
@@ -152,6 +221,7 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 	FVerseByteRange NameRange;
 	FVerseByteRange DeclaredTypeRange;
 	FVerseExpressionType Type;
+	TArray<FVerseGroupingLayer> GroupingLayers;
 	TArray<FVerseExpressionDescriptor> Operands;
 	TArray<FVerseExpressionControlRegion> ControlRegions;
 };
@@ -162,7 +232,7 @@ struct VERSEVISUALEDITOR_API FVerseClauseItemDescriptor
 	FVerseExpressionDescriptor Expression;
 	FVerseByteRange LeadingTriviaRange;
 	FVerseByteRange TrailingTriviaRange;
-	EVerseClauseItemSeparator Separator = EVerseClauseItemSeparator::None;
+	FVerseSeparatorDescriptor Separator;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;
 };
@@ -173,7 +243,7 @@ struct VERSEVISUALEDITOR_API FVerseClauseDescriptor
 	FVerseByteRange InteriorRange;
 	FVerseByteRange OpeningPunctuationRange;
 	FVerseByteRange ClosingPunctuationRange;
-	EVerseClausePunctuationStyle PunctuationStyle = EVerseClausePunctuationStyle::None;
+	FVerseClauseSyntaxDescriptor Syntax;
 	int32 EmptyBodyInsertionByte = INDEX_NONE;
 	TArray<FVerseClauseItemDescriptor> Items;
 

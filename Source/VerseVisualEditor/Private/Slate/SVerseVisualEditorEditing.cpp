@@ -679,7 +679,7 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 		bApplied = FVerseClauseEditing::AddElseExpression(
 			*ActiveDocument->Session,
 			SocketDrag->InsertionOwnerRange,
-			SocketDrag->Clause->PunctuationStyle,
+			SocketDrag->Clause->Syntax.Delimiter,
 			*Action,
 			Error,
 			&AppliedExpressionRange,

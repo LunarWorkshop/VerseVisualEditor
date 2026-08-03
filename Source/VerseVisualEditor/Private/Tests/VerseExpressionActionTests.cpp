@@ -365,7 +365,7 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		{
 			return Action.IsValid()
 				&& Action->SourceForm == EVerseExpressionSourceForm::StructuralExpression
-				&& Action->SourceSpelling == TEXT("if (true?) {}");
+				&& Action->DisplayName.ToString() == TEXT("If");
 		});
 	if (TestNotNull(TEXT("Untyped clause search offers If"), IfAction))
 	{

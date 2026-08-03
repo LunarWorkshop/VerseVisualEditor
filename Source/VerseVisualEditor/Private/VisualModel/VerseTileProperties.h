@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "Containers/UnrealString.h"
+#include "Editing/VerseFormattingEdit.h"
 #include "VisualModel/VerseVisualTile.h"
 
 class FVerseParseSnapshot;
@@ -16,6 +17,7 @@ enum class EVerseTilePropertyEditKind : uint8
 	AccessSpecifiers,
 	EffectSpecifiers,
 	Literal,
+	Syntax,
 };
 
 struct FVerseTileProperty
@@ -26,6 +28,10 @@ struct FVerseTileProperty
 	EVerseTilePropertyEditKind EditKind = EVerseTilePropertyEditKind::None;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	FVerseTextRange EditRange;
+	EVerseSyntaxControlKind SyntaxControl = EVerseSyntaxControlKind::None;
+	int32 SyntaxRegionIndex = INDEX_NONE;
+	TArray<FString> Options;
+	FString Example;
 };
 
 class FVerseTileProperties

@@ -1,5 +1,18 @@
 #pragma once
 
+#include "Slate/SVerseVisualEditor.h"
+
+#include "Document/VerseDocumentSession.h"
+#include "Editing/VerseProvisionalState.h"
+#include "Infrastructure/VerseVisualEditorLifetimeDiagnostics.h"
+#include "VisualModel/VerseFunctionNavigation.h"
+
+class FVerseDocument;
+class FVerseGraphMotionController;
+class SVerseFileCanvas;
+class SVerseFunctionCanvas;
+
+/** Per-function transient editor state shared by the split Slate implementation files. */
 struct FOpenVerseFunctionTab
 {
 	FString Name;
@@ -20,6 +33,7 @@ struct FOpenVerseFunctionTab
 	bool bHasViewState = false;
 };
 
+/** Per-file transient editor state shared by the split Slate implementation files. */
 struct FOpenVerseDocument
 {
 	FOpenVerseDocument()
@@ -39,7 +53,6 @@ struct FOpenVerseDocument
 	FText PropertyValidationMessage;
 	TOptional<FString> PendingRenameText;
 	TOptional<FString> PendingSpecifierText;
-	/** Retains an explicit overload choice while a semantically invalid fallback operand exists. */
 	TOptional<FString> PendingOperatorSignatureText;
 	FString PendingOperatorSpelling;
 	int32 PendingOperatorSignatureBeginByte = INDEX_NONE;
@@ -47,7 +60,6 @@ struct FOpenVerseDocument
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseFileCanvas> FileCanvas;
 	TOptional<FVerseVisualTile> SelectedTile;
-	/** Revision-specific, editor-only tile state. Deliberately absent from session persistence. */
 	FVerseProvisionalState ProvisionalTiles;
 	TArray<FOpenVerseFunctionTab> FunctionTabs;
 	int32 ActiveFunctionTabIndex = INDEX_NONE;
@@ -66,22 +78,25 @@ struct FOpenVerseDocument
 namespace VerseVisualEditorPrivate
 {
 	FLinearColor GetBlueprintPinColor(const FString& VerseType);
-
 	FString GetVisualTypeName(
 		const FVerseTextRange& TypeRange,
 		FName IntrinsicTypeName,
 		const FVerseDocument& Document,
-		FStringView SemanticTypeName = FStringView());
-
+		FStringView SemanticTypeName = {});
 	const FVerseVisualTile* FindTileByRange(
 		TConstArrayView<FVerseVisualTile> Tiles,
 		FVerseTextRange Range);
-
+	void ApplyProvisionalState(
+		TArray<FVerseVisualTile>& Tiles,
+		const FVerseProvisionalState& ProvisionalTiles);
 	TSharedPtr<const FVerseSemanticSnapshot> FindExactSemanticSnapshot(
 		const FVerseSemanticWorkspace* Workspace,
 		const FOpenVerseDocument& Document);
-
+	void BindGraphTiles(
+		FOpenVerseDocument& Document,
+		TArray<FVerseVisualTile>& GraphTiles,
+		const TSharedPtr<const FVerseSemanticSnapshot>& Snapshot);
 	void ReconcileFunctionTabs(
 		FOpenVerseDocument& Document,
-		const TSharedPtr<const FVerseSemanticSnapshot>& SemanticSnapshot = nullptr);
+		const TSharedPtr<const FVerseSemanticSnapshot>& SemanticSnapshot);
 }
