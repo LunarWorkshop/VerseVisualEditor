@@ -1332,7 +1332,9 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
 		const bool bHeaderAlreadyShowsOutputName = bOutput
-			&& Tile.Kind == EVerseVisualTileKind::Definition;
+			&& (Tile.Kind == EVerseVisualTileKind::Definition
+				|| (Tile.Kind == EVerseVisualTileKind::Expression
+					&& Tile.ExpressionKind == EVerseExpressionKind::Identifier));
 		const FText Name = bHeaderAlreadyShowsOutputName
 			|| (Tile.Kind == EVerseVisualTileKind::Expression
 				&& Tile.OperatorRange.IsSet())
