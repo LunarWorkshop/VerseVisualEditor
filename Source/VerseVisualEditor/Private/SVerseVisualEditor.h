@@ -115,7 +115,9 @@ private:
 	FReply SaveActiveDocument();
 	bool SaveDocument(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	void RebuildDocumentTabs();
-	void RefreshActiveDocument();
+	void RefreshActiveDocument(
+		bool bAnimateGraphChanges = true,
+		bool bRebuildDocumentChrome = true);
 	void HandleTileSelected(
 		const FVerseVisualTile& Tile,
 		TSharedPtr<FOpenVerseDocument> OpenDocument);
@@ -163,7 +165,9 @@ private:
 	void SetCompilationMode(EVerseCompilationMode Mode);
 	FText GetCompilationModeText() const;
 	void QueueCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument, bool bDebounce);
-	void StartCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
+	void StartCompilation(
+		const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+		bool bRequestSemanticAnalysis = true);
 	void ApplyCompilationResult(
 		const TSharedPtr<FOpenVerseDocument>& OpenDocument,
 		uint64 RequestId,
@@ -188,6 +192,7 @@ private:
 	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
 		bool bOnlyCleanDocuments = false) const;
 	void QueueSemanticAnalysis(bool bDebounce);
+	void MarkSemanticCompilationPending(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	void RequestSemanticCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument);
 	void PublishCompletedSemanticCompilations();
 	bool HasLocalCompileDiagnosticsForActiveDocument() const;

@@ -90,6 +90,8 @@ struct FOpenVerseFunctionTab
 	FVerseCanvasViewState ViewState;
 	TSharedPtr<SVerseFunctionCanvas> FunctionCanvas;
 	TSharedPtr<FVerseGraphMotionController> MotionController;
+	FVerseDocumentRevision GraphRevision;
+	bool bGraphUsesExactSemanticSnapshot = false;
 	bool bHasViewState = false;
 };
 
@@ -1650,6 +1652,10 @@ namespace
 			Tab.Parameters = Item->Parameters;
 			Tab.GraphTiles = Item->GraphTiles;
 			BindGraphTiles(Document, Tab.GraphTiles, SemanticSnapshot);
+			Tab.GraphRevision = Document.Session->GetRevision();
+			Tab.bGraphUsesExactSemanticSnapshot = SemanticSnapshot.IsValid()
+				&& SemanticSnapshot->Describes(
+					Document.FilePath, Document.Session->GetRevision());
 			// Provisional is transient editor state, so reapply it after every
 			// parse/semantic graph reconstruction rather than deriving it from source.
 			ApplyProvisionalState(Tab.GraphTiles, Document.ProvisionalTiles);
@@ -2525,11 +2531,22 @@ void SVerseVisualEditor::RequestSemanticCompilation(
 		return;
 	}
 
+	MarkSemanticCompilationPending(OpenDocument);
+	QueueSemanticAnalysis(false);
+}
+
+void SVerseVisualEditor::MarkSemanticCompilationPending(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+{
+	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
+	{
+		return;
+	}
+
 	OpenDocument->SemanticCompilationRevision = OpenDocument->Session->GetRevision();
 	OpenDocument->SemanticCompilationDiagnostics.Reset();
 	OpenDocument->bSemanticCompilationPending = true;
 	OpenDocument->bHasSemanticCompilationResult = false;
-	QueueSemanticAnalysis(false);
 }
 
 void SVerseVisualEditor::PublishCompletedSemanticCompilations()
@@ -2565,10 +2582,20 @@ void SVerseVisualEditor::PublishCompletedSemanticCompilations()
 		}
 		OpenDocument->bSemanticCompilationPending = false;
 		OpenDocument->bHasSemanticCompilationResult = true;
+		const bool bActiveFunctionGraphNeedsSemanticRefresh =
+			OpenDocument == ActiveDocument
+			&& OpenDocument->FunctionTabs.IsValidIndex(
+				OpenDocument->ActiveFunctionTabIndex)
+			&& (!OpenDocument->FunctionTabs[
+					OpenDocument->ActiveFunctionTabIndex].bGraphUsesExactSemanticSnapshot
+				|| OpenDocument->FunctionTabs[
+					OpenDocument->ActiveFunctionTabIndex].GraphRevision
+					!= OpenDocument->SemanticCompilationRevision);
 		const TSharedPtr<const FVerseSemanticSnapshot> ExactSnapshot =
 			FindExactSemanticSnapshot(SemanticWorkspace.Get(), *OpenDocument);
 		ReconcileFunctionTabs(*OpenDocument, ExactSnapshot);
-		bRefreshActiveGraph |= OpenDocument == ActiveDocument && ExactSnapshot.IsValid();
+		bRefreshActiveGraph |= bActiveFunctionGraphNeedsSemanticRefresh
+			&& ExactSnapshot.IsValid();
 
 		const bool bHasErrors = OpenDocument->SemanticCompilationDiagnostics.ContainsByPredicate(
 			[](const FVerseSemanticDiagnostic& Diagnostic)
@@ -2583,7 +2610,10 @@ void SVerseVisualEditor::PublishCompletedSemanticCompilations()
 	}
 	if (bRefreshActiveGraph)
 	{
-		RefreshActiveDocument();
+		// The source and graph identity did not change. Rebind compiler-derived
+		// metadata in the existing canvas without replaying entrance motion or
+		// replacing the surrounding document UI.
+		RefreshActiveDocument(false, false);
 	}
 }
 
@@ -2683,12 +2713,6 @@ TSharedRef<SWidget> SVerseVisualEditor::BuildToolbar()
 
 void SVerseVisualEditor::CompileVerseProject()
 {
-	// BuildScripts only knows registered Solaris packages. Schedule the same
-	// explicit compile result for private and unsaved editor buffers as well.
-	for (const TSharedPtr<FOpenVerseDocument>& OpenDocument : OpenDocuments)
-	{
-		RequestSemanticCompilation(OpenDocument);
-	}
 	if (ISolarisEditorModule::IsModuleLoaded())
 	{
 		ISolarisEditorModule::Get().BuildScripts(
@@ -2791,10 +2815,13 @@ void SVerseVisualEditor::HandleProjectBuildStarted(
 	{
 		if (OpenDocument.IsValid() && OpenDocument->Session.IsValid())
 		{
-			RequestSemanticCompilation(OpenDocument);
+			// Analyze private and unsaved buffers once against the post-build
+			// Solaris baseline instead of rebuilding the private environment both
+			// before and after the project compile.
+			MarkSemanticCompilationPending(OpenDocument);
 			if (OpenDocument->Session->IsDirty())
 			{
-				StartCompilation(OpenDocument);
+				StartCompilation(OpenDocument, false);
 			}
 		}
 	}
@@ -2876,7 +2903,15 @@ void SVerseVisualEditor::ApplyProjectDiagnostics(
 	OpenDocument->bHasCompilationResult = true;
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		if (!OpenDocument->FunctionTabs.IsValidIndex(
+			OpenDocument->ActiveFunctionTabIndex))
+		{
+			RefreshActiveDocument(false, false);
+		}
+		else
+		{
+			RebuildProperties();
+		}
 	}
 }
 
@@ -2974,13 +3009,18 @@ void SVerseVisualEditor::QueueCompilation(
 	OpenDocument->CompileAfterSeconds = FPlatformTime::Seconds() + 0.35;
 }
 
-void SVerseVisualEditor::StartCompilation(const TSharedPtr<FOpenVerseDocument>& OpenDocument)
+void SVerseVisualEditor::StartCompilation(
+	const TSharedPtr<FOpenVerseDocument>& OpenDocument,
+	bool bRequestSemanticAnalysis)
 {
 	if (!OpenDocument.IsValid() || !OpenDocument->Session.IsValid())
 	{
 		return;
 	}
-	RequestSemanticCompilation(OpenDocument);
+	if (bRequestSemanticAnalysis)
+	{
+		RequestSemanticCompilation(OpenDocument);
+	}
 
 	OpenDocument->bCompilationPending = false;
 	OpenDocument->bCompilationInFlight = true;
@@ -3052,7 +3092,15 @@ void SVerseVisualEditor::ApplyCompilationResult(
 	OpenDocument->bHasCompilationResult = true;
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		if (!OpenDocument->FunctionTabs.IsValidIndex(
+			OpenDocument->ActiveFunctionTabIndex))
+		{
+			RefreshActiveDocument(false, false);
+		}
+		else
+		{
+			RebuildProperties();
+		}
 	}
 }
 
@@ -4208,7 +4256,9 @@ void SVerseVisualEditor::RebuildDocumentTabs()
 	}
 }
 
-void SVerseVisualEditor::RefreshActiveDocument()
+void SVerseVisualEditor::RefreshActiveDocument(
+	bool bAnimateGraphChanges,
+	bool bRebuildDocumentChrome)
 {
 	RefreshOutliner();
 	if (!ActiveDocumentBox.IsValid())
@@ -4240,6 +4290,7 @@ void SVerseVisualEditor::RefreshActiveDocument()
 	const bool bCanReuseCanvas = bShowingFunction
 		? ActiveDocument->FunctionTabs[ActiveDocument->ActiveFunctionTabIndex].FunctionCanvas.IsValid()
 		: ActiveDocument->FileCanvas.IsValid();
+	const bool bMustRebuildDocumentChrome = bRebuildDocumentChrome || !bCanReuseCanvas;
 	if (!bCanReuseCanvas)
 	{
 		CaptureActiveCanvasView();
@@ -4256,7 +4307,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 		{
 			FunctionTab.MotionController = MakeShared<FVerseGraphMotionController>();
 		}
-		FunctionTab.MotionController->BeginBuild(FunctionTab.FunctionCanvas.IsValid());
+		FunctionTab.MotionController->BeginBuild(
+			bAnimateGraphChanges && FunctionTab.FunctionCanvas.IsValid());
 		ActiveDocument->FileCanvas.Reset();
 		TSharedPtr<SWidget> FunctionEntryAnchor;
 		const TSharedRef<const FVerseDocument> SourceDocument =
@@ -4678,8 +4730,10 @@ void SVerseVisualEditor::RefreshActiveDocument()
 					ActiveDocument));
 		}
 	}
-	ActiveDocumentBox->SetContent(
-		SNew(SBorder)
+	if (bMustRebuildDocumentChrome)
+	{
+		ActiveDocumentBox->SetContent(
+			SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(0.0f)
 		[
@@ -4704,7 +4758,8 @@ void SVerseVisualEditor::RefreshActiveDocument()
 			[
 				ActiveView
 			]
-		]);
+			]);
+	}
 	RebuildProperties();
 }
 
