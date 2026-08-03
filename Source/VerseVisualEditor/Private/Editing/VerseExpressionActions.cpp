@@ -596,19 +596,11 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	TSharedPtr<FVerseExpressionAction> IfAction = MakeShared<FVerseExpressionAction>();
 	IfAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
 	IfAction->StructuralKind = EVerseStructuralExpressionKind::If;
-	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
-	{
-		IfAction->SourceSpelling = Style.bSpaceInsideParentheses
-			? TEXT("if ( true? ) { }") : TEXT("if (true?) {}");
-	}
-	else
-	{
-		const FString Newline = FVerseSyntaxEmitter::LineEnding(Style);
-		IfAction->SourceSpelling = TEXT("if (true?):") + Newline
-			+ Style.IndentationUnit + TEXT("false");
-	}
+	IfAction->SourceSpelling = FVerseSyntaxEmitter::IfTemplate(Style);
 	IfAction->ProvisionalContentTarget =
-		EVerseProvisionalContentTarget::FirstConditionExpression;
+		Style.BodyDelimiter == EVerseClauseDelimiter::Braces
+			? EVerseProvisionalContentTarget::FirstConditionExpression
+			: EVerseProvisionalContentTarget::FirstConditionAndBodyExpressions;
 	IfAction->DisplayName = LOCTEXT("CreateIfExpression", "If");
 	IfAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
 	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");

@@ -100,14 +100,45 @@ namespace
 		return nullptr;
 	}
 
-	bool RecordGeneratedConditionAsProvisional(
+	FVerseVisualTile* FindInsertedControlTile(
+		TArray<FVerseVisualTile>& Tiles,
+		FVerseTextRange InsertedRange)
+	{
+		if (FVerseVisualTile* Exact = FindTileByRange(Tiles, InsertedRange);
+			Exact != nullptr
+			&& Exact->ExpressionKind == EVerseExpressionKind::Control)
+		{
+			return Exact;
+		}
+		for (FVerseVisualTile& Tile : Tiles)
+		{
+			// A multiline control's parser range need not share the source edit's
+			// closing boundary. Its revision and opening byte still identify the
+			// expression without accidentally selecting an enclosing control.
+			if (Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.Range.Revision == InsertedRange.Revision
+				&& Tile.Range.BeginByte == InsertedRange.BeginByte)
+			{
+				return &Tile;
+			}
+			if (FVerseVisualTile* Nested =
+				FindInsertedControlTile(Tile.Children, InsertedRange))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
+	bool RecordGeneratedContentAsProvisional(
 		FOpenVerseDocument& Document,
-		FVerseTextRange InsertedControlRange)
+		FVerseTextRange InsertedControlRange,
+		EVerseProvisionalContentTarget Target)
 	{
 		for (FOpenVerseFunctionTab& Tab : Document.FunctionTabs)
 		{
 			FVerseVisualTile* ControlTile =
-				FindTileByRange(Tab.GraphTiles, InsertedControlRange);
+				FindInsertedControlTile(Tab.GraphTiles, InsertedControlRange);
 			if (ControlTile == nullptr
 				|| ControlTile->ExpressionKind != EVerseExpressionKind::Control)
 			{
@@ -127,6 +158,24 @@ namespace
 				PredicateRange,
 				Document.Session->GetParseSnapshot().GetDocument()->GetOriginalUtf8View());
 			Condition->Children[0].bIsProvisional = true;
+			if (Target == EVerseProvisionalContentTarget::FirstConditionAndBodyExpressions)
+			{
+				const auto* Body = ControlTile->ControlRegions.FindByPredicate(
+					[](const auto& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Body;
+					});
+				if (Body != nullptr && Body->OperandCount > 0
+					&& ControlTile->Children.IsValidIndex(Body->FirstOperandIndex))
+				{
+					FVerseVisualTile& BodyPlaceholder =
+						ControlTile->Children[Body->FirstOperandIndex];
+					Document.ProvisionalTiles.Add(
+						BodyPlaceholder.Range,
+						Document.Session->GetParseSnapshot().GetDocument()->GetOriginalUtf8View());
+					BodyPlaceholder.bIsProvisional = true;
+				}
+			}
 			return true;
 		}
 		return false;
@@ -761,13 +810,14 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	ReconcileFunctionTabs(
 		*ActiveDocument,
 		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
-	const bool bCreatedProvisionalCondition = bClauseInsertion
-		&& Action->ProvisionalContentTarget
-			== EVerseProvisionalContentTarget::FirstConditionExpression;
-	if (bCreatedProvisionalCondition && AppliedExpressionRange.IsSet())
+	const bool bCreatedProvisionalContent = bClauseInsertion
+		&& Action->ProvisionalContentTarget != EVerseProvisionalContentTarget::None;
+	if (bCreatedProvisionalContent && AppliedExpressionRange.IsSet())
 	{
-		RecordGeneratedConditionAsProvisional(
-			*ActiveDocument, AppliedExpressionRange);
+		RecordGeneratedContentAsProvisional(
+			*ActiveDocument,
+			AppliedExpressionRange,
+			Action->ProvisionalContentTarget);
 	}
 	if (Action->SourceForm == EVerseExpressionSourceForm::Definition
 		&& AppliedExpressionRange.IsSet())

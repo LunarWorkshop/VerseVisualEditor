@@ -31,6 +31,8 @@ enum class EVerseProvisionalContentTarget : uint8
 	None,
 	/** First expression inside the generated control's failable condition. */
 	FirstConditionExpression,
+	/** Condition placeholder plus the no-op expression required by a colon body. */
+	FirstConditionAndBodyExpressions,
 };
 
 /** Editor-owned structural recipe materialized against its destination clause. */

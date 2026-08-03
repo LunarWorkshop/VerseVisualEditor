@@ -586,12 +586,51 @@ bool FVerseFormattingEditService::Apply(
 		if (bWantBraces && Clause->Syntax.Delimiter != EVerseClauseDelimiter::Braces)
 		{
 			Edits.Add(Edit(Session.GetRevision(), Clause->OpeningPunctuationRange, TEXTVIEW(" {")));
-			const FString Closing = Clause->Syntax.Layout == EVerseSyntaxLayout::Multiline
-				? Clause->Syntax.IndentationPrefix + TEXT("}")
-					+ FVerseSyntaxEmitter::LineEnding(Style)
+			const bool bMultiline =
+				Clause->Syntax.Layout == EVerseSyntaxLayout::Multiline;
+			// Close immediately after the clause's last owned content. Any trailing
+			// blank lines belong outside the new brace body and remain byte-exact.
+			const int32 ClosingByte = bMultiline
+				&& Clause->Syntax.TrailingWhitespaceRange.IsSet()
+					? Clause->Syntax.TrailingWhitespaceRange.BeginByte
+					: Clause->InteriorRange.EndByte();
+			const FString Closing = bMultiline
+				? FVerseSyntaxEmitter::LineEnding(Style)
+					+ Clause->Syntax.IndentationPrefix + TEXT("}")
 				: TEXT(" }");
-			Edits.Add(Edit(Session.GetRevision(),
-				{Clause->InteriorRange.EndByte(), 0}, Closing));
+			const auto* ElseRegion = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Else;
+				});
+			const bool bTrueBodyBeforeElse = bMultiline
+				&& Tile.ControlKind == EVerseControlKind::If
+				&& Tile.ControlRegions.IsValidIndex(ControlRegionIndex)
+				&& Tile.ControlRegions[ControlRegionIndex].Kind
+					== EVerseControlRegionKind::Body
+				&& ElseRegion != nullptr;
+			if (bTrueBodyBeforeElse
+				&& Clause->Syntax.TrailingWhitespaceRange.IsSet())
+			{
+				// `else` is structurally adjacent to the completed true body. Do not
+				// leave blank-line trivia between the new closing brace and `else`.
+				const int32 GapEnd = ElseRegion->Syntax.KeywordRange.IsSet()
+					? ElseRegion->Syntax.KeywordRange.BeginByte
+					: Clause->Syntax.TrailingWhitespaceRange.EndByte();
+				Edits.Add(Edit(
+					Session.GetRevision(),
+					FVerseTextRange(
+						Session.GetRevision(),
+						FVerseByteRange::FromBounds(
+							Clause->Syntax.TrailingWhitespaceRange.BeginByte,
+							GapEnd)),
+					Closing + FVerseSyntaxEmitter::LineEnding(Style)
+						+ Clause->Syntax.IndentationPrefix));
+			}
+			else
+			{
+				Edits.Add(Edit(Session.GetRevision(), {ClosingByte, 0}, Closing));
+			}
 		}
 		else if (bWantColon && Clause->Syntax.Delimiter == EVerseClauseDelimiter::Braces)
 		{

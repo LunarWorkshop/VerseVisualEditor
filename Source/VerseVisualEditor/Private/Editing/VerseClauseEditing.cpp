@@ -25,6 +25,18 @@ namespace
 			: TEXT("\n");
 	}
 
+	bool IsClauseWhitespaceOnly(FStringView Text)
+	{
+		for (TCHAR Character : Text)
+		{
+			if (!FChar::IsWhitespace(Character))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	FString IndentationAt(FUtf8StringView Source, int32 ByteOffset)
 	{
 		ByteOffset = FMath::Clamp(ByteOffset, 0, Source.Len());
@@ -142,21 +154,17 @@ namespace
 			return BuildVerseExpressionActionSource(
 				Action, BoundExpressionSource, OutSource, OutError);
 		}
-		if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
-		{
-			OutSource = Style.bSpaceInsideParentheses
-				? TEXT("if ( true? ) { }") : TEXT("if (true?) {}");
-		}
-		else
-		{
-			OutSource = TEXT("if (true?):")
-				+ FVerseSyntaxEmitter::LineEnding(Style)
-				+ Style.IndentationUnit + TEXT("false");
-		}
+		FVerseFormattingStyleProfile CreationStyle = Style;
+		// New block punctuation is an explicit project/user default. Local source
+		// still supplies indentation and line endings, but must not silently turn
+		// a requested colon block back into braces (or vice versa).
+		CreationStyle.BodyDelimiter =
+			FVerseFormattingStyleResolver::ResolveDefaults().BodyDelimiter;
+		OutSource = FVerseSyntaxEmitter::IfTemplate(CreationStyle);
 		return true;
 	}
 
-	const FVerseVisualTile* FindIfWithElse(
+	const FVerseVisualTile* FindIfAtOpeningByte(
 		TConstArrayView<FVerseVisualTile> Tiles,
 		int32 OpeningByte)
 	{
@@ -164,22 +172,32 @@ namespace
 		{
 			if (Tile.Range.BeginByte == OpeningByte
 				&& Tile.ExpressionKind == EVerseExpressionKind::Control
-				&& Tile.ControlKind == EVerseControlKind::If
-				&& Tile.ControlRegions.ContainsByPredicate(
-					[](const auto& Region)
-					{
-						return Region.Kind == EVerseControlRegionKind::Else
-							&& Region.Items.Num() == 1;
-					}))
+				&& Tile.ControlKind == EVerseControlKind::If)
 			{
 				return &Tile;
 			}
-			if (const FVerseVisualTile* Nested = FindIfWithElse(Tile.Children, OpeningByte))
+			if (const FVerseVisualTile* Nested =
+				FindIfAtOpeningByte(Tile.Children, OpeningByte))
 			{
 				return Nested;
 			}
 		}
 		return nullptr;
+	}
+
+	const FVerseVisualTile* FindIfWithElse(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		int32 OpeningByte)
+	{
+		const FVerseVisualTile* IfTile = FindIfAtOpeningByte(Tiles, OpeningByte);
+		return IfTile != nullptr
+			&& IfTile->ControlRegions.ContainsByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Else
+						&& Region.Items.Num() == 1;
+				})
+			? IfTile : nullptr;
 	}
 
 	FString TileKindName(EVerseVisualTileKind Kind)
@@ -606,6 +624,31 @@ bool FVerseClauseEditing::AddElseExpression(
 	const FString LineEnding = FVerseSyntaxEmitter::LineEnding(Style);
 	const FString Indentation = IndentationAt(Source, IfExpressionRange.BeginByte);
 	const bool bBraces = BodyStyle == EVerseClauseDelimiter::Braces;
+	int32 InsertionByte = IfExpressionRange.EndByte();
+	const TArray<FVerseFunctionNavigationItem> CurrentFunctions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	for (const FVerseFunctionNavigationItem& Function : CurrentFunctions)
+	{
+		const FVerseVisualTile* CurrentIf =
+			FindIfAtOpeningByte(Function.GraphTiles, IfExpressionRange.BeginByte);
+		if (CurrentIf == nullptr)
+		{
+			continue;
+		}
+		const auto* Body = CurrentIf->ControlRegions.FindByPredicate(
+			[](const auto& Region)
+			{
+				return Region.Kind == EVerseControlRegionKind::Body;
+			});
+		// Insert before the true body's trailing trivia. That trivia belongs after
+		// the complete if, so adding else here naturally moves it behind else.
+		if (Body != nullptr && Body->Syntax.TrailingWhitespaceRange.IsSet())
+		{
+			InsertionByte = Body->Syntax.TrailingWhitespaceRange.BeginByte;
+		}
+		break;
+	}
 	const FString Replacement = bBraces
 		? FString::Printf(TEXT(" else { %s }"), *ExpressionSource)
 		: LineEnding + Indentation + TEXT("else:") + LineEnding
@@ -615,7 +658,7 @@ bool FVerseClauseEditing::AddElseExpression(
 		: Replacement.Len() - ExpressionSource.Len();
 	const FVerseDocumentEdit Edit = MakeEdit(
 		Session.GetRevision(),
-		FVerseByteRange(IfExpressionRange.EndByte(), 0),
+		FVerseByteRange(InsertionByte, 0),
 		Replacement);
 	const FUtf8String Candidate = BuildCandidate(Session, MakeArrayView(&Edit, 1), OutError);
 	if (Candidate.IsEmpty() && Session.GetCurrentUtf8().Len() != 0)
@@ -657,7 +700,7 @@ bool FVerseClauseEditing::AddElseExpression(
 		*OutInsertedRange = FVerseTextRange(
 			Session.GetRevision(),
 			FVerseByteRange(
-				IfExpressionRange.EndByte() + PrefixUtf8.Length(),
+				InsertionByte + PrefixUtf8.Length(),
 				ExpressionUtf8.Length()));
 	}
 	return true;
@@ -701,7 +744,22 @@ bool FVerseClauseEditing::DeleteExpression(
 		return true;
 	}
 	TArray<FVerseDocumentEdit> Edits;
-	Edits.Add(MakeEdit(Session.GetRevision(), Clause.Items[ItemIndex].Expression.Range, FStringView()));
+	FVerseTextRange DeletedRange = Clause.Items[ItemIndex].Expression.Range;
+	const FVerseTextRange LeadingTrivia =
+		Clause.Items[ItemIndex].LeadingTriviaRange;
+	if (Clause.Syntax.Layout == EVerseSyntaxLayout::Multiline
+		&& LeadingTrivia.IsSet()
+		&& IsClauseWhitespaceOnly(Decode(Session, LeadingTrivia)))
+	{
+		// Delete the whole source line prefix owned by this item. Removing only
+		// the expression would strand its indentation as a whitespace-only line.
+		DeletedRange = FVerseTextRange(
+			Session.GetRevision(),
+			FVerseByteRange::FromBounds(
+				LeadingTrivia.BeginByte,
+				Clause.Items[ItemIndex].Expression.Range.EndByte()));
+	}
+	Edits.Add(MakeEdit(Session.GetRevision(), DeletedRange, FStringView()));
 
 	// Remove only a separator token. Trivia and VST-owned/ambiguous comments stay fixed.
 	if (Clause.Items.Num() > 1

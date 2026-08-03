@@ -237,6 +237,15 @@ bool FVerseFormattingStyleEmitterTest::RunTest(const FString& Parameters)
 		FVerseSyntaxEmitter::Separator(EVerseSeparatorToken::None,
 			EVerseSeparatorLayout::Newline, 1, Style, TEXTVIEW("    ")),
 		TEXT("\r\n\r\n    "));
+	Style.BodyDelimiter = EVerseClauseDelimiter::Braces;
+	Style.IndentationUnit = TEXT("    ");
+	TestEqual(TEXT("Brace if templates are multiline"),
+		FVerseSyntaxEmitter::IfTemplate(Style),
+		TEXT("if (true?) {\r\n}"));
+	Style.BodyDelimiter = EVerseClauseDelimiter::Colon;
+	TestEqual(TEXT("Colon if templates contain a provisional no-op expression"),
+		FVerseSyntaxEmitter::IfTemplate(Style),
+		TEXT("if (true?):\r\n    block {}"));
 	return true;
 }
 
@@ -372,6 +381,61 @@ bool FVerseFormattingControlEditsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Colon condition is forced multiline"),
 		MultilineCondition != nullptr
 			&& MultilineCondition->Syntax.Layout == EVerseSyntaxLayout::Multiline);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseFormattingGreedyBraceClosureTest,
+	"VerseVisualEditor.Formatting.GreedyBraceClosure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseFormattingGreedyBraceClosureTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseFormattingTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"Greedy(Input : logic) : void =\n"
+		"    if:\n"
+		"        Input?\n"
+		"    then:\n"
+		"        block {}\n"
+		"        \n"
+		"\n"
+		"    else:\n"
+		"        block {}\n"
+		"\n"
+		"Next() : void = {}\n"));
+	if (!Document.IsValid()) return false;
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseVisualTile> Graph =
+		BuildFunctionGraph(Session, TEXTVIEW("Greedy"));
+	const FVerseVisualTile* IfTile = FindTile(Graph, [](const FVerseVisualTile& Tile)
+	{
+		return Tile.ControlKind == EVerseControlKind::If;
+	});
+	int32 BodyIndex = INDEX_NONE;
+	if (IfTile != nullptr)
+	{
+		BodyIndex = IfTile->ControlRegions.IndexOfByPredicate([](const auto& Region)
+		{
+			return Region.Kind == EVerseControlRegionKind::Body;
+		});
+	}
+	FText Error;
+	TestTrue(*FString::Printf(TEXT("Colon body converts to braces: %s"), *Error.ToString()),
+		IfTile != nullptr
+			&& BodyIndex != INDEX_NONE
+			&& FVerseFormattingEditService::Apply(
+				Session, *IfTile, EVerseSyntaxControlKind::BodyDelimiter,
+				TEXTVIEW("Braces"), Error, BodyIndex));
+	const FString Source = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+	TestTrue(TEXT("Closing brace follows the last body expression immediately"),
+		Source.Contains(TEXT("then {\n        block {}\n    }")));
+	TestTrue(TEXT("Else follows the closing brace immediately"),
+		Source.Contains(TEXT("block {}\n    }\n    else:")));
+	TestFalse(TEXT("True-body blank lines do not remain in front of else"),
+		Source.Contains(TEXT("block {}\n    }\n        \n\n    else:")));
+	TestTrue(TEXT("The enclosing function's two-newline separator is preserved"),
+		Source.Contains(TEXT("else:\n        block {}\n\nNext()")));
 	return true;
 }
 

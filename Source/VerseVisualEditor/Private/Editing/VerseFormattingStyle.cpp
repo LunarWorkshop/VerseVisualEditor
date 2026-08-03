@@ -339,3 +339,16 @@ FString FVerseSyntaxEmitter::Definition(
 		bMutable ? TEXT("var ") : TEXT(""), *FString(Name), *FString(Type),
 		Space, Space, *FString(Initializer));
 }
+
+FString FVerseSyntaxEmitter::IfTemplate(const FVerseFormattingStyleProfile& Style)
+{
+	const FString Condition = Style.bSpaceInsideParentheses
+		? TEXT("if ( true? )") : TEXT("if (true?)");
+	const FString Newline = LineEnding(Style);
+	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+	{
+		return Condition + TEXT(" {") + Newline + TEXT("}");
+	}
+	return Condition + TEXT(":") + Newline
+		+ Style.IndentationUnit + TEXT("block {}");
+}

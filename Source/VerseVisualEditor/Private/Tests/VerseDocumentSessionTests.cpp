@@ -3,6 +3,7 @@
 #include "Document/VerseDocumentSession.h"
 #include "Editing/VerseClauseEditing.h"
 #include "Editing/VerseExpressionActions.h"
+#include "Editing/VerseFormattingStyle.h"
 #include "Document/VerseExternalChange.h"
 #include "Editing/VerseIdentifier.h"
 
@@ -478,6 +479,14 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 			});
 		if (TestNotNull(TEXT("Empty function exposes its editable clause"), EmptyFunction))
 		{
+			FVerseFormattingStyleProfile ExpectedStyle =
+				FVerseFormattingStyleResolver::ResolveDefaults();
+			ExpectedStyle.LineEnding = EVerseLineEnding::Lf;
+			ExpectedStyle.IndentationUnit = TEXT("    ");
+			const FString ExpectedIfSource =
+				FVerseSyntaxEmitter::IfTemplate(ExpectedStyle);
+			FString RebasedIfSource = ExpectedIfSource;
+			RebasedIfSource.ReplaceInline(TEXT("\n"), TEXT("\n    "));
 			const TArray<TSharedPtr<FVerseExpressionAction>> Actions =
 				FVerseExpressionActionQuery::BuildAll(
 					{}, *EmptyDocument, EmptyFunction->Range, FString(), {});
@@ -500,11 +509,12 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 			TestEqual(
 				TEXT("Clause insertion reports the exact generated expression range"),
 				EmptySession.GetParseSnapshot().GetDocument()->DecodeOriginalRange(InsertedIfRange),
-				FString(TEXT("if (true?) {}")));
+				RebasedIfSource);
 			TestEqual(
-				TEXT("Empty multiline clause insertion is rebased between its braces"),
+				TEXT("Empty multiline clause insertion uses project syntax and local indentation"),
 				FString(UTF8_TO_TCHAR(*EmptySession.GetCurrentUtf8())),
-				FString(TEXT("EmptyFunction()<computes> : void = {\n    if (true?) {}\n}\n")));
+				FString(TEXT("EmptyFunction()<computes> : void = {\n    "))
+					+ RebasedIfSource + TEXT("\n}\n"));
 			const FVerseVisualTile* RebuiltEmptyFunction =
 				EmptySession.GetTiles().FindByPredicate(
 					[](const FVerseVisualTile& Tile)
@@ -560,7 +570,7 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 						FString(UTF8_TO_TCHAR(*EmptySession.GetCurrentUtf8()));
 					TestTrue(
 						TEXT("Replacement changes the predicate in place"),
-						ReplacedSource.Contains(TEXT("if (false?) {}")));
+						ReplacedSource.Contains(TEXT("if (false?)")));
 					TestFalse(
 						TEXT("Replacement removes the generated placeholder"),
 						ReplacedSource.Contains(TEXT("true?")));
@@ -640,6 +650,10 @@ bool FVerseControlBranchDeletionTest::RunTest(const FString& Parameters)
 	const FString Source(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
 	TestFalse(TEXT("Deleting the branch item removes its source and separator"),
 		Source.Contains(TEXT("        Input\n        0")));
+	TestTrue(TEXT("Deleting the branch item also removes its indentation-only line"),
+		Source.Contains(TEXT("        Input\n    else:")));
+	TestFalse(TEXT("Deleting the branch item leaves no whitespace-only body line"),
+		Source.Contains(TEXT("        Input\n        \n    else:")));
 	const FVerseVisualTile* RebuiltFunction = Session.GetTiles().FindByPredicate(
 		[](const FVerseVisualTile& Tile)
 		{
@@ -691,7 +705,9 @@ bool FVerseSocketSourceEditingTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FVerseDocument> BranchDocument = MakeDocument(*this, UTF8TEXTVIEW(
 		"Branch(Input : int)<computes> : void =\n"
 		"    if (Input > 0):\n"
-		"        Input\n"));
+		"        Input\n"
+		"\n"
+		"Following() : void = {}\n"));
 	if (!BranchDocument.IsValid())
 	{
 		return false;
@@ -737,6 +753,11 @@ bool FVerseSocketSourceEditingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("False branch insertion writes an else body"),
 		FString(UTF8_TO_TCHAR(*BranchSession.GetCurrentUtf8())).Contains(
 			TEXT("else:\n        0")));
+	const FString BranchSource(UTF8_TO_TCHAR(*BranchSession.GetCurrentUtf8()));
+	TestTrue(TEXT("Else follows the true body without intervening blank lines"),
+		BranchSource.Contains(TEXT("        Input\n    else:")));
+	TestTrue(TEXT("The enclosing function separator follows the complete if"),
+		BranchSource.Contains(TEXT("        0\n\nFollowing()")));
 	BranchGraph = FindFunctionGraph(BranchSession);
 	IfTile = BranchGraph.FindByPredicate(
 		[](const FVerseVisualTile& Tile)

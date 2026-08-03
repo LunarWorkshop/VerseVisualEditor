@@ -86,4 +86,6 @@ public:
 		FStringView Type,
 		FStringView Initializer,
 		const FVerseFormattingStyleProfile& Style);
+	/** Complete, source-safe initial if expression for the selected project body syntax. */
+	static FString IfTemplate(const FVerseFormattingStyleProfile& Style);
 };

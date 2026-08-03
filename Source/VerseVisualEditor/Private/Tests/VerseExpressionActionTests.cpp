@@ -3,6 +3,7 @@
 #include "VerseDocument.h"
 #include "Document/VerseDocumentSession.h"
 #include "Editing/VerseExpressionActions.h"
+#include "Editing/VerseFormattingStyle.h"
 #include "VisualModel/VerseFunctionNavigation.h"
 #include "Editing/VerseIntrinsicPresentation.h"
 
@@ -369,10 +370,19 @@ bool FVerseTypedExpressionSearchActionsTest::RunTest(const FString& Parameters)
 		});
 	if (TestNotNull(TEXT("Untyped clause search offers If"), IfAction))
 	{
+		const FVerseFormattingStyleProfile Style =
+			FVerseFormattingStyleResolver::ResolveDefaults();
+		const EVerseProvisionalContentTarget ExpectedTarget =
+			Style.BodyDelimiter == EVerseClauseDelimiter::Braces
+				? EVerseProvisionalContentTarget::FirstConditionExpression
+				: EVerseProvisionalContentTarget::FirstConditionAndBodyExpressions;
 		TestEqual(
-			TEXT("If identifies its generated condition as provisional content"),
+			TEXT("If identifies every generated placeholder as provisional content"),
 			(*IfAction)->ProvisionalContentTarget,
-			EVerseProvisionalContentTarget::FirstConditionExpression);
+			ExpectedTarget);
+		TestEqual(TEXT("If action uses the configured project syntax"),
+			(*IfAction)->SourceSpelling,
+			FVerseSyntaxEmitter::IfTemplate(Style));
 	}
 	const TSharedPtr<FVerseExpressionAction>* VariableDefinition =
 		UntypedActions.FindByPredicate([](const TSharedPtr<FVerseExpressionAction>& Action)
