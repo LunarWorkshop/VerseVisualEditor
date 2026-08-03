@@ -11,6 +11,7 @@ enum class EVerseSyntaxControlKind : uint8
 	GroupingLayers,
 	StatementSeparator,
 	BlankLinesAfter,
+	ConditionSyntax,
 	BodyDelimiter,
 	BodyLayout,
 	BracePlacement,

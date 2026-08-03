@@ -172,6 +172,10 @@ namespace
 		case EVerseSyntaxControlKind::BlankLinesAfter:
 			return TEXT("First") + FString::ChrN(
 				FMath::Clamp(FCString::Atoi(*FString(Value)) + 1, 1, 9), TEXT('\n')) + TEXT("Second");
+		case EVerseSyntaxControlKind::ConditionSyntax:
+			return Value == TEXTVIEW("Parentheses")
+				? TEXT("if (Condition) {}")
+				: TEXT("if:\n    Condition\nthen:");
 		case EVerseSyntaxControlKind::BodyDelimiter:
 		{
 			if (Clause == EExampleClause::Condition)
@@ -425,16 +429,30 @@ TArray<FVerseTileProperty> FVerseTileProperties::Build(
 		const FString Prefix = Region.Kind == EVerseControlRegionKind::Condition
 			? TEXT("Condition") : Region.Kind == EVerseControlRegionKind::Else
 				? TEXT("False Body") : TEXT("True Body");
-		if (Region.Syntax.Delimiter == EVerseClauseDelimiter::Braces
+		const bool bIfCondition = Tile.ControlKind == EVerseControlKind::If
+			&& Region.Kind == EVerseControlRegionKind::Condition;
+		if (bIfCondition
+			&& (Region.Syntax.Delimiter == EVerseClauseDelimiter::Parentheses
+				|| Region.Syntax.Delimiter == EVerseClauseDelimiter::Colon))
+		{
+			AddSyntaxProperty(Properties, TEXT("Condition Syntax"),
+				FormatDelimiter(Region.Syntax.Delimiter),
+				EVerseSyntaxControlKind::ConditionSyntax,
+				{TEXT("Parentheses"), TEXT("Colon")}, RegionIndex);
+		}
+		else if (Region.Syntax.Delimiter == EVerseClauseDelimiter::Braces
 			|| Region.Syntax.Delimiter == EVerseClauseDelimiter::Colon)
 		{
 			AddSyntaxProperty(Properties, Prefix + TEXT(" Syntax"),
 				FormatDelimiter(Region.Syntax.Delimiter), EVerseSyntaxControlKind::BodyDelimiter,
 				{TEXT("Braces"), TEXT("Colon")}, RegionIndex);
 		}
-		AddSyntaxProperty(Properties, Prefix + TEXT(" Layout"),
-			Region.Syntax.Layout == EVerseSyntaxLayout::Multiline ? TEXT("Multiline") : TEXT("Inline"),
-			EVerseSyntaxControlKind::BodyLayout, {TEXT("Inline"), TEXT("Multiline")}, RegionIndex);
+		if (!bIfCondition)
+		{
+			AddSyntaxProperty(Properties, Prefix + TEXT(" Layout"),
+				Region.Syntax.Layout == EVerseSyntaxLayout::Multiline ? TEXT("Multiline") : TEXT("Inline"),
+				EVerseSyntaxControlKind::BodyLayout, {TEXT("Inline"), TEXT("Multiline")}, RegionIndex);
+		}
 	}
 
 	if (IsVerseBinaryOperatorExpression(Tile.ExpressionKind))

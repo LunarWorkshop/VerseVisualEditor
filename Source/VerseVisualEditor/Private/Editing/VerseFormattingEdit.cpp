@@ -181,6 +181,86 @@ namespace
 		return nullptr;
 	}
 
+	bool AddClauseLayoutEdits(
+		FVerseDocumentSession& Session,
+		const FVerseVisualClauseDescriptor& Clause,
+		bool bMultiline,
+		const FVerseFormattingStyleProfile& Style,
+		TArray<FVerseDocumentEdit>& OutEdits,
+		FText& OutError)
+	{
+		if (Clause.Items.IsEmpty())
+		{
+			OutError = LOCTEXT("NoBodyLayout", "This body has no expressions to lay out.");
+			return false;
+		}
+		const FString ChildIndent = Clause.Syntax.IndentationPrefix
+			+ (Clause.Syntax.IndentationUnit.IsEmpty()
+				? Style.IndentationUnit : Clause.Syntax.IndentationUnit);
+		const FString Leading = bMultiline
+			? FVerseSyntaxEmitter::LineEnding(Style) + ChildIndent : TEXT(" ");
+		if (!AddWhitespaceEdit(Session, Clause.Syntax.LeadingWhitespaceRange,
+			Leading, OutEdits, OutError))
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index + 1 < Clause.Items.Num(); ++Index)
+		{
+			const FVerseVisualSeparatorDescriptor& Separator = Clause.Items[Index].Separator;
+			if (Separator.bIsEndOfClause)
+			{
+				continue;
+			}
+			const int32 Begin = Separator.TokenRange.IsSet()
+				? Separator.TokenRange.BeginByte : Separator.WhitespaceRange.BeginByte;
+			int32 End = Separator.WhitespaceRange.IsSet()
+				? Separator.WhitespaceRange.EndByte() : Separator.TokenRange.EndByte();
+			const FString Trivia = Decode(Session, Separator.WhitespaceRange);
+			if (!IsWhitespaceOnly(Trivia))
+			{
+				int32 WhitespaceCharacters = 0;
+				while (WhitespaceCharacters < Trivia.Len()
+					&& FChar::IsWhitespace(Trivia[WhitespaceCharacters]))
+				{
+					++WhitespaceCharacters;
+				}
+				const FString ExpressionPrefix = Trivia.Mid(WhitespaceCharacters);
+				bool bOnlyGroupingOpeners = !ExpressionPrefix.IsEmpty();
+				for (TCHAR Character : ExpressionPrefix)
+				{
+					if (Character != TEXT('('))
+					{
+						bOnlyGroupingOpeners = false;
+						break;
+					}
+				}
+				if (!bOnlyGroupingOpeners)
+				{
+					OutError = LOCTEXT("BodyLayoutContainsComment", "A statement separator contains preserved trivia, so this body cannot be reformatted safely.");
+					return false;
+				}
+				const FTCHARToUTF8 WhitespaceUtf8(*Trivia.Left(WhitespaceCharacters));
+				End = Separator.WhitespaceRange.BeginByte + WhitespaceUtf8.Length();
+			}
+			OutEdits.Add(Edit(Session.GetRevision(), FVerseByteRange::FromBounds(Begin, End),
+				bMultiline
+					? FVerseSyntaxEmitter::LineEnding(Style) + ChildIndent
+					: TEXT("; ")));
+		}
+		if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Braces)
+		{
+			const FString Trailing = bMultiline
+				? FVerseSyntaxEmitter::LineEnding(Style) + Clause.Syntax.IndentationPrefix
+				: TEXT(" ");
+			if (!AddWhitespaceEdit(Session, Clause.Syntax.TrailingWhitespaceRange,
+				Trailing, OutEdits, OutError))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	TOptional<int32> ParseInteger(FStringView Value)
 	{
 		int32 Parsed = 0;
@@ -406,6 +486,88 @@ bool FVerseFormattingEditService::Apply(
 			return false;
 		}
 	}
+	else if (Control == EVerseSyntaxControlKind::ConditionSyntax)
+	{
+		if (Tile.ControlKind != EVerseControlKind::If
+			|| !Tile.ControlRegions.IsValidIndex(ControlRegionIndex))
+		{
+			OutError = LOCTEXT("NoConditionSyntax", "This tile has no editable if-condition syntax.");
+			return false;
+		}
+		const auto& Condition = Tile.ControlRegions[ControlRegionIndex];
+		if (Condition.Kind != EVerseControlRegionKind::Condition
+			|| !Condition.OpeningPunctuationRange.IsSet())
+		{
+			OutError = LOCTEXT("NoConditionDelimiter", "The if condition has no exact editable delimiter.");
+			return false;
+		}
+		const bool bWantParentheses = Value == TEXTVIEW("Parentheses");
+		const bool bWantColon = Value == TEXTVIEW("Colon");
+		if (!bWantParentheses && !bWantColon)
+		{
+			OutError = LOCTEXT("UnsupportedConditionSyntax", "That if-condition syntax is not supported.");
+			return false;
+		}
+		FVerseVisualClauseDescriptor ConditionClause;
+		if (GetOwnedClause(Tile, ControlRegionIndex, ConditionClause) == nullptr
+			|| !AddClauseLayoutEdits(
+				Session, ConditionClause, bWantColon, Style, Edits, OutError))
+		{
+			return false;
+		}
+		if (bWantParentheses
+			&& Condition.Syntax.Delimiter == EVerseClauseDelimiter::Colon)
+		{
+			Edits.Add(Edit(Session.GetRevision(),
+				FVerseByteRange::FromBounds(
+					Tile.Range.BeginByte, Condition.OpeningPunctuationRange.EndByte()),
+				TEXTVIEW("if (")));
+			const int32 CloseByte = Condition.Syntax.TrailingWhitespaceRange.IsSet()
+				? Condition.Syntax.TrailingWhitespaceRange.BeginByte
+				: Condition.InteriorRange.EndByte();
+			Edits.Add(Edit(Session.GetRevision(), {CloseByte, 0}, TEXTVIEW(")")));
+		}
+		else if (bWantColon
+			&& Condition.Syntax.Delimiter == EVerseClauseDelimiter::Parentheses)
+		{
+			if (!Condition.ClosingPunctuationRange.IsSet())
+			{
+				OutError = LOCTEXT("MissingConditionClose", "The parenthesized if condition has no exact closing-parenthesis range.");
+				return false;
+			}
+			Edits.Add(Edit(Session.GetRevision(),
+				FVerseByteRange::FromBounds(
+					Tile.Range.BeginByte, Condition.OpeningPunctuationRange.EndByte()),
+				TEXTVIEW("if:")));
+
+			const auto* Body = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (Body != nullptr
+				&& Body->Syntax.Keyword == EVerseClauseKeyword::None
+				&& Body->OpeningPunctuationRange.IsSet())
+			{
+				FString ThenPrefix = FVerseSyntaxEmitter::LineEnding(Style)
+					+ Condition.Syntax.IndentationPrefix + TEXT("then");
+				if (Body->Syntax.Delimiter == EVerseClauseDelimiter::Braces)
+				{
+					ThenPrefix += TEXT(" ");
+				}
+				Edits.Add(Edit(Session.GetRevision(),
+					FVerseByteRange::FromBounds(
+						Condition.ClosingPunctuationRange.BeginByte,
+						Body->OpeningPunctuationRange.BeginByte),
+					ThenPrefix));
+			}
+			else
+			{
+				Edits.Add(Edit(Session.GetRevision(),
+					Condition.ClosingPunctuationRange, FStringView()));
+			}
+		}
+	}
 	else if (Control == EVerseSyntaxControlKind::BodyDelimiter)
 	{
 		const FVerseVisualClauseDescriptor* Clause = GetOwnedClause(Tile, ControlRegionIndex, ScratchClause);
@@ -445,7 +607,7 @@ bool FVerseFormattingEditService::Apply(
 	else if (Control == EVerseSyntaxControlKind::BodyLayout)
 	{
 		const FVerseVisualClauseDescriptor* Clause = GetOwnedClause(Tile, ControlRegionIndex, ScratchClause);
-		if (Clause == nullptr || Clause->Items.IsEmpty())
+		if (Clause == nullptr)
 		{
 			OutError = LOCTEXT("NoBodyLayout", "This body has no expressions to lay out.");
 			return false;
@@ -457,47 +619,9 @@ bool FVerseFormattingEditService::Apply(
 			OutError = LOCTEXT("UnsupportedBodyLayout", "That body layout is not supported.");
 			return false;
 		}
-		const FString ChildIndent = Clause->Syntax.IndentationPrefix
-			+ (Clause->Syntax.IndentationUnit.IsEmpty()
-				? Style.IndentationUnit : Clause->Syntax.IndentationUnit);
-		const FString Leading = bMultiline
-			? FVerseSyntaxEmitter::LineEnding(Style) + ChildIndent : TEXT(" ");
-		if (!AddWhitespaceEdit(Session, Clause->Syntax.LeadingWhitespaceRange,
-			Leading, Edits, OutError))
+		if (!AddClauseLayoutEdits(Session, *Clause, bMultiline, Style, Edits, OutError))
 		{
 			return false;
-		}
-		for (int32 Index = 0; Index + 1 < Clause->Items.Num(); ++Index)
-		{
-			const FVerseVisualSeparatorDescriptor& Separator = Clause->Items[Index].Separator;
-			if (Separator.bIsEndOfClause)
-			{
-				continue;
-			}
-			const int32 Begin = Separator.TokenRange.IsSet()
-				? Separator.TokenRange.BeginByte : Separator.WhitespaceRange.BeginByte;
-			const int32 End = Separator.WhitespaceRange.IsSet()
-				? Separator.WhitespaceRange.EndByte() : Separator.TokenRange.EndByte();
-			if (!IsWhitespaceOnly(Decode(Session, Separator.WhitespaceRange)))
-			{
-				OutError = LOCTEXT("BodyLayoutContainsComment", "A statement separator contains preserved trivia, so this body cannot be reformatted safely.");
-				return false;
-			}
-			Edits.Add(Edit(Session.GetRevision(), FVerseByteRange::FromBounds(Begin, End),
-				bMultiline
-					? FVerseSyntaxEmitter::LineEnding(Style) + ChildIndent
-					: TEXT("; ")));
-		}
-		if (Clause->Syntax.Delimiter == EVerseClauseDelimiter::Braces)
-		{
-			const FString Trailing = bMultiline
-				? FVerseSyntaxEmitter::LineEnding(Style) + Clause->Syntax.IndentationPrefix
-				: TEXT(" ");
-			if (!AddWhitespaceEdit(Session, Clause->Syntax.TrailingWhitespaceRange,
-				Trailing, Edits, OutError))
-			{
-				return false;
-			}
 		}
 	}
 	else if (Control == EVerseSyntaxControlKind::BracePlacement)

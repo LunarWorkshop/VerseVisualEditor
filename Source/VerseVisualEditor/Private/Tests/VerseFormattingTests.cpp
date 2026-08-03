@@ -280,7 +280,12 @@ bool FVerseFormattingControlEditsTest::RunTest(const FString& Parameters)
 		});
 	TestEqual(TEXT("Condition syntax shows the selected source form"),
 		ConditionSyntax != nullptr ? ConditionSyntax->Example : FString(),
-		TEXT("if (Condition) :"));
+		TEXT("if:\n    Condition\nthen:"));
+	TestTrue(TEXT("Condition syntax offers parentheses and colon"),
+		ConditionSyntax != nullptr
+			&& ConditionSyntax->Value == TEXT("Colon")
+			&& ConditionSyntax->Options
+				== TArray<FString>{TEXT("Parentheses"), TEXT("Colon")});
 	auto ExampleFor = [&Properties](const TCHAR* Name)
 	{
 		const FVerseTileProperty* Property = Properties.FindByPredicate(
@@ -290,9 +295,11 @@ bool FVerseFormattingControlEditsTest::RunTest(const FString& Parameters)
 			});
 		return Property != nullptr ? Property->Example : FString();
 	};
-	TestEqual(TEXT("Condition layout previews multiple condition expressions"),
-		ExampleFor(TEXT("Condition Layout")),
-		TEXT("if:\n    FirstCondition\n    SecondCondition"));
+	TestTrue(TEXT("If condition layout is controlled by its syntax"),
+		!Properties.ContainsByPredicate([](const FVerseTileProperty& Property)
+		{
+			return Property.Name == TEXT("Condition Layout");
+		}));
 	TestFalse(TEXT("Indentation remains a file/project setting"),
 		Properties.ContainsByPredicate([](const FVerseTileProperty& Property)
 		{
@@ -309,11 +316,62 @@ bool FVerseFormattingControlEditsTest::RunTest(const FString& Parameters)
 		ExampleFor(TEXT("False Body Layout")),
 		TEXT("else:\n    FirstExpression\n    SecondExpression"));
 	Error = FText::GetEmpty();
-	TestTrue(*FString::Printf(TEXT("Condition delimiter succeeds: %s"), *Error.ToString()),
+	TestTrue(*FString::Printf(TEXT("Condition syntax succeeds: %s"), *Error.ToString()),
 		IfTile != nullptr && ConditionSyntax != nullptr
 			&& FVerseFormattingEditService::Apply(
-				Session, *IfTile, EVerseSyntaxControlKind::BodyDelimiter,
-				TEXTVIEW("Braces"), Error, ConditionSyntax->SyntaxRegionIndex));
+				Session, *IfTile, EVerseSyntaxControlKind::ConditionSyntax,
+				TEXTVIEW("Parentheses"), Error, ConditionSyntax->SyntaxRegionIndex));
+	Graph = BuildFunctionGraph(Session, TEXTVIEW("FormattingCondition"));
+	IfTile = FindTile(Graph, [](const FVerseVisualTile& Tile)
+	{
+		return Tile.ControlKind == EVerseControlKind::If;
+	});
+	const auto* InlineCondition = IfTile != nullptr
+		? IfTile->ControlRegions.FindByPredicate([](const auto& Region)
+		{
+			return Region.Kind == EVerseControlRegionKind::Condition;
+		})
+		: nullptr;
+	TestTrue(TEXT("Parenthesized condition is forced inline"),
+		InlineCondition != nullptr
+			&& InlineCondition->Syntax.Layout == EVerseSyntaxLayout::Inline);
+
+	Graph = BuildFunctionGraph(Session, TEXTVIEW("FormattingParenthesizedCondition"));
+	IfTile = FindTile(Graph, [](const FVerseVisualTile& Tile)
+	{
+		return Tile.ControlKind == EVerseControlKind::If;
+	});
+	const TArray<FVerseTileProperty> ParenthesizedProperties = IfTile != nullptr
+		? FVerseTileProperties::Build(*IfTile, Session.GetParseSnapshot())
+		: TArray<FVerseTileProperty>();
+	ConditionSyntax = ParenthesizedProperties.FindByPredicate(
+		[](const FVerseTileProperty& Property)
+		{
+			return Property.SyntaxControl == EVerseSyntaxControlKind::ConditionSyntax;
+		});
+	TestTrue(TEXT("Parenthesized if exposes the condition-syntax control"),
+		ConditionSyntax != nullptr
+			&& ConditionSyntax->Value == TEXT("Parentheses"));
+	Error = FText::GetEmpty();
+	TestTrue(*FString::Printf(TEXT("Parenthesized condition converts to colon syntax: %s"), *Error.ToString()),
+		IfTile != nullptr && ConditionSyntax != nullptr
+			&& FVerseFormattingEditService::Apply(
+				Session, *IfTile, EVerseSyntaxControlKind::ConditionSyntax,
+				TEXTVIEW("Colon"), Error, ConditionSyntax->SyntaxRegionIndex));
+	Graph = BuildFunctionGraph(Session, TEXTVIEW("FormattingParenthesizedCondition"));
+	IfTile = FindTile(Graph, [](const FVerseVisualTile& Tile)
+	{
+		return Tile.ControlKind == EVerseControlKind::If;
+	});
+	const auto* MultilineCondition = IfTile != nullptr
+		? IfTile->ControlRegions.FindByPredicate([](const auto& Region)
+		{
+			return Region.Kind == EVerseControlRegionKind::Condition;
+		})
+		: nullptr;
+	TestTrue(TEXT("Colon condition is forced multiline"),
+		MultilineCondition != nullptr
+			&& MultilineCondition->Syntax.Layout == EVerseSyntaxLayout::Multiline);
 	return true;
 }
 

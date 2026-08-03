@@ -20,3 +20,6 @@ FormattingCondition(Value: float, Low: float, High: float)<computes> : float =
         Value / Denom
     else:
         Value
+
+FormattingParenthesizedCondition(Input: logic) : void =
+    if (Input?) {}
