@@ -153,6 +153,12 @@ public:
 	TWeakPtr<SVerseGraphMotionWidget> GetMotionTarget() const { return MotionTarget; }
 	/** Desired-layout Y coordinate of an indexed value pin center relative to this tile. */
 	float GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const;
+	/**
+	 * Desired-layout Y coordinate of this tile's primary horizontal execution
+	 * anchor. This is derived from the composed socket dock that paints the pin;
+	 * graph layout must not infer the execution lane from tile height.
+	 */
+	float GetHorizontalExecutionSpineY() const;
 
 	virtual FReply OnMouseButtonDoubleClick(
 		const FGeometry& MyGeometry,
@@ -212,6 +218,8 @@ private:
 	TSet<FVerseVisualSocketId> ConnectedSockets;
 	TSharedPtr<SWidget> IdentityBandWidget;
 	TSharedPtr<SWidget> MainSocketRowWidget;
+	TSharedPtr<SWidget> HorizontalExecutionInputDockWidget;
+	TSharedPtr<SWidget> HorizontalExecutionOutputDockWidget;
 	TSharedPtr<SWidget> ValueInputColumn;
 	TSharedPtr<SWidget> ValueOutputColumn;
 	TSharedPtr<SWidget> ValueOutputDockWidget;

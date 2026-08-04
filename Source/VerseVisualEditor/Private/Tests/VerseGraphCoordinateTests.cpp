@@ -804,25 +804,64 @@ bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A statement reserves its entire subtree before the next one"),
 		SecondPosition.Y >= FirstPosition.Y + FirstBounds->GetDesiredSize().Y + 12.0f);
 
+	auto MakeHorizontalStatementTile = [](FVerseVisualTile Model, float Width, float Height)
+	{
+		Model = FinalizeTestTile(MoveTemp(Model));
+		TSharedRef<SVerseTile> Widget =
+			SNew(SVerseTile)
+			.Tile(Model)
+			.TileColor(FLinearColor::Black)
+			.HasMainContent(true)
+			.FunctionGraphPresentation(
+				EVerseFunctionGraphPresentation::HorizontalExecution)
+			.MainContent()
+			[
+				SNew(SBox).WidthOverride(Width).HeightOverride(Height)
+			];
+		Widget->SlatePrepass();
+		return Widget;
+	};
+	FVerseVisualTile EntryModel;
+	EntryModel.Kind = EVerseVisualTileKind::FunctionEntry;
+	const TSharedRef<SVerseTile> HorizontalEntry =
+		MakeHorizontalStatementTile(MoveTemp(EntryModel), 180.0f, 32.0f);
+	FVerseVisualTile IdentifierModel;
+	IdentifierModel.Kind = EVerseVisualTileKind::Expression;
+	IdentifierModel.ExpressionKind = EVerseExpressionKind::Identifier;
+	IdentifierModel.bStatementLevel = true;
+	const TSharedRef<SVerseTile> HorizontalIdentifier =
+		MakeHorizontalStatementTile(MoveTemp(IdentifierModel), 100.0f, 70.0f);
+
 	const TSharedRef<SVerseStatementLayoutPanel> HorizontalStatements =
 		SNew(SVerseStatementLayoutPanel)
 		.Presentation(EVerseFunctionGraphPresentation::HorizontalExecution)
 		.StatementGap(72.0f);
 	HorizontalStatements->AddStatement(
-		FirstBounds, Root, []() { return FVector2D(0.0f, 80.0f); });
+		HorizontalEntry, HorizontalEntry, []() { return FVector2D(0.0f, 80.0f); });
 	HorizontalStatements->AddStatement(
-		SecondBounds, SecondOperand, []() { return FVector2D(0.0f, 12.0f); });
+		HorizontalIdentifier, HorizontalIdentifier,
+		[]() { return FVector2D(0.0f, 12.0f); });
 	HorizontalStatements->SlatePrepass();
 	const FVector2D FirstHorizontalPosition =
 		HorizontalStatements->GetStatementPosition(0);
 	const FVector2D SecondHorizontalPosition =
 		HorizontalStatements->GetStatementPosition(1);
 	TestEqual(TEXT("Horizontal execution spines align"),
-		FirstHorizontalPosition.Y + 80.0f + 16.0f,
-		SecondHorizontalPosition.Y + 12.0f + 16.0f);
+		FirstHorizontalPosition.Y + 80.0f
+			+ HorizontalEntry->GetHorizontalExecutionSpineY(),
+		SecondHorizontalPosition.Y + 12.0f
+			+ HorizontalIdentifier->GetHorizontalExecutionSpineY());
+	TestTrue(TEXT("Horizontal spine follows each tile's actual execution dock"),
+		!FMath::IsNearlyEqual(
+			HorizontalEntry->GetHorizontalExecutionSpineY(),
+			HorizontalIdentifier->GetHorizontalExecutionSpineY()));
+	TestTrue(TEXT("Condition decoration remains completely below the execution lane"),
+		GetVerseHorizontalConditionTopPadding(*HorizontalEntry) - 5.5f
+			> HorizontalEntry->GetHorizontalExecutionSpineY());
 	TestTrue(TEXT("Horizontal statements reserve complete subtree width"),
 		SecondHorizontalPosition.X
-			>= FirstHorizontalPosition.X + FirstBounds->GetDesiredSize().X + 72.0f);
+			>= FirstHorizontalPosition.X
+				+ HorizontalEntry->GetDesiredSize().X + 72.0f);
 	return true;
 }
 

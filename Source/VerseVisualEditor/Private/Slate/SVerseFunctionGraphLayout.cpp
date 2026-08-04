@@ -32,8 +32,17 @@ namespace
 
 	float GetHorizontalExecutionSpineY(const SVerseTile& Tile)
 	{
-		return FMath::Min(16.0f, Tile.GetDesiredSize().Y * 0.5f);
+		return Tile.GetHorizontalExecutionSpineY();
 	}
+}
+
+float GetVerseHorizontalConditionTopPadding(const SVerseTile& ControlTile)
+{
+	// Failable contexts paint their corner diamonds 5.5 Slate units outside
+	// their measured bounds. Sixteen units leaves a visible gap beyond that
+	// decoration while following the control tile's real execution anchor.
+	constexpr float ConditionExecutionLaneGap = 16.0f;
+	return ControlTile.GetHorizontalExecutionSpineY() + ConditionExecutionLaneGap;
 }
 
 SVerseExpressionLayoutPanel::SVerseExpressionLayoutPanel()

@@ -5,6 +5,9 @@
 
 class SVerseTile;
 
+/** Places a condition's complete decorated bounds below the actual execution lane. */
+float GetVerseHorizontalConditionTopPadding(const SVerseTile& ControlTile);
+
 /**
  * A recursively measured expression subtree. Operand subtrees live to the
  * left of their consumer and are fanned around it without overlapping.

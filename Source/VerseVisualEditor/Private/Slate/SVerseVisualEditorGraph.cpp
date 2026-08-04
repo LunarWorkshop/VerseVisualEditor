@@ -647,7 +647,11 @@ namespace
 			{
 				// Horizontal execution owns the top lane. The condition and both
 				// branch subgraphs live below that lane, with True stacked above False.
-				constexpr float ConditionTopPadding = 44.0f;
+				// Derive the clearance from the actual execution pin dock. Identity-band
+				// and main-region composition can move that dock, so a fixed Y offset
+				// would eventually put the Condition back across the execution wire.
+				const float ConditionTopPadding =
+					GetVerseHorizontalConditionTopPadding(*RootTile);
 				constexpr float BranchTopPadding = 34.0f;
 				constexpr float BranchHorizontalGap = 40.0f;
 				constexpr float BranchVerticalGap = 28.0f;

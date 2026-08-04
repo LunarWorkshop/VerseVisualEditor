@@ -837,6 +837,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	}
 
 	TSharedRef<SVerticalBox> LeftDock = SNew(SVerticalBox);
+	HorizontalExecutionInputDockWidget = LeftDock;
 	LeftDock->AddSlot().AutoHeight().HAlign(HAlign_Left)
 		[ bHorizontalExecution && ExecutionInputPin.IsValid()
 			? ExecutionInputPin.ToSharedRef() : SNullWidget::NullWidget ];
@@ -844,6 +845,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	LeftDock->AddSlot().AutoHeight().HAlign(HAlign_Left)
 		[BuildSocketColumn(Tile.GetValueInputs(), false)];
 	TSharedRef<SVerticalBox> RightDock = SNew(SVerticalBox);
+	HorizontalExecutionOutputDockWidget = RightDock;
 	RightDock->AddSlot().AutoHeight().HAlign(HAlign_Right)
 		[ SAssignNew(HorizontalExecutionOutputHost, SBox)
 			.Visibility(bHorizontalExecution ? EVisibility::Visible : EVisibility::Collapsed) ];
@@ -1466,6 +1468,56 @@ TSharedRef<SWidget> SVerseTile::BuildIdentityBand(bool bCompact) const
 		];
 	}
 	return Identity;
+}
+
+float SVerseTile::GetHorizontalExecutionSpineY() const
+{
+	check(FunctionGraphPresentation !=
+		EVerseFunctionGraphPresentation::VerticalExecution);
+
+	const FVerseVisualSocketId InputId{
+		EVerseVisualSocketDirection::Input,
+		EVerseVisualSocketRole::Execution,
+		0};
+	const FVerseVisualSocketId OutputId{
+		EVerseVisualSocketDirection::Output,
+		EVerseVisualSocketRole::Execution,
+		0};
+	const FVerseVisualSocketId& PrimaryId = Tile.FindSocket(InputId) != nullptr
+		? InputId
+		: OutputId;
+	const TSharedPtr<SWidget> Anchor = GetSocketAnchor(PrimaryId);
+	if (!Anchor.IsValid())
+	{
+		ensureMsgf(false,
+			TEXT("Horizontal statement layout requires a real execution socket anchor."));
+		return 0.0f;
+	}
+
+	Anchor->SlatePrepass();
+	const float OutlinePadding = Tile.Kind == EVerseVisualTileKind::FailableBlock
+		? 2.0f
+		: 1.0f;
+	const float IdentityOffset = bHasIdentityBand && IdentityBandWidget.IsValid()
+		? IdentityBandWidget->GetDesiredSize().Y
+			+ (bHasMainContent ? 1.0f : 0.0f)
+		: 0.0f;
+	const bool bInput = PrimaryId.Direction == EVerseVisualSocketDirection::Input;
+	const TSharedPtr<SWidget>& Dock = bInput
+		? HorizontalExecutionInputDockWidget
+		: HorizontalExecutionOutputDockWidget;
+	const float DockTop = MainSocketRowWidget.IsValid() && Dock.IsValid()
+		? FMath::Max(0.0f,
+			(MainSocketRowWidget->GetDesiredSize().Y - Dock->GetDesiredSize().Y) * 0.5f)
+		: 0.0f;
+	return OutlinePadding
+		+ IdentityOffset
+		+ DockTop
+		+ Anchor->GetDesiredSize().Y
+			* GetVerseExecutionPinAnchorCoordinate(
+				bInput,
+				bCompactExecutionSpacing,
+				FunctionGraphPresentation).Y;
 }
 
 TSharedRef<SWidget> SVerseTile::BuildMainIdentity(bool bCompact) const
