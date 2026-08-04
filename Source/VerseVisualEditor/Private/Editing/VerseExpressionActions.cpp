@@ -760,7 +760,6 @@ namespace
 
 	bool ShouldParenthesizeBoundExpression(
 		const FVerseExpressionAction& Action,
-		int32 BoundInputIndex,
 		const FVerseBoundExpressionSyntax& BoundSyntax)
 	{
 		if (BoundSyntax.bExplicitlyGrouped
@@ -805,10 +804,68 @@ namespace
 		{
 			return false;
 		}
-		// Verse infix operators parse left-associatively. The same-precedence
-		// left operand retains its tree without grouping; the right operand does not.
-		return Action.SourceForm != EVerseExpressionSourceForm::InfixOperator
-			|| BoundInputIndex > 0;
+		// Keep an equal-precedence compound expression explicitly grouped on either
+		// side. Although Verse infix operators associate left-to-right, UE6's VST
+		// flattens an unparenthesized chain; grouping preserves the expression as a
+		// distinct visual subtree and keeps localized replacement addressable.
+		return true;
+	}
+
+	bool ShouldParenthesizeProviderExpression(
+		const FVerseExpressionAction& Action,
+		const FVerseExpressionParentSyntax& ParentSyntax)
+	{
+		EVerseSourcePrecedence ChildPrecedence = EVerseSourcePrecedence::Atomic;
+		switch (Action.SourceForm)
+		{
+		case EVerseExpressionSourceForm::InfixOperator:
+			ChildPrecedence = GetInfixPrecedence(Action.SourceSpelling);
+			break;
+		case EVerseExpressionSourceForm::PrefixOperator:
+			ChildPrecedence = EVerseSourcePrecedence::Prefix;
+			break;
+		case EVerseExpressionSourceForm::PostfixOperator:
+			ChildPrecedence = EVerseSourcePrecedence::Postfix;
+			break;
+		default:
+			return false;
+		}
+
+		EVerseSourcePrecedence ParentPrecedence = EVerseSourcePrecedence::Unknown;
+		if (ParentSyntax.Kind == EVerseExpressionKind::BinaryOperator)
+		{
+			ParentPrecedence = GetInfixPrecedence(ParentSyntax.OperatorSpelling);
+		}
+		else if (ParentSyntax.Kind == EVerseExpressionKind::UnaryOperator)
+		{
+			ParentPrecedence = ParentSyntax.OperatorSpelling == TEXT("?")
+				? EVerseSourcePrecedence::Postfix
+				: EVerseSourcePrecedence::Prefix;
+		}
+		else
+		{
+			// Call arguments and definition initializers already delimit their
+			// provider expression independently of surrounding operator precedence.
+			return false;
+		}
+
+		if (ChildPrecedence == EVerseSourcePrecedence::Unknown
+			|| ParentPrecedence == EVerseSourcePrecedence::Unknown)
+		{
+			return true;
+		}
+		if (ChildPrecedence < ParentPrecedence)
+		{
+			return true;
+		}
+		if (ChildPrecedence > ParentPrecedence)
+		{
+			return false;
+		}
+		// Equal-precedence infix chains are grouped even on the left. The source
+		// semantics would be equivalent without grouping, but the VST would flatten
+		// the chain and erase the provider's distinct visual-tile boundary.
+		return true;
 	}
 }
 
@@ -873,7 +930,7 @@ bool BuildVerseExpressionActionSource(
 		FString BoundInput = FString(BoundExpressionSource).TrimStartAndEnd();
 		if (BoundSyntax != nullptr
 			&& ShouldParenthesizeBoundExpression(
-				Action, Action.BoundInputIndex, *BoundSyntax))
+				Action, *BoundSyntax))
 		{
 			BoundInput = FString::Printf(TEXT("(%s)"), *BoundInput);
 		}
@@ -996,7 +1053,8 @@ bool TryApplyVerseExpressionAction(
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
 	FText& OutError,
-	const FVerseBoundExpressionSyntax* BoundSyntax)
+	const FVerseBoundExpressionSyntax* BoundSyntax,
+	const FVerseExpressionParentSyntax* ParentSyntax)
 {
 	if (ExpressionRange.Revision != Session.GetRevision())
 	{
@@ -1010,6 +1068,11 @@ bool TryApplyVerseExpressionAction(
 		Action, Existing, Replacement, OutError, BoundSyntax))
 	{
 		return false;
+	}
+	if (ParentSyntax != nullptr
+		&& ShouldParenthesizeProviderExpression(Action, *ParentSyntax))
+	{
+		Replacement = FString::Printf(TEXT("(%s)"), *Replacement);
 	}
 	EVerseExpressionKind RequiredKind = EVerseExpressionKind::Unsupported;
 	switch (Action.SourceForm)

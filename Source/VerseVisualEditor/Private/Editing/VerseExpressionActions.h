@@ -90,6 +90,14 @@ struct FVerseBoundExpressionSyntax
 	bool bExplicitlyGrouped = false;
 };
 
+/** Syntax identity of the parent whose existing operand is being replaced. */
+struct FVerseExpressionParentSyntax
+{
+	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	FString OperatorSpelling;
+	int32 OperandIndex = INDEX_NONE;
+};
+
 /** Combines canonical source spelling with editor-authored hidden search aliases. */
 FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Action);
 
@@ -136,7 +144,8 @@ bool TryApplyVerseExpressionAction(
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
 	FText& OutError,
-	const FVerseBoundExpressionSyntax* BoundSyntax = nullptr);
+	const FVerseBoundExpressionSyntax* BoundSyntax = nullptr,
+	const FVerseExpressionParentSyntax* ParentSyntax = nullptr);
 
 /** Applies a provider and all literal changes required by its selected concrete signature. */
 bool TryApplyVerseOperatorOperandAction(

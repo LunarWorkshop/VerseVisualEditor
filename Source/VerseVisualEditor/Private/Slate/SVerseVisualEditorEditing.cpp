@@ -930,6 +930,8 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	{
 		FVerseBoundExpressionSyntax BoundSyntax;
 		const FVerseBoundExpressionSyntax* BoundSyntaxPtr = nullptr;
+		FVerseExpressionParentSyntax ParentSyntax;
+		const FVerseExpressionParentSyntax* ParentSyntaxPtr = nullptr;
 		if (SocketDrag->bOutput && SocketDrag->BoundSourceRange.IsSet())
 		{
 			BoundSyntax.Kind = SocketDrag->BoundExpressionKind;
@@ -938,12 +940,21 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 				SocketDrag->bBoundExpressionExplicitlyGrouped;
 			BoundSyntaxPtr = &BoundSyntax;
 		}
+		else if (!SocketDrag->bOutput
+			&& SocketDrag->ParentOperandIndex != INDEX_NONE)
+		{
+			ParentSyntax.Kind = SocketDrag->ParentExpressionKind;
+			ParentSyntax.OperatorSpelling = SocketDrag->ParentOperatorSpelling;
+			ParentSyntax.OperandIndex = SocketDrag->ParentOperandIndex;
+			ParentSyntaxPtr = &ParentSyntax;
+		}
 		bApplied = TryApplyVerseExpressionAction(
 			*ActiveDocument->Session,
 			SocketDrag->TileRange,
 			*Action,
 			Error,
-			BoundSyntaxPtr);
+			BoundSyntaxPtr,
+			ParentSyntaxPtr);
 	}
 	if (!bApplied)
 	{

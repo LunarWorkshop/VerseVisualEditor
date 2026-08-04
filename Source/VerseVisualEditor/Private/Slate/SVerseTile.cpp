@@ -1749,6 +1749,9 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 	DragStart.TileRange = Tile.Range;
 	if (!bOutput)
 	{
+		DragStart.ParentExpressionKind = Tile.ExpressionKind;
+		DragStart.ParentOperatorSpelling = Tile.OperatorSpelling;
+		DragStart.ParentOperandIndex = SocketIndex;
 		if (Socket.InlineLiteralRange.IsSet())
 		{
 			DragStart.TileRange = Socket.InlineLiteralRange;

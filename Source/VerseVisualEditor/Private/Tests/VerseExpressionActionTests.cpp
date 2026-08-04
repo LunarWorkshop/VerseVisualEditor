@@ -633,7 +633,7 @@ bool FVerseExpressionPromotionGroupingTest::RunTest(const FString& Parameters)
 		{TEXT("Higher precedence on the right"), TEXT("+"), 1,
 			TEXT("A * B"), TEXT("*"), false, TEXT("0.0 + A * B")},
 		{TEXT("Equal precedence on the left"), TEXT("-"), 0,
-			TEXT("A - B"), TEXT("-"), false, TEXT("A - B - 0.0")},
+			TEXT("A - B"), TEXT("-"), false, TEXT("(A - B) - 0.0")},
 		{TEXT("Explicit grouping is not duplicated"), TEXT("*"), 0,
 			TEXT("(A - B)"), TEXT("-"), true, TEXT("(A - B) * 0.0")},
 		{TEXT("Unknown compound precedence is grouped conservatively"), TEXT("*"), 0,
@@ -661,6 +661,105 @@ bool FVerseExpressionPromotionGroupingTest::RunTest(const FString& Parameters)
 		{
 			TestEqual(Item.Label, Source, FString(Item.Expected));
 		}
+	}
+
+	struct FProviderInsertionCase
+	{
+		const TCHAR* Label;
+		const TCHAR* ParentOperator;
+		int32 OperandIndex;
+		const TCHAR* ProviderOperator;
+		const TCHAR* ExpectedExpression;
+	};
+	static const FProviderInsertionCase ProviderCases[] = {
+		{TEXT("Equal precedence provider on the right"), TEXT("*"), 1, TEXT("/"),
+			TEXT("0.0 * (0.0 / 0.0)")},
+		{TEXT("Equal precedence provider on the left"), TEXT("*"), 0, TEXT("/"),
+			TEXT("(0.0 / 0.0) * 1.0")},
+		{TEXT("Lower precedence provider on the right"), TEXT("*"), 1, TEXT("+"),
+			TEXT("0.0 * (0.0 + 0.0)")},
+		{TEXT("Lower precedence provider on the left"), TEXT("*"), 0, TEXT("+"),
+			TEXT("(0.0 + 0.0) * 1.0")},
+		{TEXT("Higher precedence provider on the right"), TEXT("+"), 1, TEXT("*"),
+			TEXT("0.0 + 0.0 * 0.0")},
+		{TEXT("Higher precedence provider on the left"), TEXT("+"), 0, TEXT("*"),
+			TEXT("0.0 * 0.0 + 1.0")},
+	};
+	for (const FProviderInsertionCase& Item : ProviderCases)
+	{
+		const FString InitialExpression = FString::Printf(
+			TEXT("0.0 %s 1.0"), Item.ParentOperator);
+		const FString Fixture = FString::Printf(
+			TEXT("ProviderCase()<computes> : float = %s\n"), *InitialExpression);
+		Error = FText::GetEmpty();
+		const TSharedPtr<FVerseDocument> ProviderDocument = MakeDocument(Fixture, Error);
+		if (!TestTrue(*FString::Printf(TEXT("%s fixture parses"), Item.Label),
+			ProviderDocument.IsValid()))
+		{
+			continue;
+		}
+		FVerseDocumentSession ProviderSession(ProviderDocument.ToSharedRef());
+		const TArray<FVerseFunctionNavigationItem> ProviderFunctions =
+			FVerseFunctionNavigationBuilder::Build(
+				ProviderSession.GetTiles(), ProviderSession.GetParseSnapshot());
+		const FVerseVisualTile* Parent = !ProviderFunctions.IsEmpty()
+			? ProviderFunctions[0].GraphTiles.FindByPredicate(
+				[&Item](const FVerseVisualTile& Tile)
+				{
+					return Tile.ExpressionKind == EVerseExpressionKind::BinaryOperator
+						&& Tile.OperatorSpelling == Item.ParentOperator;
+				})
+			: nullptr;
+		if (!TestTrue(*FString::Printf(TEXT("%s parent and operand exist"), Item.Label),
+			Parent != nullptr && Parent->Children.IsValidIndex(Item.OperandIndex)))
+		{
+			continue;
+		}
+
+		FVerseExpressionAction Provider;
+		Provider.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+		Provider.SourceSpelling = Item.ProviderOperator;
+		Provider.InputDefaultSources = {TEXT("0.0"), TEXT("0.0")};
+		const FVerseExpressionParentSyntax ParentSyntax{
+			EVerseExpressionKind::BinaryOperator,
+			Item.ParentOperator,
+			Item.OperandIndex};
+		Error = FText::GetEmpty();
+		const bool bApplied = TryApplyVerseExpressionAction(
+			ProviderSession,
+			Parent->Children[Item.OperandIndex].Range,
+			Provider,
+			Error,
+			nullptr,
+			&ParentSyntax);
+		TestTrue(*FString::Printf(TEXT("%s applies: %s"),
+			Item.Label, *Error.ToString()), bApplied);
+		if (!bApplied)
+		{
+			continue;
+		}
+		TestTrue(*FString::Printf(TEXT("%s preserves source grouping"), Item.Label),
+			FString(UTF8_TO_TCHAR(*ProviderSession.GetCurrentUtf8())).Contains(
+				Item.ExpectedExpression));
+
+		const TArray<FVerseFunctionNavigationItem> ReparsedFunctions =
+			FVerseFunctionNavigationBuilder::Build(
+				ProviderSession.GetTiles(), ProviderSession.GetParseSnapshot());
+		const FVerseVisualTile* ReparsedParent = !ReparsedFunctions.IsEmpty()
+			? ReparsedFunctions[0].GraphTiles.FindByPredicate(
+				[&Item](const FVerseVisualTile& Tile)
+				{
+					return Tile.ExpressionKind == EVerseExpressionKind::BinaryOperator
+						&& Tile.OperatorSpelling == Item.ParentOperator;
+				})
+			: nullptr;
+		TestTrue(*FString::Printf(TEXT("%s reparses under the original parent"), Item.Label),
+			ReparsedParent != nullptr
+				&& ReparsedParent->Children.IsValidIndex(Item.OperandIndex)
+				&& ReparsedParent->Children[Item.OperandIndex].ExpressionKind
+					== EVerseExpressionKind::BinaryOperator
+				&& ReparsedParent->Children[Item.OperandIndex].OperatorSpelling
+					== Item.ProviderOperator);
 	}
 	return true;
 }

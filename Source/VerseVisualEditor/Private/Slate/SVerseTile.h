@@ -65,6 +65,10 @@ struct FVerseSocketDragStart
 	EVerseExpressionKind BoundExpressionKind = EVerseExpressionKind::Unsupported;
 	FString BoundOperatorSpelling;
 	bool bBoundExpressionExplicitlyGrouped = false;
+	/** Parent syntax needed when a new provider replaces this input operand. */
+	EVerseExpressionKind ParentExpressionKind = EVerseExpressionKind::Unsupported;
+	FString ParentOperatorSpelling;
+	int32 ParentOperandIndex = INDEX_NONE;
 	/** Omitted named/default input which must be materialized in its call. */
 	FString MaterializedInputName;
 	FVerseDesktopPoint DesktopPosition;
