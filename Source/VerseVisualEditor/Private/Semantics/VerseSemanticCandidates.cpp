@@ -95,6 +95,51 @@ namespace
 		return nullptr;
 	}
 
+	const Verse::Vst::Node* FindExactExpressionSemanticNode(
+		const FVerseSemanticSnapshot& Snapshot,
+		const FString& FilePath,
+		const FVerseVisualTile& Tile,
+		const FVerseDocument& Document)
+	{
+		if (const Verse::Vst::Node* Node = FindExactSemanticNode(
+			Snapshot, FilePath, Tile.Range, Document))
+		{
+			return Node;
+		}
+
+		// Visual grouping ranges include their parentheses, while the VST Parens
+		// and operator nodes commonly cover only the text between the delimiters.
+		// Resolve through that recorded interior rather than allowing grouped nested
+		// operators to lose their compiler signature and operand types.
+		for (const FVerseVisualExpressionDescriptor::FGroupingLayer& Layer :
+			Tile.GroupingLayers)
+		{
+			if (Layer.OpeningRange.IsSet() && Layer.ClosingRange.IsSet()
+				&& Layer.OpeningRange.EndByte() <= Layer.ClosingRange.BeginByte)
+			{
+				const FVerseTextRange InteriorRange(
+					Layer.Range.Revision,
+					FVerseByteRange::FromBounds(
+						Layer.OpeningRange.EndByte(),
+						Layer.ClosingRange.BeginByte));
+				if (const Verse::Vst::Node* Node = FindExactSemanticNode(
+					Snapshot, FilePath, InteriorRange, Document))
+				{
+					return Node;
+				}
+			}
+
+			// Retain the delimiter-inclusive lookup for VST forms whose locus owns
+			// the complete grouping range.
+			if (const Verse::Vst::Node* Node = FindExactSemanticNode(
+				Snapshot, FilePath, Layer.Range, Document))
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	}
+
 	const uLang::CExpressionBase* FindMappedExpression(const Verse::Vst::Node& Node)
 	{
 		if (const uLang::CAstNode* Ast = Node.GetMappedAstNode())
@@ -386,8 +431,8 @@ namespace
 			return;
 		}
 
-		const Verse::Vst::Node* Node = FindExactSemanticNode(
-			*Snapshot, FilePath, Tile.Range, Document);
+		const Verse::Vst::Node* Node = FindExactExpressionSemanticNode(
+			*Snapshot, FilePath, Tile, Document);
 		const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
 		const uLang::CScope* ActiveScope = Node != nullptr
 			? FindActiveScope(*Node, Program)
@@ -1159,9 +1204,16 @@ bool FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
 	bool bCheckTypeCompatibility)
 {
 	const TSharedPtr<const FVerseSemanticSnapshot> Snapshot = Provider.SemanticSnapshot;
-	if (!Snapshot.IsValid() || Consumer.SemanticSnapshot.Get() != Snapshot.Get()
+	const TSharedPtr<const FVerseSemanticSnapshot> ConsumerSnapshot =
+		Consumer.AcceptedSemanticSnapshot.IsValid()
+			? Consumer.AcceptedSemanticSnapshot
+			: Consumer.SemanticSnapshot;
+	const uLang::CTypeBase* ConsumerType = Consumer.AcceptedSemanticType != nullptr
+		? Consumer.AcceptedSemanticType
+		: Consumer.SemanticType;
+	if (!Snapshot.IsValid() || ConsumerSnapshot.Get() != Snapshot.Get()
 		|| !Snapshot->GetProgram().IsValid()
-		|| Provider.SemanticType == nullptr || Consumer.SemanticType == nullptr)
+		|| Provider.SemanticType == nullptr || ConsumerType == nullptr)
 	{
 		return false;
 	}
@@ -1183,7 +1235,7 @@ bool FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
 		: VerseFN::UploadedAtFNVersion::Latest;
 	if (bCheckTypeCompatibility
 		&& !uLang::SemanticTypeUtils::IsSubtype(
-			Provider.SemanticType, Consumer.SemanticType, UploadedVersion))
+			Provider.SemanticType, ConsumerType, UploadedVersion))
 	{
 		return false;
 	}

@@ -183,6 +183,14 @@ struct FVerseVisualSocket
 	FString SemanticTypeName;
 	/** Compiler-owned expected/result type, kept alive by SemanticSnapshot. */
 	const uLang::CTypeBase* SemanticType = nullptr;
+	/**
+	 * Compiler-owned formal type accepted by this input. This intentionally
+	 * differs from SemanticType, which describes the expression currently
+	 * connected to the input and drives its concrete presentation.
+	 */
+	const uLang::CTypeBase* AcceptedSemanticType = nullptr;
+	FString AcceptedSemanticTypeName;
+	TSharedPtr<const FVerseSemanticSnapshot> AcceptedSemanticSnapshot;
 	FVerseTextRange InlineLiteralRange;
 	EVerseLiteralKind InlineLiteralKind = EVerseLiteralKind::None;
 	/** An omitted fixed formal parameter currently uses its declared default. */

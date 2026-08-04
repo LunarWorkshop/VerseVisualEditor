@@ -265,6 +265,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"CallGenericFloat(Input : float)<computes> : float = Identity(Input)\n"
 		"CallDefault(Input : int)<computes> : float = WithDefault(Input)\n"
 		"CompareFloat(Input : float)<computes><decides> : float = Input <> 0.0\n"
+		"OperandAcceptance(Input : float)<computes><decides> : float = (Input - Input) * (1.0 / 2.0)\n"
 		"QueryLogic(Input : logic)<computes><decides> : logic = Input?\n"));
 	Document.Revision.Value = 91;
 
@@ -823,6 +824,75 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 				{
 					return Signature.ResultTypeName == TEXT("int");
 				}));
+	}
+	FVerseFunctionNavigationItem* OperandAcceptance = BoundFunctions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("OperandAcceptance");
+		});
+	if (TestNotNull(TEXT("Operand-acceptance fixture binds"), OperandAcceptance))
+	{
+		FVerseSemanticCandidateProvider::BindFunctionGraph(
+			OperandAcceptance->GraphTiles,
+			Workspace.GetLastSuccessfulSnapshot(),
+			Document.FilePath,
+			*ParsedDocument);
+		TArray<const FVerseVisualTile*> Operators;
+		TFunction<void(TConstArrayView<FVerseVisualTile>)> CollectOperators =
+			[&](TConstArrayView<FVerseVisualTile> Tiles)
+			{
+				for (const FVerseVisualTile& Tile : Tiles)
+				{
+					if (Tile.OperatorSpelling == TEXT("-")
+						|| Tile.OperatorSpelling == TEXT("/"))
+					{
+						Operators.Add(&Tile);
+					}
+					CollectOperators(Tile.Children);
+				}
+			};
+		CollectOperators(OperandAcceptance->GraphTiles);
+		TestEqual(TEXT("Identifier and literal operator fixtures are found"),
+			Operators.Num(), 2);
+		const FVerseVisualTile* Entry = OperandAcceptance->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == EVerseVisualTileKind::FunctionEntry;
+			});
+		const FVerseVisualSocket* FloatProvider = Entry != nullptr
+			&& !Entry->GetValueOutputs().IsEmpty()
+			? &Entry->GetValueOutputs()[0]
+			: nullptr;
+		TestNotNull(TEXT("Float provider socket is compiler-backed"), FloatProvider);
+		for (const FVerseVisualTile* Operator : Operators)
+		{
+			if (!TestTrue(TEXT("Each binary operator has two inputs"),
+				Operator != nullptr && Operator->GetValueInputs().Num() == 2))
+			{
+				continue;
+			}
+			for (const FVerseVisualSocket& Input : Operator->GetValueInputs())
+			{
+				TestTrue(
+					*FString::Printf(TEXT("%s input retains its compiler-owned accepted type"),
+						*Operator->OperatorSpelling),
+					Input.AcceptedSemanticType != nullptr
+						&& Input.AcceptedSemanticSnapshot
+							== Workspace.GetLastSuccessfulSnapshot());
+				if (FloatProvider != nullptr)
+				{
+					TestTrue(
+						*FString::Printf(TEXT("%s input accepts a float provider"),
+							*Operator->OperatorSpelling),
+						FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
+							Document.FilePath,
+							Operator->Range.BeginByte,
+							*ParsedDocument,
+							*FloatProvider,
+							Input));
+				}
+			}
+		}
 	}
 	FVerseVisualTile* DefaultCall = BindNamedFunction(TEXT("CallDefault"));
 	if (TestNotNull(TEXT("Default-parameter invocation binds"), DefaultCall))

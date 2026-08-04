@@ -939,6 +939,17 @@ private:
 						Input.SemanticSnapshot = Tile.SemanticSnapshot;
 					}
 				}
+				if (Tile.SemanticInputTypeNames.IsValidIndex(Index)
+					&& Tile.SemanticInputTypes.IsValidIndex(Index))
+				{
+					// The child result controls how an occupied socket is displayed, but
+					// compatibility must use the callee's formal input. Literal children
+					// deliberately have no compiler pointer of their own, and generic
+					// children may have a more concrete type than the formal constraint.
+					Input.AcceptedSemanticTypeName = Tile.SemanticInputTypeNames[Index];
+					Input.AcceptedSemanticType = Tile.SemanticInputTypes[Index];
+					Input.AcceptedSemanticSnapshot = Tile.SemanticSnapshot;
+				}
 				Input.bNamedParameter = Tile.SemanticInputNamed.IsValidIndex(Index)
 					&& Tile.SemanticInputNamed[Index];
 				Input.bUsesDeclaredDefault = !Tile.Children.IsValidIndex(Index)
@@ -960,6 +971,9 @@ private:
 			Input.SemanticTypeName = Tile.SemanticTypeName;
 			Input.SemanticType = Tile.SemanticType;
 			Input.SemanticSnapshot = Tile.SemanticSnapshot;
+			Input.AcceptedSemanticTypeName = Tile.SemanticTypeName;
+			Input.AcceptedSemanticType = Tile.SemanticType;
+			Input.AcceptedSemanticSnapshot = Tile.SemanticSnapshot;
 			if (Initializer.LiteralKind != EVerseLiteralKind::None)
 			{
 				Input.InlineLiteralRange = Initializer.Range;
