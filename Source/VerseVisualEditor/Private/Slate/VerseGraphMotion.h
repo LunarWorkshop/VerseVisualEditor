@@ -31,6 +31,8 @@ struct FVerseGraphMotionPose
 	FVector2D TargetGraphPosition = FVector2D::ZeroVector;
 	FVector2D DisplayedGraphPosition = FVector2D::ZeroVector;
 	float Opacity = 1.0f;
+	FVector2D TargetGraphSize = FVector2D::ZeroVector;
+	FVector2D DisplayedGraphSize = FVector2D::ZeroVector;
 };
 
 class SVerseGraphMotionWidget;
@@ -83,6 +85,7 @@ public:
 		SLATE_ARGUMENT(FString, ParentMotionKey)
 		SLATE_ARGUMENT(EVerseGraphMotionEntrance, Entrance)
 		SLATE_ARGUMENT(bool, IsGraphAnchor)
+		SLATE_ARGUMENT(bool, AnimateHorizontalSizeFromLeft)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
 
@@ -97,6 +100,7 @@ public:
 		const FGeometry& AllottedGeometry,
 		double InCurrentTime,
 		float InDeltaTime) override;
+	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
 
 private:
 	void StartReturnAnimation(double CurrentTime);
@@ -107,12 +111,15 @@ private:
 	FString ParentMotionKey;
 	EVerseGraphMotionEntrance Entrance = EVerseGraphMotionEntrance::FromRight;
 	bool bIsGraphAnchor = false;
+	bool bAnimateHorizontalSizeFromLeft = false;
 	FVector2D ReflowStartOffset = FVector2D::ZeroVector;
 	FVector2D ReflowOffset = FVector2D::ZeroVector;
 	FVector2D DragStartDesktop = FVector2D::ZeroVector;
 	FVector2D DragOffset = FVector2D::ZeroVector;
 	FVector2D ReturnStartOffset = FVector2D::ZeroVector;
 	FVector2D LastTargetGraphPosition = FVector2D::ZeroVector;
+	FVector2D LastTargetGraphSize = FVector2D::ZeroVector;
+	FVector2D LastDisplayedGraphSize = FVector2D::ZeroVector;
 	double ReflowStartTime = 0.0;
 	double ReturnStartTime = 0.0;
 	float ReflowStartOpacity = 1.0f;
@@ -121,4 +128,10 @@ private:
 	bool bAnimatingReflow = false;
 	bool bAnimatingReturn = false;
 	bool bDragging = false;
+	mutable float HorizontalSizeStartWidth = 0.0f;
+	mutable float HorizontalSizeTargetWidth = 0.0f;
+	mutable float HorizontalSizeDisplayedWidth = 0.0f;
+	mutable double HorizontalSizeStartTime = 0.0;
+	mutable bool bHorizontalSizeInitialized = false;
+	mutable bool bAnimatingHorizontalSize = false;
 };

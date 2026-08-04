@@ -143,8 +143,57 @@ void SVerseGraphMotionWidget::Construct(const FArguments& InArgs)
 	ParentMotionKey = InArgs._ParentMotionKey;
 	Entrance = InArgs._Entrance;
 	bIsGraphAnchor = InArgs._IsGraphAnchor;
+	bAnimateHorizontalSizeFromLeft = InArgs._AnimateHorizontalSizeFromLeft;
 	SetCanTick(true);
-	ChildSlot[InArgs._Content.Widget];
+	if (bAnimateHorizontalSizeFromLeft)
+	{
+		SetClipping(EWidgetClipping::ClipToBounds);
+		ChildSlot
+			.HAlign(HAlign_Fill)
+			.VAlign(VAlign_Fill)
+			[
+				InArgs._Content.Widget
+			];
+	}
+	else
+	{
+		ChildSlot[InArgs._Content.Widget];
+	}
+}
+
+FVector2D SVerseGraphMotionWidget::ComputeDesiredSize(float LayoutScaleMultiplier) const
+{
+	FVector2D ComputedSize = SCompoundWidget::ComputeDesiredSize(LayoutScaleMultiplier);
+	if (!bAnimateHorizontalSizeFromLeft || !Controller.IsValid())
+	{
+		return ComputedSize;
+	}
+
+	HorizontalSizeTargetWidth = ComputedSize.X;
+	if (!bHorizontalSizeInitialized)
+	{
+		bHorizontalSizeInitialized = true;
+		HorizontalSizeStartWidth = HorizontalSizeTargetWidth;
+		HorizontalSizeDisplayedWidth = HorizontalSizeTargetWidth;
+		if (Controller->ShouldAnimateBuild() && GetDuration() > 0.0f)
+		{
+			if (const TOptional<FVerseGraphMotionPose> Previous =
+				Controller->FindPreviousPose(MotionKey))
+			{
+				const float PreviousWidth = Previous->DisplayedGraphSize.X;
+				if (PreviousWidth > UE_SMALL_NUMBER
+					&& !FMath::IsNearlyEqual(PreviousWidth, HorizontalSizeTargetWidth))
+				{
+					HorizontalSizeStartWidth = PreviousWidth;
+					HorizontalSizeDisplayedWidth = PreviousWidth;
+					HorizontalSizeStartTime = FPlatformTime::Seconds();
+					bAnimatingHorizontalSize = true;
+				}
+			}
+		}
+	}
+	ComputedSize.X = HorizontalSizeDisplayedWidth;
+	return ComputedSize;
 }
 
 void SVerseGraphMotionWidget::BeginElasticDrag(FVector2D DesktopPosition)
@@ -168,7 +217,9 @@ void SVerseGraphMotionWidget::UpdateElasticDrag(FVector2D DesktopPosition)
 		Controller->PublishPose(MotionKey, {
 			LastTargetGraphPosition,
 			LastTargetGraphPosition + ReflowOffset + DragOffset,
-			CurrentOpacity});
+			CurrentOpacity,
+			LastTargetGraphSize,
+			LastDisplayedGraphSize});
 	}
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
@@ -297,15 +348,40 @@ void SVerseGraphMotionWidget::Tick(
 			DragOffset = FVector2D::ZeroVector;
 		}
 	}
+	if (bAnimatingHorizontalSize)
+	{
+		const float Alpha = Duration > 0.0f
+			? static_cast<float>((InCurrentTime - HorizontalSizeStartTime) / Duration)
+			: 1.0f;
+		HorizontalSizeDisplayedWidth = FMath::Lerp(
+			HorizontalSizeStartWidth,
+			HorizontalSizeTargetWidth,
+			EvaluateVerseGraphEaseOut(Alpha));
+		if (Alpha >= 1.0f)
+		{
+			bAnimatingHorizontalSize = false;
+			HorizontalSizeDisplayedWidth = HorizontalSizeTargetWidth;
+		}
+		Invalidate(EInvalidateWidgetReason::Layout);
+	}
 
 	const FVector2D TotalOffset = ReflowOffset + DragOffset;
 	SetRenderTransform(FSlateRenderTransform(TotalOffset));
 	CurrentOpacity = Opacity;
 	SetRenderOpacity(Opacity);
+	const FVector2D AllottedSize = AllottedGeometry.GetLocalSize();
+	LastTargetGraphSize = bAnimateHorizontalSizeFromLeft
+		? FVector2D(HorizontalSizeTargetWidth, AllottedSize.Y)
+		: AllottedSize;
+	LastDisplayedGraphSize = bAnimateHorizontalSizeFromLeft
+		? FVector2D(HorizontalSizeDisplayedWidth, AllottedSize.Y)
+		: AllottedSize;
 	Controller->PublishPose(MotionKey, {
 		Target,
 		Target + TotalOffset,
-		Opacity});
+		Opacity,
+		LastTargetGraphSize,
+		LastDisplayedGraphSize});
 	if (bAnimatingReflow || bAnimatingReturn || bDragging)
 	{
 		Invalidate(EInvalidateWidgetReason::Paint);

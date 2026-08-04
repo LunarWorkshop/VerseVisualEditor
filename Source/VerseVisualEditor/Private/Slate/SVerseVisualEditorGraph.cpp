@@ -382,7 +382,10 @@ namespace
 		EVerseFunctionGraphPresentation Presentation =
 			EVerseFunctionGraphPresentation::VerticalExecution,
 		TSharedPtr<FVerseGraphMotionController> MotionController = nullptr,
-		FString ParentMotionKey = FString())
+		FString ParentMotionKey = FString(),
+		bool bCompensateParentMotion = true,
+		bool bAnimateHorizontalSizeFromLeft = false,
+		FString MotionRoleKeyBase = FString())
 	{
 		constexpr float StandardOperandColumnWidth = 190.0f;
 		constexpr float StandardOperandWireSpace = 72.0f;
@@ -393,7 +396,10 @@ namespace
 			: StandardOperandWireSpace;
 		const FString MotionKey = MotionController.IsValid()
 			? MotionController->AllocateKey(
-				BuildVerseGraphMotionKeyBase(Tile), ParentMotionKey)
+				MotionRoleKeyBase.IsEmpty()
+					? BuildVerseGraphMotionKeyBase(Tile)
+					: MotionRoleKeyBase,
+				ParentMotionKey)
 			: FString();
 		const bool bIsGraphAnchor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
 			&& ParentMotionKey.IsEmpty();
@@ -401,7 +407,8 @@ namespace
 			Tile.StatementFailure == EVerseStatementFailureDisposition::Propagated
 			|| Tile.StatementFailure == EVerseStatementFailureDisposition::CompilerError;
 		auto FinishRow = [MotionController, MotionKey, ParentMotionKey, Presentation,
-			bIsGraphAnchor, bReserveFailureTerminalLane](
+			bIsGraphAnchor, bReserveFailureTerminalLane, bCompensateParentMotion,
+			bAnimateHorizontalSizeFromLeft](
 			FBuiltFunctionGraphRow Row)
 		{
 			if (bReserveFailureTerminalLane)
@@ -422,11 +429,12 @@ namespace
 				SNew(SVerseGraphMotionWidget)
 				.Controller(MotionController)
 				.MotionKey(MotionKey)
-				.ParentMotionKey(ParentMotionKey)
+				.ParentMotionKey(bCompensateParentMotion ? ParentMotionKey : FString())
 				.Entrance(Presentation == EVerseFunctionGraphPresentation::VerticalExecution
 					? EVerseGraphMotionEntrance::FromRight
 					: EVerseGraphMotionEntrance::FromTop)
 				.IsGraphAnchor(bIsGraphAnchor)
+				.AnimateHorizontalSizeFromLeft(bAnimateHorizontalSizeFromLeft)
 				[
 					Row.Widget
 				];
@@ -568,7 +576,10 @@ namespace
 					OwningRenderScope,
 					Presentation,
 					MotionController,
-					MotionKey);
+					MotionKey,
+					false,
+					Presentation == EVerseFunctionGraphPresentation::HorizontalExecution,
+					TEXT("IfCondition"));
 				PredicatePresentation = PredicateRow.Widget;
 			}
 			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
@@ -694,9 +705,13 @@ namespace
 						]
 					],
 					RootTile,
-					[ExecutionSpineOffset]()
+					[PredicatePresentation, OperandColumnWidth, OperandWireSpace]()
 					{
-						return FVector2D(ExecutionSpineOffset, 0.0f);
+						return FVector2D(
+							FMath::Max(OperandColumnWidth,
+								PredicatePresentation->GetDesiredSize().X)
+								+ OperandWireSpace,
+							0.0f);
 					}});
 			}
 			return FinishRow({
