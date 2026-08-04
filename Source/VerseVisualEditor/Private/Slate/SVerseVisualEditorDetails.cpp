@@ -297,7 +297,11 @@ void SVerseVisualEditor::HandleRenameCommitted(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		// Renaming can change measured widths throughout the horizontal layout,
+		// but it does not insert, remove, or reorder graph structure. Apply the
+		// resulting layout atomically instead of replaying reflow motion on every
+		// downstream tile whose target position changed.
+		RefreshActiveDocument(false);
 	}
 }
 
