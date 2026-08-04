@@ -147,7 +147,10 @@ void SVerseGraphMotionWidget::Construct(const FArguments& InArgs)
 	SetCanTick(true);
 	if (bAnimateHorizontalSizeFromLeft)
 	{
-		SetClipping(EWidgetClipping::ClipToBounds);
+		// The fill-arranged tile shell follows the interpolated width, while the
+		// tile's nested render scope clips its internal graph content. Do not clip
+		// this outer motion wrapper: pins and failure diamonds deliberately straddle
+		// the tile boundary and must remain visible during and after the resize.
 		ChildSlot
 			.HAlign(HAlign_Fill)
 			.VAlign(VAlign_Fill)
