@@ -198,6 +198,9 @@ namespace
 			.CompactExecutionSpacing(bCompactExecutionSpacing)
 			.FunctionGraphPresentation(Presentation)
 			.ConnectedSockets(MoveTemp(ConnectedSockets))
+			.EndpointRegistry(WidgetRegistry != nullptr
+				? TSharedPtr<FVerseGraphEndpointRegistry>(WidgetRegistry->Endpoints)
+				: nullptr)
 			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
 			{
 				return IsTileSelected.IsBound()
@@ -1411,7 +1414,8 @@ void SVerseVisualEditor::RefreshActiveDocument(
 			FunctionTab.FunctionCanvas->RefreshContent(
 				FunctionContent,
 				MoveTemp(GraphConnections),
-				FunctionEntryAnchor);
+				FunctionEntryAnchor,
+				WidgetRegistry.Endpoints);
 			ActiveView = FunctionTab.FunctionCanvas.ToSharedRef();
 		}
 		else
@@ -1424,7 +1428,8 @@ void SVerseVisualEditor::RefreshActiveDocument(
 				.InitialAnchor(FunctionEntryAnchor)
 				.Connections(GraphConnections)
 				.MotionController(FunctionTab.MotionController)
-				.OnConnectionDropped(FOnVerseGraphConnectionDropped::CreateSP(
+				.EndpointRegistry(WidgetRegistry.Endpoints)
+				.OnConnectionDropped(FOnVerseGraphConnectionTargetDropped::CreateSP(
 					this, &SVerseVisualEditor::HandleConnectionDropped))
 				.OnConnectionCancelled(FSimpleDelegate::CreateSP(
 					this, &SVerseVisualEditor::HandleConnectionCancelled))

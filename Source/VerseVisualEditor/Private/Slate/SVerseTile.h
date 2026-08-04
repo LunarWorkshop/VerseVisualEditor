@@ -8,6 +8,8 @@
 class FVerseDocument;
 class SVerseGraphRenderScope;
 class SVerseGraphMotionWidget;
+class FVerseGraphEndpointRegistry;
+enum class EVerseSocketDragVisualState : uint8;
 
 struct FVerseFailablePatternSegment
 {
@@ -49,6 +51,7 @@ struct FVerseSocketDragStart
 
 	TSharedPtr<SWidget> Anchor;
 	FVerseVisualSocketEndpoint Endpoint;
+	FVerseVisualSocket Socket;
 	FVector2D AnchorCoordinate = FVector2D(0.5f, 0.5f);
 	FVerseTextRange TileRange;
 	/** Nearest statement ancestor used solely for lexical semantic lookup. */
@@ -83,6 +86,7 @@ struct FVerseSocketDragStart
 	EPurpose Purpose = EPurpose::ValueConnection;
 	TWeakPtr<SVerseGraphRenderScope> RenderScope;
 	bool bScopedToNestedRenderScope = false;
+	bool bInsideFailableContext = false;
 };
 
 DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnVerseSocketDragStarted, const FVerseSocketDragStart&);
@@ -119,6 +123,7 @@ public:
 		SLATE_ARGUMENT(EVerseFunctionGraphPresentation, FunctionGraphPresentation)
 		SLATE_ARGUMENT(FText, DiagnosticText)
 		SLATE_ARGUMENT(TSet<FVerseVisualSocketId>, ConnectedSockets)
+		SLATE_ARGUMENT(TSharedPtr<FVerseGraphEndpointRegistry>, EndpointRegistry)
 		SLATE_ATTRIBUTE(bool, IsSelected)
 		SLATE_EVENT(FOnClicked, OnSelected)
 		SLATE_EVENT(FOnClicked, OnOpened)
@@ -212,6 +217,17 @@ private:
 	FReply HandleIdentityMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
 	FSlateColor GetOutlineColor() const;
 	FSlateColor GetShadowColor() const;
+	EVerseSocketDragVisualState GetSocketDragState(FVerseVisualSocketId SocketId) const;
+	float GetSocketDragOpacity(FVerseVisualSocketId SocketId) const;
+	FSlateColor GetSocketDragRowColor(
+		FVerseVisualSocketId SocketId,
+		FLinearColor TypeColor) const;
+	FSlateColor GetSocketDragPinColor(
+		FVerseVisualSocketId SocketId,
+		FLinearColor TypeColor) const;
+	FSlateRenderTransform GetSocketDragPinTransform(FVerseVisualSocketId SocketId) const;
+	EVisibility GetSocketDragHaloVisibility(FVerseVisualSocketId SocketId) const;
+	FSlateColor GetSocketDragHaloColor(FVerseVisualSocketId SocketId) const;
 
 	FVerseVisualTile Tile;
 	TSharedPtr<const FVerseDocument> Document;
@@ -224,6 +240,7 @@ private:
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TMap<FVerseVisualSocketId, TSharedPtr<SWidget>> SocketAnchors;
 	TSet<FVerseVisualSocketId> ConnectedSockets;
+	TSharedPtr<FVerseGraphEndpointRegistry> EndpointRegistry;
 	TSharedPtr<SWidget> IdentityBandWidget;
 	TSharedPtr<SWidget> MainSocketRowWidget;
 	TSharedPtr<SWidget> HorizontalExecutionInputDockWidget;
@@ -243,3 +260,10 @@ private:
 	EVerseFunctionGraphPresentation FunctionGraphPresentation =
 		EVerseFunctionGraphPresentation::VerticalExecution;
 };
+
+/** Builds source-edit metadata for a model socket without requiring a Slate widget. */
+FVerseSocketDragStart BuildVerseSocketDragDescriptor(
+	const FVerseVisualTile& Tile,
+	const FVerseVisualSocket& Socket,
+	bool bOutput,
+	int32 SocketIndex);

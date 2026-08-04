@@ -764,4 +764,204 @@ bool FVerseExpressionPromotionGroupingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDirectSocketExpressionMoveTest,
+	"VerseVisualEditor.Expressions.Source.DirectSocketMove",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDirectSocketExpressionMoveTest::RunTest(const FString& Parameters)
+{
+	FText Error;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		TEXT("Move(A : float, B : float, C : float)<computes> : float = (A - B) * C\n"),
+		Error);
+	if (!TestTrue(TEXT("Direct-move fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseVisualTile* Multiply = Functions.IsEmpty() ? nullptr
+		: Functions[0].GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.OperatorSpelling == TEXT("*");
+			});
+	if (!TestNotNull(TEXT("Multiply statement is represented"), Multiply)
+		|| Multiply->Children.Num() != 2)
+	{
+		return false;
+	}
+	const FVerseVisualTile& Subtract = Multiply->Children[0];
+	const FVerseVisualTile& Consumer = Multiply->Children[1];
+	FVerseTextRange Placeholder;
+	const bool bMoved = TryConnectVerseExpressions(
+		Session,
+		Subtract.Range,
+		TEXTVIEW("float"),
+		false,
+		{EVerseExpressionKind::BinaryOperator, TEXT("-"), true},
+		Consumer.Range,
+		{EVerseExpressionKind::BinaryOperator, TEXT("*"), 1},
+		Error,
+		&Placeholder);
+	TestTrue(*FString::Printf(TEXT("Direct move succeeds: %s"), *Error.ToString()), bMoved);
+	if (bMoved)
+	{
+		const FString Source = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+		TestTrue(TEXT("Provider moves once and leaves a source-safe placeholder"),
+			Source.Contains(TEXT("0.0 * (A - B)")));
+		TestTrue(TEXT("Placeholder range is returned for provisional tracking"),
+			Placeholder.IsSet());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDirectSocketOperatorRetargetTest,
+	"VerseVisualEditor.Expressions.Source.DirectSocketOperatorRetarget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDirectSocketOperatorRetargetTest::RunTest(const FString& Parameters)
+{
+	FText Error;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		TEXT("Retarget(A : float)<computes> : float =\n")
+		TEXT("    A\n")
+		TEXT("    0 + 0\n"),
+		Error);
+	if (!TestTrue(TEXT("Operator-retarget fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseVisualTile* Provider = Functions.IsEmpty() ? nullptr
+		: Functions[0].GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::Identifier;
+			});
+	const FVerseVisualTile* Add = Functions.IsEmpty() ? nullptr
+		: Functions[0].GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.OperatorSpelling == TEXT("+");
+			});
+	if (!TestNotNull(TEXT("Provider identifier is represented"), Provider)
+		|| !TestNotNull(TEXT("Add operator is represented"), Add)
+		|| Add->GetValueInputs().Num() != 2)
+	{
+		return false;
+	}
+	FVerseOperatorRetargetRecipe Recipe;
+	Recipe.OperatorRange = Add->Range;
+	Recipe.OperatorSpelling = TEXT("+");
+	Recipe.OperandCount = 2;
+	Recipe.ReplacedOperandIndex = 0;
+	Recipe.SignatureDisplayText = TEXT("float x float -> float");
+	Recipe.OperandTypeNames = {TEXT("float"), TEXT("float")};
+	for (const FVerseVisualSocket& Input : Add->GetValueInputs())
+	{
+		Recipe.InlineLiteralRanges.Add(Input.InlineLiteralRange);
+	}
+	FVerseTextRange Placeholder;
+	const bool bMoved = TryConnectVerseExpressions(
+		Session,
+		Provider->Range,
+		TEXTVIEW("float"),
+		false,
+		{EVerseExpressionKind::Identifier, FString(), false},
+		Add->GetValueInputs()[0].InlineLiteralRange,
+		{EVerseExpressionKind::BinaryOperator, TEXT("+"), 0},
+		Error,
+		&Placeholder,
+		FStringView(),
+		&Recipe);
+	TestTrue(*FString::Printf(TEXT("Direct retarget succeeds: %s"), *Error.ToString()), bMoved);
+	if (bMoved)
+	{
+		const FString Source = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+		TestTrue(TEXT("Operator adopts the provider's concrete signature"),
+			Source.Contains(TEXT("A + 0.0")));
+		TestTrue(TEXT("Moved provider leaves a provisional source-safe placeholder"),
+			Placeholder.IsSet() && Source.Contains(TEXT("    0.0\n")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDirectSocketNamedInputTest,
+	"VerseVisualEditor.Expressions.Source.DirectSocketNamedInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDirectSocketNamedInputTest::RunTest(const FString& Parameters)
+{
+	FText Error;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		TEXT("WithDefault(Required : int, ?Optional : float = 1.0)<computes> : float = Optional\n")
+		TEXT("UseDefault(A : float)<computes> : float =\n")
+		TEXT("    A\n")
+		TEXT("    WithDefault(1)\n"),
+		Error);
+	if (!TestTrue(TEXT("Direct named-input fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseFunctionNavigationItem* Caller = Functions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Function)
+		{
+			return Function.Name == TEXT("UseDefault");
+		});
+	const FVerseVisualTile* Provider = Caller != nullptr
+		? Caller->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::Identifier;
+			})
+		: nullptr;
+	const FVerseVisualTile* Call = Caller != nullptr
+		? Caller->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::Call;
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("Named-input provider is represented"), Provider)
+		|| !TestNotNull(TEXT("Call with omitted input is represented"), Call))
+	{
+		return false;
+	}
+	FVerseTextRange Placeholder;
+	const bool bMoved = TryConnectVerseExpressions(
+		Session,
+		Provider->Range,
+		TEXTVIEW("float"),
+		false,
+		{EVerseExpressionKind::Identifier, FString(), false},
+		Call->Range,
+		{EVerseExpressionKind::Call, FString(), INDEX_NONE},
+		Error,
+		&Placeholder,
+		TEXTVIEW("Optional"));
+	TestTrue(*FString::Printf(TEXT("Direct named input succeeds: %s"), *Error.ToString()), bMoved);
+	if (bMoved)
+	{
+		const FString Source = FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+		TestTrue(TEXT("Named/default input materializes atomically"),
+			Source.Contains(TEXT("WithDefault(1, ?Optional := A)")));
+		TestTrue(TEXT("Moved provider receives a provisional placeholder"),
+			Placeholder.IsSet());
+	}
+	return true;
+}
+
 #endif

@@ -434,6 +434,40 @@ bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseSocketDragVisualStateTest,
+	"VerseVisualEditor.Graph.Interaction.SocketDragVisualState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseSocketDragVisualStateTest::RunTest(const FString& Parameters)
+{
+	const FVerseVisualSocketEndpoint Source{
+		{11}, {EVerseVisualSocketDirection::Output, EVerseVisualSocketRole::Value, 0}};
+	const FVerseVisualSocketEndpoint Compatible{
+		{12}, {EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Value, 0}};
+	const FVerseVisualSocketEndpoint Incompatible{
+		{13}, {EVerseVisualSocketDirection::Input, EVerseVisualSocketRole::Value, 0}};
+	FVerseGraphEndpointRegistry Registry;
+	Registry.SetDragStates({
+		{Source, EVerseSocketDragVisualState::Source},
+		{Compatible, EVerseSocketDragVisualState::Compatible},
+		{Incompatible, EVerseSocketDragVisualState::Incompatible}});
+	TestEqual(TEXT("Source retains source treatment"), Registry.GetDragState(Source),
+		EVerseSocketDragVisualState::Source);
+	TestTrue(TEXT("Compatible endpoint is a drop target"),
+		Registry.IsCompatibleTarget(Compatible));
+	TestFalse(TEXT("Incompatible endpoint is not a drop target"),
+		Registry.IsCompatibleTarget(Incompatible));
+	Registry.SetHoveredEndpoint(Compatible);
+	TestEqual(TEXT("Hovered target receives stronger treatment"),
+		Registry.GetDragState(Compatible),
+		EVerseSocketDragVisualState::HoveredCompatible);
+	Registry.ClearDragStates();
+	TestEqual(TEXT("Clearing a drag restores neutral state"),
+		Registry.GetDragState(Compatible), EVerseSocketDragVisualState::Neutral);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseTileSemanticCompositionTest,
 	"VerseVisualEditor.Graph.Tile.SemanticComposition",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

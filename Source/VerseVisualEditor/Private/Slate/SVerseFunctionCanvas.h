@@ -11,7 +11,8 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
-		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
+		SLATE_ARGUMENT(TSharedPtr<FVerseGraphEndpointRegistry>, EndpointRegistry)
+		SLATE_EVENT(FOnVerseGraphConnectionTargetDropped, OnConnectionDropped)
 		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
 		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
@@ -22,8 +23,11 @@ public:
 	void RefreshContent(
 		TSharedRef<SWidget> InContent,
 		TArray<FVerseGraphConnection> InConnections,
-		TSharedPtr<SWidget> InInitialAnchor);
-	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
+		TSharedPtr<SWidget> InInitialAnchor,
+		TSharedPtr<FVerseGraphEndpointRegistry> InEndpointRegistry);
+	FReply BeginConnectionDrag(
+		const FVerseSocketDragStart& DragStart,
+		TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates);
 	void EndConnectionPreview();
 	TSharedRef<FVerseGraphMotionController> GetMotionController() const
 	{

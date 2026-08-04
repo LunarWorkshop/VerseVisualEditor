@@ -55,15 +55,35 @@ struct FVerseGraphEndpointBinding
 	bool bScopedToNestedRenderScope = false;
 };
 
+enum class EVerseSocketDragVisualState : uint8
+{
+	Neutral,
+	Source,
+	Compatible,
+	Incompatible,
+	HoveredCompatible,
+};
+
 /** Resolves immutable model endpoints to the widgets arranged for the current graph revision. */
 class FVerseGraphEndpointRegistry
 {
 public:
 	void Register(FVerseVisualSocketEndpoint Endpoint, FVerseGraphEndpointBinding Binding);
 	const FVerseGraphEndpointBinding* Find(FVerseVisualSocketEndpoint Endpoint) const;
+	const TMap<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding>& GetBindings() const
+	{
+		return Bindings;
+	}
+	void SetDragStates(TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> InStates);
+	void SetHoveredEndpoint(TOptional<FVerseVisualSocketEndpoint> Endpoint);
+	void ClearDragStates();
+	EVerseSocketDragVisualState GetDragState(FVerseVisualSocketEndpoint Endpoint) const;
+	bool IsCompatibleTarget(FVerseVisualSocketEndpoint Endpoint) const;
 
 private:
 	TMap<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding> Bindings;
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates;
+	TOptional<FVerseVisualSocketEndpoint> HoveredEndpoint;
 };
 
 using FVerseGraphArrangedEndpointMap =
@@ -123,10 +143,11 @@ FVector2D ComputeVerseAnchorLockedScrollOffset(
 	FVector2D PreviousAnchorDesktopPosition,
 	FVector2D CurrentAnchorDesktopPosition);
 
-DECLARE_DELEGATE_TwoParams(
-	FOnVerseGraphConnectionDropped,
+DECLARE_DELEGATE_ThreeParams(
+	FOnVerseGraphConnectionTargetDropped,
 	const FVerseSocketDragStart&,
-	FVerseDesktopPoint);
+	FVerseDesktopPoint,
+	TOptional<FVerseVisualSocketEndpoint>);
 
 /** Shared transform, interaction, background, and connection owner for every Verse graph. */
 class SVerseGraphSurface final : public SCompoundWidget
@@ -139,8 +160,9 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
+		SLATE_ARGUMENT(TSharedPtr<FVerseGraphEndpointRegistry>, EndpointRegistry)
 		SLATE_EVENT(FSimpleDelegate, OnBackgroundClicked)
-		SLATE_EVENT(FOnVerseGraphConnectionDropped, OnConnectionDropped)
+		SLATE_EVENT(FOnVerseGraphConnectionTargetDropped, OnConnectionDropped)
 		SLATE_EVENT(FSimpleDelegate, OnConnectionCancelled)
 		SLATE_DEFAULT_SLOT(FArguments, Content)
 	SLATE_END_ARGS()
@@ -152,7 +174,9 @@ public:
 
 	FVerseCanvasViewState GetViewState() const;
 	bool FocusWidget(const TSharedPtr<SWidget>& Widget, float Padding = 20.0f);
-	FReply BeginConnectionDrag(const FVerseSocketDragStart& DragStart);
+	FReply BeginConnectionDrag(
+		const FVerseSocketDragStart& DragStart,
+		TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates);
 	void EndConnectionPreview();
 	void SetContent(TSharedRef<SWidget> InContent);
 	void SetContentAndAnchor(
@@ -160,6 +184,7 @@ public:
 		TSharedPtr<SWidget> InAnchor);
 	void SetInitialAnchor(TSharedPtr<SWidget> InAnchor);
 	void SetConnections(TArray<FVerseGraphConnection> InConnections);
+	void SetEndpointRegistry(TSharedPtr<FVerseGraphEndpointRegistry> InRegistry);
 	TSharedRef<FVerseGraphMotionController> GetMotionController() const
 	{
 		return MotionController.ToSharedRef();
@@ -217,6 +242,9 @@ private:
 		FSlateWindowElementList& OutDrawElements,
 		int32 LayerId,
 		const FVerseGraphArrangedEndpointMap& ArrangedEndpoints) const;
+	TOptional<FVerseVisualSocketEndpoint> FindCompatibleEndpointAt(
+		const FGeometry& AllottedGeometry,
+		FVerseDesktopPoint Position) const;
 
 	TSharedPtr<SScrollBar> HorizontalScrollbar;
 	TSharedPtr<SScrollBar> VerticalScrollbar;
@@ -227,10 +255,11 @@ private:
 	TWeakPtr<SWidget> InitialAnchor;
 	TOptional<FVector2D> PendingAnchorDesktopPosition;
 	TArray<FVerseGraphConnection> Connections;
+	TSharedPtr<FVerseGraphEndpointRegistry> EndpointRegistry;
 	TOptional<FVerseSocketDragStart> ConnectionDrag;
 	TSharedPtr<FVerseGraphMotionController> MotionController;
 	FVerseCanvasPoint PreviewEndpoint;
-	FOnVerseGraphConnectionDropped OnConnectionDropped;
+	FOnVerseGraphConnectionTargetDropped OnConnectionDropped;
 	FSimpleDelegate OnConnectionCancelled;
 	FSimpleDelegate OnBackgroundClicked;
 	float Zoom = 1.0f;

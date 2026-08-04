@@ -369,6 +369,44 @@ const FVerseGraphEndpointBinding* FVerseGraphEndpointRegistry::Find(
 	return Bindings.Find(Endpoint);
 }
 
+void FVerseGraphEndpointRegistry::SetDragStates(
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> InStates)
+{
+	DragStates = MoveTemp(InStates);
+	HoveredEndpoint.Reset();
+}
+
+void FVerseGraphEndpointRegistry::SetHoveredEndpoint(
+	TOptional<FVerseVisualSocketEndpoint> Endpoint)
+{
+	HoveredEndpoint = Endpoint;
+}
+
+void FVerseGraphEndpointRegistry::ClearDragStates()
+{
+	DragStates.Reset();
+	HoveredEndpoint.Reset();
+}
+
+EVerseSocketDragVisualState FVerseGraphEndpointRegistry::GetDragState(
+	FVerseVisualSocketEndpoint Endpoint) const
+{
+	if (HoveredEndpoint.IsSet() && HoveredEndpoint.GetValue() == Endpoint
+		&& IsCompatibleTarget(Endpoint))
+	{
+		return EVerseSocketDragVisualState::HoveredCompatible;
+	}
+	return DragStates.FindRef(Endpoint);
+}
+
+bool FVerseGraphEndpointRegistry::IsCompatibleTarget(
+	FVerseVisualSocketEndpoint Endpoint) const
+{
+	const EVerseSocketDragVisualState State = DragStates.FindRef(Endpoint);
+	return State == EVerseSocketDragVisualState::Compatible
+		|| State == EVerseSocketDragVisualState::HoveredCompatible;
+}
+
 void SVerseGraphRenderScope::Construct(const FArguments& InArgs)
 {
 	Connections = InArgs._Connections;
@@ -502,6 +540,7 @@ void SVerseGraphSurface::Construct(
 	bPendingInitialCenter = bCenterInitially;
 	InitialAnchor = InArgs._InitialAnchor;
 	Connections = InArgs._Connections;
+	EndpointRegistry = InArgs._EndpointRegistry;
 	MotionController = InArgs._MotionController.IsValid()
 		? InArgs._MotionController
 		: MakeShared<FVerseGraphMotionController>();
@@ -592,13 +631,19 @@ bool SVerseGraphSurface::FocusWidget(const TSharedPtr<SWidget>& Widget, float Pa
 	return true;
 }
 
-FReply SVerseGraphSurface::BeginConnectionDrag(const FVerseSocketDragStart& DragStart)
+FReply SVerseGraphSurface::BeginConnectionDrag(
+	const FVerseSocketDragStart& DragStart,
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates)
 {
 	if (!DragStart.Anchor.IsValid())
 	{
 		return FReply::Unhandled();
 	}
 	ConnectionDrag = DragStart;
+	if (EndpointRegistry.IsValid())
+	{
+		EndpointRegistry->SetDragStates(MoveTemp(DragStates));
+	}
 	bPreviewFrozen = false;
 	PreviewEndpoint = VerseDesktopToCanvas(
 		GetTickSpaceGeometry(),
@@ -610,6 +655,10 @@ FReply SVerseGraphSurface::BeginConnectionDrag(const FVerseSocketDragStart& Drag
 void SVerseGraphSurface::EndConnectionPreview()
 {
 	ConnectionDrag.Reset();
+	if (EndpointRegistry.IsValid())
+	{
+		EndpointRegistry->ClearDragStates();
+	}
 	bPreviewFrozen = false;
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
@@ -659,12 +708,29 @@ void SVerseGraphSurface::SetConnections(TArray<FVerseGraphConnection> InConnecti
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
+void SVerseGraphSurface::SetEndpointRegistry(
+	TSharedPtr<FVerseGraphEndpointRegistry> InRegistry)
+{
+	if (EndpointRegistry.IsValid())
+	{
+		EndpointRegistry->ClearDragStates();
+	}
+	EndpointRegistry = MoveTemp(InRegistry);
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
 void SVerseGraphSurface::Tick(
 	const FGeometry& AllottedGeometry,
 	double InCurrentTime,
 	float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (ConnectionDrag.IsSet() && EndpointRegistry.IsValid())
+	{
+		// Socket halos pulse while the pointer is stationary; paint invalidation is
+		// sufficient because drag feedback never participates in desired layout.
+		Invalidate(EInvalidateWidgetReason::Paint);
+	}
 	const TSharedPtr<SWidget> Anchor = InitialAnchor.Pin();
 	if (PendingAnchorDesktopPosition.IsSet()
 		&& Anchor.IsValid()
@@ -698,6 +764,10 @@ void SVerseGraphSurface::Tick(
 		if (!Scope.IsValid() || !Scope->CanSupplyVisibleEndpoints())
 		{
 			ConnectionDrag.Reset();
+			if (EndpointRegistry.IsValid())
+			{
+				EndpointRegistry->ClearDragStates();
+			}
 			bPreviewFrozen = false;
 			OnConnectionCancelled.ExecuteIfBound();
 		}
@@ -751,14 +821,78 @@ FVerseGraphArrangedEndpointMap SVerseGraphSurface::ArrangeEndpointsForPaint(
 	const FGeometry& AllottedGeometry,
 	TSharedPtr<SWidget> AdditionalAnchor) const
 {
-	const TSet<TSharedRef<SWidget>> Anchors =
+	TSet<TSharedRef<SWidget>> Anchors =
 		CollectConnectionAnchors(Connections, MoveTemp(AdditionalAnchor));
+	if (EndpointRegistry.IsValid())
+	{
+		for (const TPair<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding>& Pair :
+			EndpointRegistry->GetBindings())
+		{
+			if (const TSharedPtr<SWidget> Anchor = Pair.Value.Anchor.Pin())
+			{
+				Anchors.Add(Anchor.ToSharedRef());
+			}
+		}
+	}
 	FVerseGraphArrangedEndpointMap Result;
 	if (!Anchors.IsEmpty())
 	{
 		FindChildGeometries(AllottedGeometry, Anchors, Result);
 	}
 	return Result;
+}
+
+TOptional<FVerseVisualSocketEndpoint> SVerseGraphSurface::FindCompatibleEndpointAt(
+	const FGeometry& AllottedGeometry,
+	FVerseDesktopPoint Position) const
+{
+	if (!EndpointRegistry.IsValid())
+	{
+		return {};
+	}
+	const FVerseGraphArrangedEndpointMap Arranged =
+		ArrangeEndpointsForPaint(AllottedGeometry);
+	TOptional<FVerseVisualSocketEndpoint> Best;
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (const TPair<FVerseVisualSocketEndpoint, FVerseGraphEndpointBinding>& Pair :
+		EndpointRegistry->GetBindings())
+	{
+		if (!EndpointRegistry->IsCompatibleTarget(Pair.Key))
+		{
+			continue;
+		}
+		if (Pair.Value.bScopedToNestedRenderScope)
+		{
+			const TSharedPtr<SVerseGraphRenderScope> Scope =
+				Pair.Value.RenderScope.Pin();
+			if (!Scope.IsValid() || !Scope->CanSupplyVisibleEndpoints())
+			{
+				continue;
+			}
+		}
+		const TSharedPtr<SWidget> Anchor = Pair.Value.Anchor.Pin();
+		const FArrangedWidget* Widget = Anchor.IsValid()
+			? Arranged.Find(Anchor.ToSharedRef()) : nullptr;
+		if (Widget == nullptr)
+		{
+			continue;
+		}
+		const FVector2D Center = Widget->Geometry.GetAbsolutePositionAtCoordinates(
+			Pair.Value.AnchorCoordinate);
+		const FVector2D Extent = Widget->Geometry.GetAbsoluteSize() * 0.5f
+			+ FVector2D(7.0f, 7.0f);
+		const FVector2D Delta = Position.Value - Center;
+		if (FMath::Abs(Delta.X) <= Extent.X && FMath::Abs(Delta.Y) <= Extent.Y)
+		{
+			const float DistanceSquared = Delta.SizeSquared();
+			if (DistanceSquared < BestDistanceSquared)
+			{
+				Best = Pair.Key;
+				BestDistanceSquared = DistanceSquared;
+			}
+		}
+	}
+	return Best;
 }
 
 int32 SVerseGraphSurface::OnPaint(
@@ -941,9 +1075,18 @@ FReply SVerseGraphSurface::OnMouseButtonUp(
 		PreviewEndpoint = VerseDesktopToCanvas(
 			MyGeometry, FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()));
 		bPreviewFrozen = true;
+		const TOptional<FVerseVisualSocketEndpoint> Target =
+			FindCompatibleEndpointAt(
+				MyGeometry,
+				FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()));
+		if (EndpointRegistry.IsValid())
+		{
+			EndpointRegistry->ClearDragStates();
+		}
 		OnConnectionDropped.ExecuteIfBound(
 			ConnectionDrag.GetValue(),
-			FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()));
+			FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()),
+			Target);
 		Invalidate(EInvalidateWidgetReason::Paint);
 		return FReply::Handled().ReleaseMouseCapture();
 	}
@@ -972,6 +1115,12 @@ FReply SVerseGraphSurface::OnMouseMove(
 	{
 		PreviewEndpoint = VerseDesktopToCanvas(
 			MyGeometry, FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition()));
+		if (EndpointRegistry.IsValid())
+		{
+			EndpointRegistry->SetHoveredEndpoint(FindCompatibleEndpointAt(
+				MyGeometry,
+				FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition())));
+		}
 		Invalidate(EInvalidateWidgetReason::Paint);
 		return FReply::Handled();
 	}
@@ -1039,6 +1188,10 @@ void SVerseGraphSurface::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLost
 	if (ConnectionDrag.IsSet() && !bPreviewFrozen)
 	{
 		ConnectionDrag.Reset();
+		if (EndpointRegistry.IsValid())
+		{
+			EndpointRegistry->ClearDragStates();
+		}
 		OnConnectionCancelled.ExecuteIfBound();
 	}
 	Invalidate(EInvalidateWidgetReason::Paint);

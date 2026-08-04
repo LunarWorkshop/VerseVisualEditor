@@ -1150,6 +1150,65 @@ TArray<FString> FVerseSemanticCandidateProvider::BuildVisibleTypeNames(
 	return Result;
 }
 
+bool FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
+	const FString& FilePath,
+	int32 ConsumerExpressionBeginByte,
+	const FVerseDocument& Document,
+	const FVerseVisualSocket& Provider,
+	const FVerseVisualSocket& Consumer,
+	bool bCheckTypeCompatibility)
+{
+	const TSharedPtr<const FVerseSemanticSnapshot> Snapshot = Provider.SemanticSnapshot;
+	if (!Snapshot.IsValid() || Consumer.SemanticSnapshot.Get() != Snapshot.Get()
+		|| !Snapshot->GetProgram().IsValid()
+		|| Provider.SemanticType == nullptr || Consumer.SemanticType == nullptr)
+	{
+		return false;
+	}
+	const Verse::Vst::Node* Node = FindSemanticNode(
+		*Snapshot, FilePath, ConsumerExpressionBeginByte, Document);
+	if (Node == nullptr)
+	{
+		return false;
+	}
+	const uLang::CSemanticProgram& Program = *Snapshot->GetProgram();
+	const uLang::CScope* ConsumerScope = FindActiveScope(*Node, Program);
+	if (ConsumerScope == nullptr)
+	{
+		return false;
+	}
+	const uLang::CAstPackage* Package = ConsumerScope->GetPackage();
+	const uint32 UploadedVersion = Package
+		? Package->_UploadedAtFNVersion
+		: VerseFN::UploadedAtFNVersion::Latest;
+	if (bCheckTypeCompatibility
+		&& !uLang::SemanticTypeUtils::IsSubtype(
+			Provider.SemanticType, Consumer.SemanticType, UploadedVersion))
+	{
+		return false;
+	}
+	if (Provider.SemanticDataDefinition != nullptr
+		&& !Provider.SemanticDataDefinition->IsAccessibleFrom(*ConsumerScope))
+	{
+		return false;
+	}
+	if (!Provider.LegalConsumerScopes.IsEmpty())
+	{
+		bool bInsideLegalScope = false;
+		for (const uLang::CScope* Scope = ConsumerScope;
+			Scope != nullptr && !bInsideLegalScope;
+			Scope = Scope->GetParentScope())
+		{
+			bInsideLegalScope = Provider.LegalConsumerScopes.Contains(Scope);
+		}
+		if (!bInsideLegalScope)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 TArray<FVerseOperatorSignature> FVerseSemanticCandidateProvider::BuildOperatorSignatures(
 	TConstArrayView<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots,
 	const FString& FilePath,

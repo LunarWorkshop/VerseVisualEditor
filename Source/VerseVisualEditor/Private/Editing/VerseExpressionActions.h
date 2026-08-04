@@ -160,3 +160,17 @@ bool TryMaterializeVerseNamedInput(
 	FStringView InputName,
 	const FVerseExpressionAction& Action,
 	FText& OutError);
+
+/** Moves or references one existing provider into an existing consumer input atomically. */
+bool TryConnectVerseExpressions(
+	FVerseDocumentSession& Session,
+	FVerseTextRange ProviderRange,
+	FStringView ProviderTypeName,
+	bool bReferenceProvider,
+	const FVerseBoundExpressionSyntax& ProviderSyntax,
+	FVerseTextRange ConsumerRange,
+	const FVerseExpressionParentSyntax& ConsumerSyntax,
+	FText& OutError,
+	FVerseTextRange* OutProvisionalPlaceholderRange = nullptr,
+	FStringView MaterializedInputName = FStringView(),
+	const FVerseOperatorRetargetRecipe* OperatorRetarget = nullptr);

@@ -18,6 +18,7 @@
 
 struct FFileChangeData;
 struct FOpenVerseDocument;
+struct FOpenVerseFunctionTab;
 enum class EVerseSyntaxControlKind : uint8;
 
 enum class EVerseProjectBuildState : uint8
@@ -184,7 +185,16 @@ private:
 	FReply BeginSocketDrag(const struct FVerseSocketDragStart& DragStart);
 	void HandleConnectionDropped(
 		const struct FVerseSocketDragStart& DragStart,
-		FVerseDesktopPoint DesktopPosition);
+		FVerseDesktopPoint DesktopPosition,
+		TOptional<FVerseVisualSocketEndpoint> TargetEndpoint);
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState>
+		BuildSocketCompatibility(
+			const FVerseSocketDragStart& Source,
+			const FOpenVerseFunctionTab& Tab);
+	bool ApplyDirectSocketConnection(
+		const FVerseSocketDragStart& Source,
+		const FVerseSocketDragStart& Target,
+		FText& OutError);
 	void HandleConnectionCancelled();
 	void OpenExpressionSearch(FVerseDesktopPoint DesktopPosition);
 	void FinishExpressionSearch();
@@ -247,6 +257,8 @@ private:
 	EVerseFunctionGraphPresentation FunctionGraphPresentation =
 		EVerseFunctionGraphPresentation::VerticalExecution;
 	TOptional<struct FVerseSocketDragStart> SocketDrag;
+	TMap<FVerseVisualSocketEndpoint, FVerseSocketDragStart> CompatibleSocketTargets;
+	TMap<FVerseVisualSocketEndpoint, FVerseExpressionAction> CompatibleOperatorRetargets;
 	TArray<TSharedPtr<struct FVerseExpressionAction>> ExpressionActions;
 	TSharedPtr<class IMenu> ExpressionMenu;
 	TUniquePtr<FVerseSemanticWorkspace> SemanticWorkspace;

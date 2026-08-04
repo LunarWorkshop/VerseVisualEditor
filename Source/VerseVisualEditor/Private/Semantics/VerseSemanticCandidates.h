@@ -86,6 +86,14 @@ public:
 		int32 OperandCount,
 		TConstArrayView<const FVerseVisualSocket*> ConnectedOperands,
 		TConstArrayView<const FVerseVisualSocket*> OutputConsumers);
+	/** Uses the compiler-owned scope and types from one exact snapshot. */
+	static bool CanConnectDataSocketsAt(
+		const FString& FilePath,
+		int32 ConsumerExpressionBeginByte,
+		const FVerseDocument& Document,
+		const FVerseVisualSocket& Provider,
+		const FVerseVisualSocket& Consumer,
+		bool bCheckTypeCompatibility = true);
 
 	/** Bind existing expression tiles to the exact compiler-owned syntax/semantic graph. */
 	static void BindFunctionGraph(

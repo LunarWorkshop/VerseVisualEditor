@@ -5,6 +5,7 @@
 
 #include "Brushes/SlateColorBrush.h"
 #include "Input/DragAndDrop.h"
+#include "HAL/PlatformTime.h"
 #include "Rendering/DrawElements.h"
 #include "Settings/EditorStyleSettings.h"
 #include "Styling/AppStyle.h"
@@ -519,6 +520,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	OnSocketDragStarted = InArgs._OnSocketDragStarted;
 	OnInlineLiteralCommitted = InArgs._OnInlineLiteralCommitted;
 	OnClauseReordered = InArgs._OnClauseReordered;
+	EndpointRegistry = InArgs._EndpointRegistry;
 	OwningRenderScope = InArgs._OwningRenderScope;
 	BodyRenderScope = InArgs._BodyRenderScope;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
@@ -1068,24 +1070,57 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			: Socket.IntrinsicTypeName.ToString();
 		const bool bFailable = Socket.Outcome == EVerseExpressionOutcome::FailableValue
 			|| Socket.Outcome == EVerseExpressionOutcome::FailureOnly;
-		TSharedPtr<SWidget> Pin;
+		TSharedPtr<SWidget> PinCore;
+		const FLinearColor PinColor = Socket.Outcome == EVerseExpressionOutcome::FailureOnly
+			? GetVerseFailureDecorationColor() : GetVerseTilePinColor(Type);
 		if (bFailable)
 		{
-			Pin = SNew(SVerseFailableValuePin)
-				.Color(Socket.Outcome == EVerseExpressionOutcome::FailureOnly
-					? GetVerseFailureDecorationColor()
-					: GetVerseTilePinColor(Type))
+			PinCore = SNew(SVerseFailableValuePin)
+				.Color(PinColor)
 				.Connected(ConnectedSockets.Contains(Socket.Id))
+				.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+				.RenderTransform_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragPinTransform(SocketId);
+				})
 				.Visibility(EVisibility::HitTestInvisible);
 		}
 		else
 		{
-			Pin = SNew(SImage)
+			PinCore = SNew(SImage)
 				.Image(GetVerseTilePinBrush(Type, ConnectedSockets.Contains(Socket.Id)))
-				.ColorAndOpacity(GetVerseTilePinColor(Type))
+				.ColorAndOpacity_Lambda([this, SocketId = Socket.Id, PinColor]()
+				{
+					return GetSocketDragPinColor(SocketId, PinColor);
+				})
+				.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+				.RenderTransform_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragPinTransform(SocketId);
+				})
 				.Visibility(EVisibility::HitTestInvisible)
 				.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
 		}
+		TSharedRef<SOverlay> Pin = SNew(SOverlay)
+			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				SNew(SImage)
+				.Image(GetVerseTilePinBrush(Type, true))
+				.ColorAndOpacity_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragHaloColor(SocketId);
+				})
+				.Visibility_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragHaloVisibility(SocketId);
+				})
+				.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+				.RenderTransform(FSlateRenderTransform(FScale2D(1.45f, 1.45f)))
+			]
+			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				PinCore.ToSharedRef()
+			];
 		SocketAnchors.Add(Socket.Id, Pin);
 		TileAndOutput->AddSlot()
 		.HAlign(Horizontal)
@@ -1094,12 +1129,17 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			SNew(SBorder)
 			.BorderImage(nullptr)
 			.Padding(0.0f)
+			.ColorAndOpacity_Lambda([this, SocketId = Socket.Id]()
+			{
+				const float Opacity = GetSocketDragOpacity(SocketId);
+				return FLinearColor(1.0f, 1.0f, 1.0f, Opacity);
+			})
 			.RenderTransform(FSlateRenderTransform(Offset))
 			.OnMouseButtonDown(
 				this, &SVerseTile::HandleSocketMouseButtonDown,
-				Pin, Socket, bOutput, 0)
+				TSharedPtr<SWidget>(Pin), Socket, bOutput, 0)
 			[
-				Pin.ToSharedRef()
+				Pin
 			]
 		];
 	};
@@ -1345,6 +1385,21 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	else
 	{
 		ChildSlot[TileWithExecution];
+	}
+	if (EndpointRegistry.IsValid())
+	{
+		for (const TPair<FVerseVisualSocketId, TSharedPtr<SWidget>>& Pair : SocketAnchors)
+		{
+			if (Pair.Value.IsValid())
+			{
+				EndpointRegistry->Register({Tile.Id, Pair.Key}, {
+					Pair.Value,
+					GetSocketAnchorCoordinate(Pair.Key),
+					GetSocketRenderScope(Pair.Key),
+					MotionTarget,
+					GetSocketRenderScope(Pair.Key).IsValid()});
+			}
+		}
 	}
 }
 
@@ -1628,7 +1683,6 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			? FText::FromString(Socket.SemanticName)
 			: Decode(Socket.NameRange);
 		TSharedRef<SHorizontalBox> Row = SNew(SHorizontalBox);
-		Rows.Add(Row);
 		auto AddPin = [&]()
 		{
 			const bool bFailable =
@@ -1638,39 +1692,65 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 				Socket.Outcome == EVerseExpressionOutcome::FailureOnly
 					? GetVerseFailureDecorationColor()
 					: GetVerseTilePinColor(Type);
-			TSharedPtr<SWidget> PinWidget;
+			TSharedPtr<SWidget> PinCore;
 			if (bFailable)
 			{
-				PinWidget = SNew(SVerseFailableValuePin)
+				PinCore = SNew(SVerseFailableValuePin)
 					.Color(PinColor)
 					.Connected(ConnectedSockets.Contains(Socket.Id))
+					.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+					.RenderTransform_Lambda([this, SocketId = Socket.Id]()
+					{
+						return GetSocketDragPinTransform(SocketId);
+					})
 					.Visibility(EVisibility::HitTestInvisible);
 			}
 			else
 			{
-				PinWidget = SNew(SImage)
+				PinCore = SNew(SImage)
 					.Image(GetVerseTilePinBrush(Type, ConnectedSockets.Contains(Socket.Id)))
-					.ColorAndOpacity(PinColor)
+					.ColorAndOpacity_Lambda([this, SocketId = Socket.Id, PinColor]()
+					{
+						return GetSocketDragPinColor(SocketId, PinColor);
+					})
+					.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+					.RenderTransform_Lambda([this, SocketId = Socket.Id]()
+					{
+						return GetSocketDragPinTransform(SocketId);
+					})
 					.Visibility(EVisibility::HitTestInvisible)
 					.DesiredSizeOverride(FVector2D(11.0f, 11.0f));
 			}
-			if (bOutput)
-			{
-				SocketAnchors.Add(Socket.Id, PinWidget);
-			}
-			else
-			{
-				SocketAnchors.Add(Socket.Id, PinWidget);
-			}
+			TSharedRef<SOverlay> PinWidget = SNew(SOverlay);
+			PinWidget->AddSlot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				SNew(SImage)
+				.Image(GetVerseTilePinBrush(Type, true))
+				.ColorAndOpacity_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragHaloColor(SocketId);
+				})
+				.Visibility_Lambda([this, SocketId = Socket.Id]()
+				{
+					return GetSocketDragHaloVisibility(SocketId);
+				})
+				.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+				.RenderTransform(FSlateRenderTransform(FScale2D(1.45f, 1.45f)))
+			];
+			PinWidget->AddSlot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				PinCore.ToSharedRef()
+			];
+			SocketAnchors.Add(Socket.Id, PinWidget);
 			Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(bOutput ? 0.0f : -5.0f, 0.0f, bOutput ? -5.0f : 5.0f, 0.0f)
 			[
 				SNew(SBorder)
 					.BorderImage(nullptr)
 					.Padding(0.0f)
 					.OnMouseButtonDown(this, &SVerseTile::HandleSocketMouseButtonDown,
-						PinWidget, Socket, bOutput, SocketIndex)
+						TSharedPtr<SWidget>(PinWidget), Socket, bOutput, SocketIndex)
 				[
-					PinWidget.ToSharedRef()
+					PinWidget
 				]
 			];
 		};
@@ -1714,7 +1794,26 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 		};
 		if (bOutput) { AddName(); AddPin(); }
 		else { AddPin(); AddInlineLiteral(); AddName(); }
-		Column->AddSlot().AutoHeight().HAlign(bOutput ? HAlign_Right : HAlign_Left).Padding(0.0f, 1.0f)[Row];
+		TSharedRef<SBorder> RowSurface = SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderBackgroundColor_Lambda([this, SocketId = Socket.Id, PinColor =
+				Socket.Outcome == EVerseExpressionOutcome::FailureOnly
+					? GetVerseFailureDecorationColor() : GetVerseTilePinColor(Type)]()
+			{
+				return GetSocketDragRowColor(SocketId, PinColor);
+			})
+			.Padding(0.0f)
+			.ColorAndOpacity_Lambda([this, SocketId = Socket.Id]()
+			{
+				const float Opacity = GetSocketDragOpacity(SocketId);
+				return FLinearColor(1.0f, 1.0f, 1.0f, Opacity);
+			})
+			[
+				Row
+			];
+		Rows.Add(RowSurface);
+		Column->AddSlot().AutoHeight().HAlign(bOutput ? HAlign_Right : HAlign_Left)
+			.Padding(0.0f, 1.0f)[RowSurface];
 	}
 	if (bOutput)
 	{
@@ -1727,26 +1826,19 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 	return Column;
 }
 
-FReply SVerseTile::HandleSocketMouseButtonDown(
-	const FGeometry& Geometry,
-	const FPointerEvent& MouseEvent,
-	TSharedPtr<SWidget> Anchor,
-	FVerseVisualSocket Socket,
+FVerseSocketDragStart BuildVerseSocketDragDescriptor(
+	const FVerseVisualTile& Tile,
+	const FVerseVisualSocket& Socket,
 	bool bOutput,
 	int32 SocketIndex)
 {
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
-		|| !OnSocketDragStarted.IsBound())
-	{
-		return FReply::Unhandled();
-	}
 	FVerseSocketDragStart DragStart;
-	DragStart.Anchor = MoveTemp(Anchor);
-	DragStart.RenderScope = OwningRenderScope;
-	DragStart.bScopedToNestedRenderScope = OwningRenderScope.IsValid();
 	DragStart.Endpoint = {Tile.Id, Socket.Id};
+	DragStart.Socket = Socket;
 	DragStart.bAdoptsProvisionalTile = Tile.bIsProvisional;
 	DragStart.TileRange = Tile.Range;
+	DragStart.bOutput = bOutput;
+	DragStart.Outcome = Socket.Outcome;
 	if (!bOutput)
 	{
 		DragStart.ParentExpressionKind = Tile.ExpressionKind;
@@ -1791,18 +1883,37 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 			DragStart.ClauseInsertionIndex = Target->InsertIndex;
 		}
 	}
+	return DragStart;
+}
+
+FReply SVerseTile::HandleSocketMouseButtonDown(
+	const FGeometry& Geometry,
+	const FPointerEvent& MouseEvent,
+	TSharedPtr<SWidget> Anchor,
+	FVerseVisualSocket Socket,
+	bool bOutput,
+	int32 SocketIndex)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton
+		|| !OnSocketDragStarted.IsBound())
+	{
+		return FReply::Unhandled();
+	}
+	FVerseSocketDragStart DragStart = BuildVerseSocketDragDescriptor(
+		Tile, Socket, bOutput, SocketIndex);
+	DragStart.Anchor = MoveTemp(Anchor);
+	DragStart.RenderScope = OwningRenderScope;
+	DragStart.bScopedToNestedRenderScope = OwningRenderScope.IsValid();
 	DragStart.DesktopPosition = FVerseDesktopPoint(MouseEvent.GetScreenSpacePosition());
 	DragStart.WireColor = GetVerseTilePinColor(!Socket.SemanticTypeName.IsEmpty()
 		? Socket.SemanticTypeName
 		: Socket.TypeRange.IsSet()
 		? Decode(Socket.TypeRange).ToString()
 		: Socket.IntrinsicTypeName.ToString());
-	DragStart.Outcome = Socket.Outcome;
 	if (Socket.Outcome == EVerseExpressionOutcome::FailureOnly)
 	{
 		DragStart.WireColor = GetVerseFailureDecorationColor();
 	}
-	DragStart.bOutput = bOutput;
 	if (DragStart.bAdoptsProvisionalTile)
 	{
 		// Adoption is transient UI state. Make the existing widget opaque
@@ -2104,6 +2215,79 @@ FSlateColor SVerseTile::GetShadowColor() const
 	return IsSelected.Get(false)
 		? Style.GetColor(TEXT("Color.SelectedShadow"))
 		: Style.GetColor(TEXT("Color.Shadow"));
+}
+
+EVerseSocketDragVisualState SVerseTile::GetSocketDragState(
+	FVerseVisualSocketId SocketId) const
+{
+	return EndpointRegistry.IsValid()
+		? EndpointRegistry->GetDragState({Tile.Id, SocketId})
+		: EVerseSocketDragVisualState::Neutral;
+}
+
+float SVerseTile::GetSocketDragOpacity(FVerseVisualSocketId SocketId) const
+{
+	return GetSocketDragState(SocketId) == EVerseSocketDragVisualState::Incompatible
+		? 0.25f : 1.0f;
+}
+
+FSlateColor SVerseTile::GetSocketDragRowColor(
+	FVerseVisualSocketId SocketId,
+	FLinearColor TypeColor) const
+{
+	const EVerseSocketDragVisualState State = GetSocketDragState(SocketId);
+	return State == EVerseSocketDragVisualState::Compatible
+		|| State == EVerseSocketDragVisualState::HoveredCompatible
+		? TypeColor.CopyWithNewOpacity(
+			State == EVerseSocketDragVisualState::HoveredCompatible ? 0.16f : 0.08f)
+		: FLinearColor::Transparent;
+}
+
+FSlateColor SVerseTile::GetSocketDragPinColor(
+	FVerseVisualSocketId SocketId,
+	FLinearColor TypeColor) const
+{
+	const EVerseSocketDragVisualState State = GetSocketDragState(SocketId);
+	if (State == EVerseSocketDragVisualState::Compatible
+		|| State == EVerseSocketDragVisualState::HoveredCompatible
+		|| State == EVerseSocketDragVisualState::Source)
+	{
+		return FLinearColor(
+			FMath::Min(TypeColor.R * 1.35f + 0.08f, 1.0f),
+			FMath::Min(TypeColor.G * 1.35f + 0.08f, 1.0f),
+			FMath::Min(TypeColor.B * 1.35f + 0.08f, 1.0f),
+			TypeColor.A);
+	}
+	return TypeColor;
+}
+
+FSlateRenderTransform SVerseTile::GetSocketDragPinTransform(
+	FVerseVisualSocketId SocketId) const
+{
+	const EVerseSocketDragVisualState State = GetSocketDragState(SocketId);
+	const float Scale = State == EVerseSocketDragVisualState::Compatible
+		|| State == EVerseSocketDragVisualState::HoveredCompatible
+		? 1.12f : 1.0f;
+	return FSlateRenderTransform(FScale2D(Scale, Scale));
+}
+
+EVisibility SVerseTile::GetSocketDragHaloVisibility(
+	FVerseVisualSocketId SocketId) const
+{
+	const EVerseSocketDragVisualState State = GetSocketDragState(SocketId);
+	return State == EVerseSocketDragVisualState::Compatible
+		|| State == EVerseSocketDragVisualState::HoveredCompatible
+		|| State == EVerseSocketDragVisualState::Source
+		? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+}
+
+FSlateColor SVerseTile::GetSocketDragHaloColor(FVerseVisualSocketId SocketId) const
+{
+	const EVerseSocketDragVisualState State = GetSocketDragState(SocketId);
+	const double Phase = FPlatformTime::Seconds() * 2.0 * PI / 0.9;
+	const float Pulse = State == EVerseSocketDragVisualState::HoveredCompatible
+		? 1.0f : 0.72f + 0.20f * static_cast<float>((FMath::Sin(Phase) + 1.0) * 0.5);
+	return FLinearColor(0.96f, 0.98f, 1.0f, Pulse);
 }
 
 #undef LOCTEXT_NAMESPACE

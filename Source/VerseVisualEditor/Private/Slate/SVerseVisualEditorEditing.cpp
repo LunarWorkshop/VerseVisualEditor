@@ -491,7 +491,231 @@ namespace
 		return false;
 	}
 
+	void CollectDataSocketDescriptors(
+		TConstArrayView<FVerseVisualTile> Tiles,
+		TOptional<FVerseTextRange> StatementScope,
+		bool bInsideFailableContext,
+		TMap<FVerseVisualSocketEndpoint, FVerseSocketDragStart>& OutDescriptors)
+	{
+		for (const FVerseVisualTile& Tile : Tiles)
+		{
+			const TOptional<FVerseTextRange> TileStatementScope = Tile.bStatementLevel
+				? TOptional<FVerseTextRange>(Tile.Range) : StatementScope;
+			const bool bTileInsideFailable = bInsideFailableContext
+				|| Tile.Kind == EVerseVisualTileKind::FailableBlock;
+			auto AddSockets = [&](TConstArrayView<FVerseVisualSocket> Sockets, bool bOutput)
+			{
+				for (int32 Index = 0; Index < Sockets.Num(); ++Index)
+				{
+					const FVerseVisualSocket& Socket = Sockets[Index];
+					if (Socket.Id.Role != EVerseVisualSocketRole::Value
+						&& Socket.Id.Role != EVerseVisualSocketRole::BoundaryBinding)
+					{
+						continue;
+					}
+					FVerseSocketDragStart Descriptor = BuildVerseSocketDragDescriptor(
+						Tile, Socket, bOutput, Index);
+					Descriptor.SemanticScopeRange = TileStatementScope.Get(Tile.Range);
+					Descriptor.bInsideFailableContext = bTileInsideFailable;
+					OutDescriptors.Add(Descriptor.Endpoint, MoveTemp(Descriptor));
+				}
+			};
+			AddSockets(Tile.GetValueInputs(), false);
+			AddSockets(Tile.GetValueOutputs(), true);
+			CollectDataSocketDescriptors(
+				Tile.Children,
+				TileStatementScope,
+				bTileInsideFailable,
+				OutDescriptors);
+		}
+	}
 
+
+}
+
+TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState>
+SVerseVisualEditor::BuildSocketCompatibility(
+	const FVerseSocketDragStart& Source,
+	const FOpenVerseFunctionTab& Tab)
+{
+	CompatibleSocketTargets.Reset();
+	CompatibleOperatorRetargets.Reset();
+	TMap<FVerseVisualSocketEndpoint, FVerseSocketDragStart> Descriptors;
+	CollectDataSocketDescriptors(Tab.GraphTiles, {}, false, Descriptors);
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> States;
+	for (const TPair<FVerseVisualSocketEndpoint, FVerseSocketDragStart>& Pair : Descriptors)
+	{
+		States.Add(Pair.Key, EVerseSocketDragVisualState::Incompatible);
+	}
+	States.Add(Source.Endpoint, EVerseSocketDragVisualState::Source);
+	if (!ActiveDocument.IsValid())
+	{
+		return States;
+	}
+	const FVerseDocument& Document =
+		*ActiveDocument->Session->GetParseSnapshot().GetDocument();
+	for (const TPair<FVerseVisualSocketEndpoint, FVerseSocketDragStart>& Pair : Descriptors)
+	{
+		const FVerseSocketDragStart& Candidate = Pair.Value;
+		if (Pair.Key == Source.Endpoint || Candidate.bOutput == Source.bOutput)
+		{
+			continue;
+		}
+		const FVerseSocketDragStart& Provider = Source.bOutput ? Source : Candidate;
+		const FVerseSocketDragStart& Consumer = Source.bOutput ? Candidate : Source;
+		if (!Provider.BoundSourceRange.IsSet()
+			|| !Consumer.TileRange.IsSet())
+		{
+			continue;
+		}
+		if (!Provider.Socket.SemanticSnapshot.IsValid()
+			|| !Provider.Socket.SemanticSnapshot->Describes(
+				ActiveDocument->FilePath, Consumer.TileRange.Revision))
+		{
+			// Last-successful snapshots may still populate global search actions, but
+			// they cannot authorize a connection against changed local source ranges.
+			continue;
+		}
+		if ((Provider.Outcome == EVerseExpressionOutcome::FailableValue
+				|| Provider.Outcome == EVerseExpressionOutcome::FailureOnly)
+			&& !Consumer.bInsideFailableContext)
+		{
+			continue;
+		}
+		bool bCompatible = FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
+			ActiveDocument->FilePath,
+			Consumer.SemanticScopeRange.IsSet()
+				? Consumer.SemanticScopeRange.BeginByte
+				: Consumer.TileRange.BeginByte,
+			Document,
+			Provider.Socket,
+			Consumer.Socket);
+		FVerseExpressionAction RetargetAction;
+		if (FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
+				ActiveDocument->FilePath,
+				Consumer.SemanticScopeRange.IsSet()
+					? Consumer.SemanticScopeRange.BeginByte
+					: Consumer.TileRange.BeginByte,
+				Document,
+				Provider.Socket,
+				Consumer.Socket,
+				false))
+		{
+			const FVerseVisualTile* ConsumerTile = FindTileById(
+				Tab.GraphTiles, Consumer.Endpoint.Tile);
+			const int32 OperandIndex = Consumer.Endpoint.Socket.Index;
+			if (ConsumerTile != nullptr
+				&& IsVerseOperatorExpression(ConsumerTile->ExpressionKind)
+				&& ConsumerTile->GetValueInputs().IsValidIndex(OperandIndex))
+			{
+				FVerseOperatorConnectionConstraints Constraints =
+					FVerseVisualTileBuilder::BuildOperatorConnectionConstraints(
+						Tab.GraphTiles, *ConsumerTile, Document);
+				Constraints.ConnectedOperands[OperandIndex] = Provider.Socket;
+				const TArray<const FVerseVisualSocket*> ConnectedOperands =
+					Constraints.GetConnectedOperandPointers();
+				const TArray<const FVerseVisualSocket*> OutputConsumers =
+					Constraints.GetOutputConsumerPointers();
+				const TArray<TSharedPtr<const FVerseSemanticSnapshot>> Snapshots =
+					SemanticWorkspace
+						? SemanticWorkspace->GetCandidateSnapshots()
+						: TArray<TSharedPtr<const FVerseSemanticSnapshot>>();
+				const TArray<FVerseOperatorSignature> Signatures =
+					FVerseSemanticCandidateProvider::BuildOperatorSignatures(
+						Snapshots,
+						ActiveDocument->FilePath,
+						ConsumerTile->Range.BeginByte,
+						Document,
+						ConsumerTile->OperatorSpelling,
+						ConsumerTile->GetValueInputs().Num(),
+						ConnectedOperands,
+						OutputConsumers);
+				const FVerseOperatorSignature* BestSignature = nullptr;
+				int32 BestLiteralChangeCount = MAX_int32;
+				int32 BestHeterogeneousPenalty = MAX_int32;
+				for (const FVerseOperatorSignature& Signature : Signatures)
+				{
+					if (Signature.OperandTypeNames.Num()
+						!= ConsumerTile->GetValueInputs().Num())
+					{
+						continue;
+					}
+					const bool bHomogeneous = Signature.OperandTypeNames.IsEmpty()
+						|| Algo::AllOf(
+							Signature.OperandTypeNames,
+							[&Signature](const FString& Type)
+							{
+								return Type == Signature.OperandTypeNames[0];
+							});
+					int32 LiteralChangeCount = 0;
+					for (int32 Index = 0;
+						Index < ConsumerTile->GetValueInputs().Num(); ++Index)
+					{
+						if (Index == OperandIndex)
+						{
+							continue;
+						}
+						const FVerseVisualSocket& Input =
+							ConsumerTile->GetValueInputs()[Index];
+						if (Input.InlineLiteralRange.IsSet())
+						{
+							const FString Existing = Document.DecodeOriginalRange(
+								Input.InlineLiteralRange).TrimStartAndEnd();
+							const FString Default = GetDefaultVerseLiteralSourceForType(
+								Signature.OperandTypeNames[Index]).Get(TEXT("0"));
+							LiteralChangeCount += Existing == Default ? 0 : 1;
+						}
+					}
+					const int32 HeterogeneousPenalty = bHomogeneous ? 0 : 1;
+					if (BestSignature == nullptr
+						|| HeterogeneousPenalty < BestHeterogeneousPenalty
+						|| (HeterogeneousPenalty == BestHeterogeneousPenalty
+							&& LiteralChangeCount < BestLiteralChangeCount))
+					{
+						BestSignature = &Signature;
+						BestHeterogeneousPenalty = HeterogeneousPenalty;
+						BestLiteralChangeCount = LiteralChangeCount;
+					}
+				}
+				if (BestSignature != nullptr)
+				{
+					FVerseOperatorRetargetRecipe Recipe;
+					Recipe.OperatorRange = ConsumerTile->Range;
+					Recipe.OperatorSpelling = ConsumerTile->OperatorSpelling;
+					Recipe.OperandCount = ConsumerTile->GetValueInputs().Num();
+					Recipe.ReplacedOperandIndex = OperandIndex;
+					Recipe.SignatureDisplayText = BestSignature->DisplayText;
+					Recipe.OperandTypeNames = BestSignature->OperandTypeNames;
+					for (const FVerseVisualSocket& Input :
+						ConsumerTile->GetValueInputs())
+					{
+						Recipe.InlineLiteralRanges.Add(Input.InlineLiteralRange);
+					}
+					RetargetAction.OperatorRetarget = MoveTemp(Recipe);
+					bCompatible = true;
+				}
+			}
+		}
+		if (!bCompatible)
+		{
+			continue;
+		}
+		const bool bReferenceProvider =
+			Provider.BoundExpressionKind == EVerseExpressionKind::Identifier;
+		if (!bReferenceProvider
+			&& Provider.BoundSourceRange.BeginByte < Consumer.TileRange.EndByte()
+			&& Consumer.TileRange.BeginByte < Provider.BoundSourceRange.EndByte())
+		{
+			continue;
+		}
+		States[Pair.Key] = EVerseSocketDragVisualState::Compatible;
+		CompatibleSocketTargets.Add(Pair.Key, Candidate);
+		if (RetargetAction.OperatorRetarget.IsSet())
+		{
+			CompatibleOperatorRetargets.Add(Pair.Key, MoveTemp(RetargetAction));
+		}
+	}
+	return States;
 }
 
 FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStart)
@@ -545,22 +769,119 @@ FReply SVerseVisualEditor::BeginSocketDrag(const FVerseSocketDragStart& DragStar
 		}
 		SocketDrag = EffectiveDrag;
 	}
+	TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates;
+	if (EffectiveDrag.Purpose == FVerseSocketDragStart::EPurpose::ValueConnection)
+	{
+		DragStates = BuildSocketCompatibility(EffectiveDrag, Tab);
+	}
+	else
+	{
+		CompatibleSocketTargets.Reset();
+		CompatibleOperatorRetargets.Reset();
+	}
 	return Tab.FunctionCanvas.IsValid()
-		? Tab.FunctionCanvas->BeginConnectionDrag(EffectiveDrag)
+		? Tab.FunctionCanvas->BeginConnectionDrag(EffectiveDrag, MoveTemp(DragStates))
 		: FReply::Unhandled();
 }
 
 void SVerseVisualEditor::HandleConnectionDropped(
 	const FVerseSocketDragStart& DragStart,
-	FVerseDesktopPoint DesktopPosition)
+	FVerseDesktopPoint DesktopPosition,
+	TOptional<FVerseVisualSocketEndpoint> TargetEndpoint)
 {
 	SocketDrag = DragStart;
+	if (TargetEndpoint.IsSet())
+	{
+		const FVerseSocketDragStart* Target =
+			CompatibleSocketTargets.Find(TargetEndpoint.GetValue());
+		FText Error;
+		if (Target != nullptr && ApplyDirectSocketConnection(DragStart, *Target, Error))
+		{
+			FinishExpressionSearch();
+			return;
+		}
+		if (!Error.IsEmpty() && ActiveDocument.IsValid())
+		{
+			ActiveDocument->LoadError = Error;
+			bLocalCompilePanelOpen = true;
+		}
+		FinishExpressionSearch();
+		return;
+	}
 	OpenExpressionSearch(DesktopPosition);
 }
 
 void SVerseVisualEditor::HandleConnectionCancelled()
 {
 	SocketDrag.Reset();
+	CompatibleSocketTargets.Reset();
+	CompatibleOperatorRetargets.Reset();
+}
+
+bool SVerseVisualEditor::ApplyDirectSocketConnection(
+	const FVerseSocketDragStart& Source,
+	const FVerseSocketDragStart& Target,
+	FText& OutError)
+{
+	if (!ActiveDocument.IsValid())
+	{
+		return false;
+	}
+	const FVerseSocketDragStart& Provider = Source.bOutput ? Source : Target;
+	const FVerseSocketDragStart& Consumer = Source.bOutput ? Target : Source;
+	if (!Provider.BoundSourceRange.IsSet() || !Consumer.TileRange.IsSet())
+	{
+		return false;
+	}
+	FVerseBoundExpressionSyntax ProviderSyntax;
+	ProviderSyntax.Kind = Provider.BoundExpressionKind;
+	ProviderSyntax.OperatorSpelling = Provider.BoundOperatorSpelling;
+	ProviderSyntax.bExplicitlyGrouped = Provider.bBoundExpressionExplicitlyGrouped;
+	FVerseExpressionParentSyntax ConsumerSyntax;
+	ConsumerSyntax.Kind = Consumer.ParentExpressionKind;
+	ConsumerSyntax.OperatorSpelling = Consumer.ParentOperatorSpelling;
+	ConsumerSyntax.OperandIndex = Consumer.ParentOperandIndex;
+	const FString ProviderType = !Provider.Socket.SemanticTypeName.IsEmpty()
+		? Provider.Socket.SemanticTypeName
+		: Provider.Socket.IntrinsicTypeName.ToString();
+	FVerseTextRange PlaceholderRange;
+	const FVerseExpressionAction* RetargetAction =
+		CompatibleOperatorRetargets.Find(Target.Endpoint);
+	if (!TryConnectVerseExpressions(
+		*ActiveDocument->Session,
+		Provider.BoundSourceRange,
+		ProviderType,
+		Provider.BoundExpressionKind == EVerseExpressionKind::Identifier,
+		ProviderSyntax,
+		Consumer.TileRange,
+		ConsumerSyntax,
+		OutError,
+		&PlaceholderRange,
+		Consumer.MaterializedInputName,
+		RetargetAction != nullptr && RetargetAction->OperatorRetarget.IsSet()
+			? &RetargetAction->OperatorRetarget.GetValue()
+			: nullptr))
+	{
+		return false;
+	}
+	if (PlaceholderRange.IsSet())
+	{
+		ActiveDocument->ProvisionalTiles.Add(
+			PlaceholderRange,
+			ActiveDocument->Session->GetCurrentUtf8());
+	}
+	ActiveDocument->LoadError = FText::GetEmpty();
+	ActiveDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(ActiveDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(ActiveDocument, true);
+	}
+	ReconcileFunctionTabs(
+		*ActiveDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+	return true;
 }
 
 void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition)
@@ -835,6 +1156,8 @@ void SVerseVisualEditor::FinishExpressionSearch()
 		}
 	}
 	SocketDrag.Reset();
+	CompatibleSocketTargets.Reset();
+	CompatibleOperatorRetargets.Reset();
 	ExpressionActions.Reset();
 	ExpressionMenu.Reset();
 }

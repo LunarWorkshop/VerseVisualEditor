@@ -1212,6 +1212,47 @@ bool TryApplyVerseOperatorOperandAction(
 	return Session.ReplaceMany(Edits, OutError);
 }
 
+namespace
+{
+	bool BuildMaterializedNamedInputSource(
+		const FVerseDocument& Document,
+		FVerseTextRange CallRange,
+		FStringView InputName,
+		FStringView ProviderSource,
+		FString& OutCallSource,
+		FText& OutError)
+	{
+		OutCallSource = Document.DecodeOriginalRange(CallRange).TrimStartAndEnd();
+		int32 ClosingIndex = OutCallSource.Len() - 1;
+		while (ClosingIndex >= 0 && FChar::IsWhitespace(OutCallSource[ClosingIndex]))
+		{
+			--ClosingIndex;
+		}
+		if (ClosingIndex < 0
+			|| (OutCallSource[ClosingIndex] != TEXT(')')
+				&& OutCallSource[ClosingIndex] != TEXT(']')))
+		{
+			OutError = LOCTEXT(
+				"MissingCallDelimiterForNamedInput",
+				"The call's closing delimiter could not be found.");
+			return false;
+		}
+		const int32 OpeningIndex = OutCallSource.Find(
+			OutCallSource[ClosingIndex] == TEXT(')') ? TEXT("(") : TEXT("["));
+		const bool bHasArguments = OpeningIndex != INDEX_NONE
+			&& !OutCallSource.Mid(OpeningIndex + 1, ClosingIndex - OpeningIndex - 1)
+				.TrimStartAndEnd().IsEmpty();
+		const FString Argument = FString::Printf(
+			TEXT("?%s := %s"),
+			*FString(InputName).TrimStartAndEnd(),
+			*FString(ProviderSource));
+		OutCallSource.InsertAt(
+			ClosingIndex,
+			(bHasArguments ? TEXT(", ") : TEXT("")) + Argument);
+		return true;
+	}
+}
+
 bool TryMaterializeVerseNamedInput(
 	FVerseDocumentSession& Session,
 	FVerseTextRange CallRange,
@@ -1235,39 +1276,221 @@ bool TryMaterializeVerseNamedInput(
 	}
 	const TSharedRef<const FVerseDocument> Document =
 		Session.GetParseSnapshot().GetDocument();
-	FString CallSource = Document->DecodeOriginalRange(CallRange).TrimStartAndEnd();
-	int32 ClosingIndex = CallSource.Len() - 1;
-	while (ClosingIndex >= 0 && FChar::IsWhitespace(CallSource[ClosingIndex]))
+	FString CallSource;
+	if (!BuildMaterializedNamedInputSource(
+		*Document, CallRange, InputName, ProviderSource, CallSource, OutError))
 	{
-		--ClosingIndex;
-	}
-	if (ClosingIndex < 0
-		|| (CallSource[ClosingIndex] != TEXT(')')
-			&& CallSource[ClosingIndex] != TEXT(']')))
-	{
-		OutError = LOCTEXT(
-			"MissingCallDelimiterForNamedInput",
-			"The call's closing delimiter could not be found.");
 		return false;
 	}
-	const int32 OpeningIndex = CallSource.Find(
-		CallSource[ClosingIndex] == TEXT(')') ? TEXT("(") : TEXT("["));
-	const bool bHasArguments = OpeningIndex != INDEX_NONE
-		&& !CallSource.Mid(OpeningIndex + 1, ClosingIndex - OpeningIndex - 1)
-			.TrimStartAndEnd().IsEmpty();
-	const FString Argument = FString::Printf(
-		TEXT("?%s := %s"),
-		*FString(InputName).TrimStartAndEnd(),
-		*ProviderSource);
-	CallSource.InsertAt(
-		ClosingIndex,
-		(bHasArguments ? TEXT(", ") : TEXT("")) + Argument);
 	return TryReplaceExpressionSource(
 		Session,
 		CallRange,
 		CallSource,
 		EVerseExpressionKind::Call,
 		OutError);
+}
+
+bool TryConnectVerseExpressions(
+	FVerseDocumentSession& Session,
+	FVerseTextRange ProviderRange,
+	FStringView ProviderTypeName,
+	bool bReferenceProvider,
+	const FVerseBoundExpressionSyntax& ProviderSyntax,
+	FVerseTextRange ConsumerRange,
+	const FVerseExpressionParentSyntax& ConsumerSyntax,
+	FText& OutError,
+	FVerseTextRange* OutProvisionalPlaceholderRange,
+	FStringView MaterializedInputName,
+	const FVerseOperatorRetargetRecipe* OperatorRetarget)
+{
+	if (ProviderRange.Revision != Session.GetRevision()
+		|| ConsumerRange.Revision != Session.GetRevision()
+		|| !ProviderRange.IsSet() || !ConsumerRange.IsSet())
+	{
+		OutError = LOCTEXT(
+			"StaleDirectSocketConnection",
+			"The socket connection belongs to an obsolete graph revision.");
+		return false;
+	}
+	if (!bReferenceProvider
+		&& ProviderRange.BeginByte < ConsumerRange.EndByte()
+		&& ConsumerRange.BeginByte < ProviderRange.EndByte())
+	{
+		OutError = LOCTEXT(
+			"CyclicDirectSocketConnection",
+			"The socket connection would move an expression into itself.");
+		return false;
+	}
+	const TSharedRef<const FVerseDocument> Document =
+		Session.GetParseSnapshot().GetDocument();
+	FString ProviderSource =
+		Document->DecodeOriginalRange(ProviderRange).TrimStartAndEnd();
+	if (ProviderSource.IsEmpty())
+	{
+		OutError = LOCTEXT(
+			"MissingDirectSocketProvider",
+			"The provider socket has no source expression.");
+		return false;
+	}
+	FVerseExpressionAction ProviderAction;
+	ProviderAction.SourceSpelling = ProviderSyntax.OperatorSpelling;
+	switch (ProviderSyntax.Kind)
+	{
+	case EVerseExpressionKind::BinaryOperator:
+		ProviderAction.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+		break;
+	case EVerseExpressionKind::UnaryOperator:
+		ProviderAction.SourceForm = ProviderSyntax.OperatorSpelling == TEXT("?")
+			? EVerseExpressionSourceForm::PostfixOperator
+			: EVerseExpressionSourceForm::PrefixOperator;
+		break;
+	case EVerseExpressionKind::Call:
+		ProviderAction.SourceForm = EVerseExpressionSourceForm::OrdinaryCall;
+		break;
+	case EVerseExpressionKind::Identifier:
+		ProviderAction.SourceForm = EVerseExpressionSourceForm::IdentifierReference;
+		break;
+	default:
+		ProviderAction.SourceForm = EVerseExpressionSourceForm::Literal;
+		break;
+	}
+	if (!ProviderSyntax.bExplicitlyGrouped
+		&& ShouldParenthesizeProviderExpression(ProviderAction, ConsumerSyntax))
+	{
+		ProviderSource = FString::Printf(TEXT("(%s)"), *ProviderSource);
+	}
+
+	TArray<FVerseDocumentEdit> Edits;
+	if (MaterializedInputName.TrimStartAndEnd().IsEmpty())
+	{
+		Edits.Add({ConsumerRange, FUtf8String(ProviderSource)});
+	}
+	else
+	{
+		FString CallSource;
+		if (!BuildMaterializedNamedInputSource(
+			*Document,
+			ConsumerRange,
+			MaterializedInputName,
+			ProviderSource,
+			CallSource,
+			OutError))
+		{
+			return false;
+		}
+		Edits.Add({ConsumerRange, FUtf8String(CallSource)});
+	}
+	if (OperatorRetarget != nullptr)
+	{
+		if (OperatorRetarget->ReplacedOperandIndex == INDEX_NONE
+			|| OperatorRetarget->OperandCount != OperatorRetarget->OperandTypeNames.Num()
+			|| OperatorRetarget->OperandCount != OperatorRetarget->InlineLiteralRanges.Num())
+		{
+			OutError = LOCTEXT(
+				"InvalidDirectOperatorRetarget",
+				"The operator signature recipe is incomplete.");
+			return false;
+		}
+		for (int32 Index = 0; Index < OperatorRetarget->OperandCount; ++Index)
+		{
+			if (Index == OperatorRetarget->ReplacedOperandIndex)
+			{
+				continue;
+			}
+			const FVerseTextRange& LiteralRange =
+				OperatorRetarget->InlineLiteralRanges[Index];
+			if (!bReferenceProvider && LiteralRange.IsSet()
+				&& LiteralRange == ProviderRange)
+			{
+				continue;
+			}
+			if (!LiteralRange.IsSet())
+			{
+				// A connected operand already has source of its own. The selected
+				// signature constrains it, but there is no inline default to rewrite.
+				continue;
+			}
+			if (LiteralRange.Revision != Session.GetRevision())
+			{
+				OutError = LOCTEXT(
+					"StaleDirectOperatorLiteral",
+					"An operator default belongs to an obsolete graph revision.");
+				return false;
+			}
+			const FString DefaultSource = GetDefaultVerseLiteralSourceForType(
+				OperatorRetarget->OperandTypeNames[Index]).Get(TEXT("0"));
+			Edits.Add({LiteralRange, FUtf8String(DefaultSource)});
+		}
+	}
+	FString Placeholder;
+	if (!bReferenceProvider)
+	{
+		Placeholder = GetDefaultVerseLiteralSourceForType(ProviderTypeName).Get(TEXT("0"));
+		Edits.Add({ProviderRange, FUtf8String(Placeholder)});
+	}
+
+	TArray<FVerseDocumentEdit> Ascending(Edits);
+	Ascending.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
+	{
+		return Left.Range.BeginByte < Right.Range.BeginByte;
+	});
+	const FUtf8String& Current = Session.GetCurrentUtf8();
+	FUtf8String Candidate;
+	int32 Cursor = 0;
+	for (const FVerseDocumentEdit& Edit : Ascending)
+	{
+		if (Edit.Range.BeginByte < Cursor || Edit.Range.EndByte() > Current.Len())
+		{
+			OutError = LOCTEXT(
+				"InvalidDirectSocketRanges",
+				"The socket connection contains overlapping or invalid source ranges.");
+			return false;
+		}
+		Candidate.Append(FUtf8StringView(*Current + Cursor, Edit.Range.BeginByte - Cursor));
+		Candidate.Append(Edit.Replacement);
+		Cursor = Edit.Range.EndByte();
+	}
+	Candidate.Append(FUtf8StringView(*Current + Cursor, Current.Len() - Cursor));
+	const TConstArrayView<uint8> CandidateBytes(
+		reinterpret_cast<const uint8*>(*Candidate), Candidate.Len());
+	TSharedPtr<const FVerseDocument> CandidateDocument =
+		FVerseDocument::CreateFromBytes(CandidateBytes, OutError);
+	if (!CandidateDocument.IsValid())
+	{
+		return false;
+	}
+	const FVerseParseSnapshot CandidateSnapshot =
+		FVerseParseSnapshotBuilder::Build(CandidateDocument.ToSharedRef());
+	const TArray<FVerseVisualTile> CandidateTiles =
+		FVerseVisualTileBuilder::Build(CandidateSnapshot);
+	if (FVerseFunctionNavigationBuilder::Build(CandidateTiles, CandidateSnapshot).IsEmpty())
+	{
+		OutError = LOCTEXT(
+			"DirectSocketConnectionRejected",
+			"The socket connection would not produce a supported Verse function graph.");
+		return false;
+	}
+	if (!Session.ReplaceMany(Edits, OutError))
+	{
+		return false;
+	}
+	if (OutProvisionalPlaceholderRange != nullptr)
+	{
+		*OutProvisionalPlaceholderRange = {};
+		if (!bReferenceProvider && Session.GetLastSourceTransition().IsSet())
+		{
+			for (const FVerseDocumentTransitionEdit& Edit :
+				Session.GetLastSourceTransition()->Edits)
+			{
+				if (Edit.PreviousRange == ProviderRange)
+				{
+					*OutProvisionalPlaceholderRange = Edit.CurrentRange;
+					break;
+				}
+			}
+		}
+	}
+	return true;
 }
 
 #undef LOCTEXT_NAMESPACE
