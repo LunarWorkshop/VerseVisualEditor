@@ -1024,7 +1024,7 @@ void SVerseVisualEditor::HandleInlineLiteralCommitted(
 		if (OpenDocument == ActiveDocument)
 		{
 			bLocalCompilePanelOpen = true;
-			RefreshActiveDocument();
+			RefreshActiveDocument(false);
 		}
 		return;
 	}
@@ -1044,7 +1044,7 @@ void SVerseVisualEditor::HandleInlineLiteralCommitted(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		RefreshActiveDocument(false);
 	}
 }
 

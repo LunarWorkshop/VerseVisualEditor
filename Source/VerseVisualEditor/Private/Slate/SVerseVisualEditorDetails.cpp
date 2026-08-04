@@ -464,7 +464,10 @@ void SVerseVisualEditor::HandleTypeSelected(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		// A type edit may resize this definition and retarget connected operator
+		// presentation, but it does not insert or reorder graph structure. Apply
+		// the rebuilt layout atomically rather than animating every affected tile.
+		RefreshActiveDocument(false);
 	}
 }
 
@@ -552,7 +555,7 @@ void SVerseVisualEditor::HandleOperatorSignatureSelected(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		RefreshActiveDocument(false);
 	}
 }
 
@@ -618,7 +621,7 @@ void SVerseVisualEditor::HandleSyntaxControlSelected(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		RefreshActiveDocument(false);
 	}
 }
 
@@ -711,7 +714,7 @@ void SVerseVisualEditor::HandleSpecifiersCommitted(
 	RebuildDocumentTabs();
 	if (OpenDocument == ActiveDocument)
 	{
-		RefreshActiveDocument();
+		RefreshActiveDocument(false);
 	}
 }
 
