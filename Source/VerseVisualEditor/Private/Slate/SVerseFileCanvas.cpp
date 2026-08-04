@@ -269,7 +269,7 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildTile(const FVerseVisualTile& Tile, in
 		? FString()
 		: MotionParentKeys.Last();
 	const FString MotionKey = MotionController->AllocateKey(
-		BuildVerseGraphMotionKeyBase(Tile, *Snapshot->GetDocument()));
+		BuildVerseGraphMotionKeyBase(Tile), ParentMotionKey);
 	MotionParentKeys.Add(MotionKey);
 	const bool bCompactDefinition = Tile.Kind == EVerseVisualTileKind::Definition
 		&& (Tile.DefinitionKind == VerseSyntaxKind::Constant

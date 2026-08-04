@@ -393,7 +393,7 @@ namespace
 			: StandardOperandWireSpace;
 		const FString MotionKey = MotionController.IsValid()
 			? MotionController->AllocateKey(
-				BuildVerseGraphMotionKeyBase(Tile, *Document))
+				BuildVerseGraphMotionKeyBase(Tile), ParentMotionKey)
 			: FString();
 		const bool bIsGraphAnchor = Tile.Kind == EVerseVisualTileKind::FunctionEntry
 			&& ParentMotionKey.IsEmpty();
@@ -1177,7 +1177,7 @@ void SVerseVisualEditor::RefreshActiveDocument(
 					nullptr,
 					FunctionGraphPresentation);
 				const FString ReturnMotionKey = FunctionTab.MotionController->AllocateKey(
-					BuildVerseGraphMotionKeyBase(ReturnDisplayTile, *SourceDocument));
+					BuildVerseGraphMotionKeyBase(ReturnDisplayTile));
 				const TSharedRef<SVerseGraphMotionWidget> ReturnMotion =
 					SNew(SVerseGraphMotionWidget)
 					.Controller(FunctionTab.MotionController)

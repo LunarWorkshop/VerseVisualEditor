@@ -4,7 +4,6 @@
 #include "Widgets/SCompoundWidget.h"
 
 class SVerseTile;
-class FVerseDocument;
 struct FVerseVisualTile;
 
 enum class EVerseGraphMotionEntrance : uint8
@@ -19,10 +18,8 @@ FVector2D ApplyVerseGraphDragResistance(FVector2D ScreenDisplacement);
 /** Fixed cubic ease-out used by every graph motion channel. */
 float EvaluateVerseGraphEaseOut(float Alpha);
 
-/** Stable presentation fingerprint used to reconcile one tile across source revisions. */
-FString BuildVerseGraphMotionKeyBase(
-	const FVerseVisualTile& Tile,
-	const FVerseDocument& Document);
+/** Stable structural fingerprint used to reconcile one tile across source revisions. */
+FString BuildVerseGraphMotionKeyBase(const FVerseVisualTile& Tile);
 
 /** Converts surface-local positions into the graph space anchored at the function entry. */
 FVector2D ComputeVerseAnchorRelativeGraphPosition(
@@ -44,7 +41,7 @@ class FVerseGraphMotionController final
 {
 public:
 	void BeginBuild(bool bAnimateChanges);
-	FString AllocateKey(const FString& BaseKey);
+	FString AllocateKey(const FString& BaseKey, const FString& ParentKey = FString());
 	void SetSurfaceGeometry(
 		const FGeometry& InGeometry,
 		float InZoom,

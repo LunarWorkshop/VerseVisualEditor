@@ -1,7 +1,6 @@
 #include "Slate/VerseGraphMotion.h"
 
 #include "VerseVisualEditorSettings.h"
-#include "VerseDocument.h"
 #include "VisualModel/VerseVisualTile.h"
 
 #include "HAL/PlatformTime.h"
@@ -24,29 +23,20 @@ float EvaluateVerseGraphEaseOut(float Alpha)
 	return 1.0f - Remaining * Remaining * Remaining;
 }
 
-FString BuildVerseGraphMotionKeyBase(
-	const FVerseVisualTile& Tile,
-	const FVerseDocument& Document)
+FString BuildVerseGraphMotionKeyBase(const FVerseVisualTile& Tile)
 {
-	FString Identity;
-	if (Tile.NameRange.IsSet())
-	{
-		Identity = Document.DecodeOriginalRange(Tile.NameRange);
-	}
-	else if (!Tile.OperatorSpelling.IsEmpty())
-	{
-		Identity = Tile.OperatorSpelling;
-	}
-	else if (Tile.Range.IsSet())
-	{
-		Identity = Document.DecodeOriginalRange(Tile.Range).TrimStartAndEnd();
-	}
+	// Motion identity describes the tile's structural role, never its mutable
+	// source. In particular, a control tile's Range includes all descendant
+	// clauses; using that text makes an unchanged `if` appear newly inserted
+	// whenever an expression inside its condition or branch changes.
 	return FString::Printf(
-		TEXT("%d|%d|%s|%s"),
+		TEXT("%d|%d|%d|%d|%s|%d"),
 		static_cast<int32>(Tile.Kind),
 		static_cast<int32>(Tile.ExpressionKind),
+		static_cast<int32>(Tile.LiteralKind),
+		static_cast<int32>(Tile.ControlKind),
 		*Tile.DefinitionKind.ToString(),
-		*Identity);
+		Tile.bStatementLevel ? 1 : 0);
 }
 
 FVector2D ComputeVerseAnchorRelativeGraphPosition(
@@ -64,10 +54,18 @@ void FVerseGraphMotionController::BeginBuild(bool bAnimateChanges)
 	bAnimateCurrentBuild = bAnimateChanges;
 }
 
-FString FVerseGraphMotionController::AllocateKey(const FString& BaseKey)
+FString FVerseGraphMotionController::AllocateKey(
+	const FString& BaseKey,
+	const FString& ParentKey)
 {
-	int32& Occurrence = KeyOccurrences.FindOrAdd(BaseKey);
-	return FString::Printf(TEXT("%s#%d"), *BaseKey, Occurrence++);
+	// Count structurally identical tiles within their owning tile instead of
+	// globally. Adding a child in one nested graph cannot renumber an unrelated
+	// tile elsewhere in the function.
+	const FString ScopedBase = ParentKey.IsEmpty()
+		? BaseKey
+		: FString::Printf(TEXT("%s>%s"), *ParentKey, *BaseKey);
+	int32& Occurrence = KeyOccurrences.FindOrAdd(ScopedBase);
+	return FString::Printf(TEXT("%s#%d"), *ScopedBase, Occurrence++);
 }
 
 void FVerseGraphMotionController::SetSurfaceGeometry(

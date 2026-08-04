@@ -92,6 +92,35 @@ bool FVerseGraphMotionMathTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Ease finishes at one"), EvaluateVerseGraphEaseOut(1.0f), 1.0f);
 	TestTrue(TEXT("Cubic ease-out advances faster than linear in the middle"),
 		EvaluateVerseGraphEaseOut(0.5f) > 0.5f);
+
+	FVerseVisualTile IfBefore;
+	IfBefore.Kind = EVerseVisualTileKind::Expression;
+	IfBefore.ExpressionKind = EVerseExpressionKind::Control;
+	IfBefore.ControlKind = EVerseControlKind::If;
+	IfBefore.bStatementLevel = true;
+	IfBefore.Range = FVerseTextRange({1}, FVerseByteRange::FromBounds(100, 120));
+	FVerseVisualTile IfAfter = IfBefore;
+	IfAfter.Range = FVerseTextRange({2}, FVerseByteRange::FromBounds(100, 180));
+	TestEqual(TEXT("Descendant source edits do not change a control tile motion identity"),
+		BuildVerseGraphMotionKeyBase(IfAfter),
+		BuildVerseGraphMotionKeyBase(IfBefore));
+
+	FVerseGraphMotionController RebuiltController;
+	RebuiltController.BeginBuild(false);
+	const FString ExistingTileKey = RebuiltController.AllocateKey(
+		BuildVerseGraphMotionKeyBase(IfBefore));
+	const FVerseGraphMotionPose CompletedPose{
+		FVector2D(120.0f, 80.0f),
+		FVector2D(118.0f, 79.0f),
+		1.0f};
+	RebuiltController.PublishPose(ExistingTileKey, CompletedPose);
+	RebuiltController.BeginBuild(true);
+	const FString RebuiltTileKey = RebuiltController.AllocateKey(
+		BuildVerseGraphMotionKeyBase(IfAfter));
+	TestEqual(TEXT("The rebuilt control receives its preceding motion key"),
+		RebuiltTileKey, ExistingTileKey);
+	TestTrue(TEXT("A rebuild retains the preceding completed tile pose"),
+		RebuiltController.FindPreviousPose(RebuiltTileKey).IsSet());
 	return true;
 }
 
