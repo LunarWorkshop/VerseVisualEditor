@@ -82,6 +82,14 @@ struct FVerseExpressionAction
 	TOptional<FVerseOperatorRetargetRecipe> OperatorRetarget;
 };
 
+/** Syntax identity of an existing expression being embedded into a new parent. */
+struct FVerseBoundExpressionSyntax
+{
+	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
+	FString OperatorSpelling;
+	bool bExplicitlyGrouped = false;
+};
+
 /** Combines canonical source spelling with editor-authored hidden search aliases. */
 FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Action);
 
@@ -93,7 +101,8 @@ bool BuildVerseExpressionActionSource(
 	const FVerseExpressionAction& Action,
 	FStringView BoundExpressionSource,
 	FString& OutSource,
-	FText& OutError);
+	FText& OutError,
+	const FVerseBoundExpressionSyntax* BoundSyntax = nullptr);
 
 /** Discovers expression actions from the current lexical scope and the expression registry. */
 class FVerseExpressionActionQuery
@@ -126,7 +135,8 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
-	FText& OutError);
+	FText& OutError,
+	const FVerseBoundExpressionSyntax* BoundSyntax = nullptr);
 
 /** Applies a provider and all literal changes required by its selected concrete signature. */
 bool TryApplyVerseOperatorOperandAction(

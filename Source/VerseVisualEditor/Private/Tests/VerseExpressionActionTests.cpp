@@ -507,4 +507,162 @@ bool FVersePrimitiveDefinitionDefaultTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseExpressionPromotionGroupingTest,
+	"VerseVisualEditor.Expressions.Source.PromotionGrouping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseExpressionPromotionGroupingTest::RunTest(const FString& Parameters)
+{
+	FText Error;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		TEXT("Promote(OutHigh : float, OutLow : float)<computes> : float = OutHigh - OutLow\n"),
+		Error);
+	if (!TestTrue(TEXT("Expression-promotion fixture parses"), Document.IsValid()))
+	{
+		return false;
+	}
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const TArray<FVerseFunctionNavigationItem> Functions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseFunctionNavigationItem* Function = Functions.FindByPredicate(
+		[](const FVerseFunctionNavigationItem& Item)
+		{
+			return Item.Name == TEXT("Promote");
+		});
+	const FVerseVisualTile* Subtract = Function != nullptr
+		? Function->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::BinaryOperator
+					&& Tile.OperatorSpelling == TEXT("-");
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("Statement subtraction is represented"), Subtract))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Statement subtraction owns its complete source"),
+		Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(Subtract->Range),
+		FString(TEXT("OutHigh - OutLow")));
+
+	FVerseExpressionAction Multiply;
+	Multiply.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+	Multiply.SourceSpelling = TEXT("*");
+	Multiply.InputDefaultSources = {TEXT("0.0"), TEXT("0.0")};
+	Multiply.BoundInputIndex = 0;
+	const FVerseBoundExpressionSyntax SubtractSyntax{
+		EVerseExpressionKind::BinaryOperator,
+		TEXT("-"),
+		false};
+	const bool bPromoted = TryApplyVerseExpressionAction(
+		Session, Subtract->Range, Multiply, Error, &SubtractSyntax);
+	TestTrue(*FString::Printf(TEXT("Subtraction promotion succeeds: %s"),
+		*Error.ToString()), bPromoted);
+	if (!bPromoted)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Promotion groups the lower-precedence subtraction"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(
+			TEXT("(OutHigh - OutLow) * 0.0")));
+
+	const TArray<FVerseFunctionNavigationItem> RebuiltFunctions =
+		FVerseFunctionNavigationBuilder::Build(
+			Session.GetTiles(), Session.GetParseSnapshot());
+	const FVerseFunctionNavigationItem* RebuiltFunction =
+		RebuiltFunctions.FindByPredicate(
+			[](const FVerseFunctionNavigationItem& Item)
+			{
+				return Item.Name == TEXT("Promote");
+			});
+	const FVerseVisualTile* MultiplyRoot = RebuiltFunction != nullptr
+		? RebuiltFunction->GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::BinaryOperator
+					&& Tile.OperatorSpelling == TEXT("*");
+			})
+		: nullptr;
+	TestTrue(TEXT("Reparse promotes Multiply above Subtract"),
+		MultiplyRoot != nullptr
+			&& MultiplyRoot->Children.Num() == 2
+			&& MultiplyRoot->Children[0].ExpressionKind
+				== EVerseExpressionKind::BinaryOperator
+			&& MultiplyRoot->Children[0].OperatorSpelling == TEXT("-"));
+
+	FVerseExpressionAction OuterSubtract;
+	OuterSubtract.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+	OuterSubtract.SourceSpelling = TEXT("-");
+	OuterSubtract.InputDefaultSources = {TEXT("0.0"), TEXT("0.0")};
+	OuterSubtract.BoundInputIndex = 1;
+	FString AssociatedSource;
+	TestTrue(TEXT("Right-side equal-precedence binding emits source"),
+		BuildVerseExpressionActionSource(
+			OuterSubtract, TEXTVIEW("A - B"), AssociatedSource, Error, &SubtractSyntax));
+	TestEqual(TEXT("Right-side equal precedence preserves associativity"),
+		AssociatedSource, FString(TEXT("0.0 - (A - B)")));
+
+	const FVerseBoundExpressionSyntax IdentifierSyntax{
+		EVerseExpressionKind::Identifier,
+		FString(),
+		false};
+	FString AtomicSource;
+	TestTrue(TEXT("Atomic binding emits source"),
+		BuildVerseExpressionActionSource(
+			Multiply, TEXTVIEW("Input"), AtomicSource, Error, &IdentifierSyntax));
+	TestEqual(TEXT("Atomic binding remains unparenthesized"),
+		AtomicSource, FString(TEXT("Input * 0.0")));
+
+	struct FPromotionSourceCase
+	{
+		const TCHAR* Label;
+		const TCHAR* ParentOperator;
+		int32 BoundInputIndex;
+		const TCHAR* ChildSource;
+		const TCHAR* ChildOperator;
+		bool bExplicitlyGrouped;
+		const TCHAR* Expected;
+	};
+	static const FPromotionSourceCase Cases[] = {
+		{TEXT("Lower precedence on the right"), TEXT("*"), 1,
+			TEXT("A - B"), TEXT("-"), false, TEXT("0.0 * (A - B)")},
+		{TEXT("Higher precedence on the left"), TEXT("+"), 0,
+			TEXT("A * B"), TEXT("*"), false, TEXT("A * B + 0.0")},
+		{TEXT("Higher precedence on the right"), TEXT("+"), 1,
+			TEXT("A * B"), TEXT("*"), false, TEXT("0.0 + A * B")},
+		{TEXT("Equal precedence on the left"), TEXT("-"), 0,
+			TEXT("A - B"), TEXT("-"), false, TEXT("A - B - 0.0")},
+		{TEXT("Explicit grouping is not duplicated"), TEXT("*"), 0,
+			TEXT("(A - B)"), TEXT("-"), true, TEXT("(A - B) * 0.0")},
+		{TEXT("Unknown compound precedence is grouped conservatively"), TEXT("*"), 0,
+			TEXT("A unknown B"), TEXT("unknown"), false,
+			TEXT("(A unknown B) * 0.0")},
+	};
+	for (const FPromotionSourceCase& Item : Cases)
+	{
+		FVerseExpressionAction Parent;
+		Parent.SourceForm = EVerseExpressionSourceForm::InfixOperator;
+		Parent.SourceSpelling = Item.ParentOperator;
+		Parent.InputDefaultSources = {TEXT("0.0"), TEXT("0.0")};
+		Parent.BoundInputIndex = Item.BoundInputIndex;
+		const FVerseBoundExpressionSyntax ChildSyntax{
+			EVerseExpressionKind::BinaryOperator,
+			Item.ChildOperator,
+			Item.bExplicitlyGrouped};
+		FString Source;
+		Error = FText::GetEmpty();
+		const bool bBuilt = BuildVerseExpressionActionSource(
+			Parent, Item.ChildSource, Source, Error, &ChildSyntax);
+		TestTrue(*FString::Printf(TEXT("%s emits source: %s"),
+			Item.Label, *Error.ToString()), bBuilt);
+		if (bBuilt)
+		{
+			TestEqual(Item.Label, Source, FString(Item.Expected));
+		}
+	}
+	return true;
+}
+
 #endif

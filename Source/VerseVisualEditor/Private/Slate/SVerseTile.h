@@ -61,6 +61,10 @@ struct FVerseSocketDragStart
 	TOptional<FVerseTextRange> ProvisionalReplacementRange;
 	/** Value expression represented by an output binding or parameter socket. */
 	FVerseTextRange BoundSourceRange;
+	/** Syntax shape needed to preserve grouping when this output becomes an operand. */
+	EVerseExpressionKind BoundExpressionKind = EVerseExpressionKind::Unsupported;
+	FString BoundOperatorSpelling;
+	bool bBoundExpressionExplicitlyGrouped = false;
 	/** Omitted named/default input which must be materialized in its call. */
 	FString MaterializedInputName;
 	FVerseDesktopPoint DesktopPosition;

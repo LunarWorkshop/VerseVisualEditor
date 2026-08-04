@@ -928,11 +928,22 @@ void SVerseVisualEditor::ApplyExpressionAction(TSharedPtr<FVerseExpressionAction
 	}
 	else
 	{
+		FVerseBoundExpressionSyntax BoundSyntax;
+		const FVerseBoundExpressionSyntax* BoundSyntaxPtr = nullptr;
+		if (SocketDrag->bOutput && SocketDrag->BoundSourceRange.IsSet())
+		{
+			BoundSyntax.Kind = SocketDrag->BoundExpressionKind;
+			BoundSyntax.OperatorSpelling = SocketDrag->BoundOperatorSpelling;
+			BoundSyntax.bExplicitlyGrouped =
+				SocketDrag->bBoundExpressionExplicitlyGrouped;
+			BoundSyntaxPtr = &BoundSyntax;
+		}
 		bApplied = TryApplyVerseExpressionAction(
 			*ActiveDocument->Session,
 			SocketDrag->TileRange,
 			*Action,
-			Error);
+			Error,
+			BoundSyntaxPtr);
 	}
 	if (!bApplied)
 	{

@@ -1770,10 +1770,14 @@ FReply SVerseTile::HandleSocketMouseButtonDown(
 			&& Socket.NameRange.IsSet())
 		{
 			DragStart.BoundSourceRange = Socket.NameRange;
+			DragStart.BoundExpressionKind = EVerseExpressionKind::Identifier;
 		}
 		else
 		{
 			DragStart.BoundSourceRange = Tile.Range;
+			DragStart.BoundExpressionKind = Tile.ExpressionKind;
+			DragStart.BoundOperatorSpelling = Tile.OperatorSpelling;
+			DragStart.bBoundExpressionExplicitlyGrouped = !Tile.GroupingLayers.IsEmpty();
 		}
 		if (const FVerseVisualSocketInsertionTarget* Target =
 			Tile.FindSocketInsertionTarget(Socket.Id))

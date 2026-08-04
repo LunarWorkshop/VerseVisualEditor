@@ -706,11 +706,118 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::Build(
 	return Result;
 }
 
+namespace
+{
+	enum class EVerseSourcePrecedence : uint8
+	{
+		Unknown,
+		Comparison,
+		Additive,
+		Multiplicative,
+		Prefix,
+		Postfix,
+		Atomic,
+	};
+
+	EVerseSourcePrecedence GetInfixPrecedence(FStringView Operator)
+	{
+		if (Operator == TEXTVIEW("*") || Operator == TEXTVIEW("/"))
+		{
+			return EVerseSourcePrecedence::Multiplicative;
+		}
+		if (Operator == TEXTVIEW("+") || Operator == TEXTVIEW("-"))
+		{
+			return EVerseSourcePrecedence::Additive;
+		}
+		if (Operator == TEXTVIEW("=") || Operator == TEXTVIEW("<>")
+			|| Operator == TEXTVIEW("<") || Operator == TEXTVIEW("<=")
+			|| Operator == TEXTVIEW(">") || Operator == TEXTVIEW(">="))
+		{
+			return EVerseSourcePrecedence::Comparison;
+		}
+		return EVerseSourcePrecedence::Unknown;
+	}
+
+	EVerseSourcePrecedence GetBoundPrecedence(
+		const FVerseBoundExpressionSyntax& BoundSyntax)
+	{
+		switch (BoundSyntax.Kind)
+		{
+		case EVerseExpressionKind::BinaryOperator:
+			return GetInfixPrecedence(BoundSyntax.OperatorSpelling);
+		case EVerseExpressionKind::UnaryOperator:
+			return BoundSyntax.OperatorSpelling == TEXT("?")
+				? EVerseSourcePrecedence::Postfix
+				: EVerseSourcePrecedence::Prefix;
+		case EVerseExpressionKind::Identifier:
+		case EVerseExpressionKind::Literal:
+		case EVerseExpressionKind::Call:
+			return EVerseSourcePrecedence::Atomic;
+		default:
+			return EVerseSourcePrecedence::Unknown;
+		}
+	}
+
+	bool ShouldParenthesizeBoundExpression(
+		const FVerseExpressionAction& Action,
+		int32 BoundInputIndex,
+		const FVerseBoundExpressionSyntax& BoundSyntax)
+	{
+		if (BoundSyntax.bExplicitlyGrouped
+			|| (BoundSyntax.Kind != EVerseExpressionKind::BinaryOperator
+				&& BoundSyntax.Kind != EVerseExpressionKind::UnaryOperator))
+		{
+			return false;
+		}
+
+		const EVerseSourcePrecedence ChildPrecedence =
+			GetBoundPrecedence(BoundSyntax);
+		EVerseSourcePrecedence ParentPrecedence = EVerseSourcePrecedence::Unknown;
+		switch (Action.SourceForm)
+		{
+		case EVerseExpressionSourceForm::InfixOperator:
+			ParentPrecedence = GetInfixPrecedence(Action.SourceSpelling);
+			break;
+		case EVerseExpressionSourceForm::PrefixOperator:
+			ParentPrecedence = EVerseSourcePrecedence::Prefix;
+			break;
+		case EVerseExpressionSourceForm::PostfixOperator:
+			ParentPrecedence = EVerseSourcePrecedence::Postfix;
+			break;
+		default:
+			// Call argument delimiters and the remaining source forms already
+			// preserve the bound expression as one syntactic unit.
+			return false;
+		}
+
+		if (ChildPrecedence == EVerseSourcePrecedence::Unknown
+			|| ParentPrecedence == EVerseSourcePrecedence::Unknown)
+		{
+			// A supported compound expression with unknown precedence must be
+			// grouped conservatively rather than silently changing its parse tree.
+			return true;
+		}
+		if (ChildPrecedence < ParentPrecedence)
+		{
+			return true;
+		}
+		if (ChildPrecedence > ParentPrecedence)
+		{
+			return false;
+		}
+		// Verse infix operators parse left-associatively. The same-precedence
+		// left operand retains its tree without grouping; the right operand does not.
+		return Action.SourceForm != EVerseExpressionSourceForm::InfixOperator
+			|| BoundInputIndex > 0;
+	}
+}
+
 bool BuildVerseExpressionActionSource(
 	const FVerseExpressionAction& Action,
 	FStringView BoundExpressionSource,
 	FString& OutSource,
-	FText& OutError)
+	FText& OutError,
+	const FVerseBoundExpressionSyntax* BoundSyntax)
 {
 	const FVerseFormattingStyleProfile Style =
 		FVerseFormattingStyleResolver::ResolveDefaults();
@@ -763,7 +870,14 @@ bool BuildVerseExpressionActionSource(
 				"The selected expression cannot preserve the dragged input.");
 			return false;
 		}
-		Inputs[Action.BoundInputIndex] = FString(BoundExpressionSource).TrimStartAndEnd();
+		FString BoundInput = FString(BoundExpressionSource).TrimStartAndEnd();
+		if (BoundSyntax != nullptr
+			&& ShouldParenthesizeBoundExpression(
+				Action, Action.BoundInputIndex, *BoundSyntax))
+		{
+			BoundInput = FString::Printf(TEXT("(%s)"), *BoundInput);
+		}
+		Inputs[Action.BoundInputIndex] = MoveTemp(BoundInput);
 	}
 	if (Inputs.ContainsByPredicate([](const FString& Input) { return Input.IsEmpty(); }))
 	{
@@ -881,7 +995,8 @@ bool TryApplyVerseExpressionAction(
 	FVerseDocumentSession& Session,
 	FVerseTextRange ExpressionRange,
 	const FVerseExpressionAction& Action,
-	FText& OutError)
+	FText& OutError,
+	const FVerseBoundExpressionSyntax* BoundSyntax)
 {
 	if (ExpressionRange.Revision != Session.GetRevision())
 	{
@@ -891,7 +1006,8 @@ bool TryApplyVerseExpressionAction(
 	const TSharedRef<const FVerseDocument> Document = Session.GetParseSnapshot().GetDocument();
 	const FString Existing = Document->DecodeOriginalRange(ExpressionRange).TrimStartAndEnd();
 	FString Replacement;
-	if (!BuildVerseExpressionActionSource(Action, Existing, Replacement, OutError))
+	if (!BuildVerseExpressionActionSource(
+		Action, Existing, Replacement, OutError, BoundSyntax))
 	{
 		return false;
 	}
