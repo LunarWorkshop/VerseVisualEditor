@@ -709,13 +709,11 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 	FVerseVisualTile OneBindingBlock = EmptyBlock;
 	FVerseVisualTile& OneDefinition = OneBindingBlock.Children.AddDefaulted_GetRef();
 	OneDefinition.Kind = EVerseVisualTileKind::Definition;
-	OneDefinition.SemanticDataDefinition = reinterpret_cast<const uLang::CDataDefinition*>(1);
 	OneDefinition.SemanticTypeName = TEXT("int");
 	OneBindingBlock = FinalizeTestTile(MoveTemp(OneBindingBlock));
 	FVerseVisualTile TwoBindingBlock = OneBindingBlock;
 	FVerseVisualTile& TwoDefinition = TwoBindingBlock.Children.AddDefaulted_GetRef();
 	TwoDefinition.Kind = EVerseVisualTileKind::Definition;
-	TwoDefinition.SemanticDataDefinition = reinterpret_cast<const uLang::CDataDefinition*>(2);
 	TwoDefinition.SemanticTypeName = TEXT("float");
 	TwoBindingBlock = FinalizeTestTile(MoveTemp(TwoBindingBlock));
 	const TSharedRef<SVerseTile> OneBindingWidget =
@@ -732,7 +730,7 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		.MainContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
 	OneBindingWidget->SlatePrepass();
 	TwoBindingWidget->SlatePrepass();
-	TestTrue(TEXT("Failure and binding pins share one right-edge group"),
+	TestTrue(TEXT("Syntax-known bindings survive without an exact semantic snapshot"),
 		OneBindingWidget->GetSocketAnchor({EVerseVisualSocketDirection::Output,
 			EVerseVisualSocketRole::FailureContext, 0}).IsValid()
 		&& OneBindingBlock.GetValueOutputs().Num() >= 1

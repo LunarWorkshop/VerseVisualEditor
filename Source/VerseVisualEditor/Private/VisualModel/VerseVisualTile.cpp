@@ -795,8 +795,12 @@ private:
 			}
 			for (const FVerseVisualTile& Child : Tile.Children)
 			{
-				if (Child.Kind != EVerseVisualTileKind::Definition
-					|| Child.SemanticDataDefinition == nullptr)
+				// A definition introduces its boundary binding structurally. Exact
+				// semantic analysis enriches this socket with compiler identity and
+				// legal consumer scopes, but it must not decide whether the socket
+				// exists. Otherwise every source edit temporarily removes binding
+				// labels while the replacement semantic snapshot is compiling.
+				if (Child.Kind != EVerseVisualTileKind::Definition)
 				{
 					continue;
 				}
