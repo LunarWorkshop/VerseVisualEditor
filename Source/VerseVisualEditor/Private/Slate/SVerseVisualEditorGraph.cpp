@@ -166,52 +166,37 @@ namespace
 		const bool bControl = bExpression
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control;
 		const FLinearColor TileColor = VerseVisualEditorStyle::GetTileTitleColor(Tile);
-		TSharedRef<SWidget> Body = BodyOverride.IsValid()
+		TSharedRef<SWidget> MainContent = BodyOverride.IsValid()
 			? BodyOverride.ToSharedRef()
 			: SNullWidget::NullWidget;
-		if (!BodyOverride.IsValid() && bExpression && !bIdentifier && !bControl)
+		const bool bLiteral = bExpression
+			&& Tile.ExpressionKind == EVerseExpressionKind::Literal;
+		const bool bHasSourcePreview = !BodyOverride.IsValid()
+			&& ((bExpression && !bIdentifier && !bControl && !bLiteral)
+				|| (Tile.Kind == EVerseVisualTileKind::Definition
+					&& Tile.bStatementLevel));
+		TSharedRef<SWidget> SourcePreview = SNullWidget::NullWidget;
+		if (bHasSourcePreview)
 		{
-			Body = SNew(SBorder)
+			SourcePreview = SNew(SBorder)
 				.BorderImage(nullptr)
-				.Padding(FMargin(10.0f, 7.0f))
+				.Padding(0.0f)
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(Document->DecodeOriginalRange(Tile.Range)))
 					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 				];
-		}
-		TArray<FText> ExecutionOutputLabels;
-		if (bControl && Tile.ControlKind == EVerseControlKind::If)
-		{
-			ExecutionOutputLabels = {
-				LOCTEXT("IfCompletedOutput", "Completed"),
-				LOCTEXT("IfTrueOutput", "True"),
-				LOCTEXT("IfFalseOutput", "False")};
-		}
-		FMargin TileHeaderPadding(0.0f, 6.0f, 8.0f, 6.0f);
-		if (Tile.Kind == EVerseVisualTileKind::FunctionEntry)
-		{
-			TileHeaderPadding = FMargin(10.0f, 7.0f, 10.0f, 8.0f);
-		}
-		else if (bIdentifier)
-		{
-			TileHeaderPadding = FMargin(6.0f, 6.0f, 8.0f, 6.0f);
 		}
 		TSharedRef<SVerseTile> Result = SNew(SVerseTile)
 			.Tile(Tile)
 			.Document(Document)
 			.TileColor(TileColor)
 			.UnselectedOutlineColor(FLinearColor::Black)
-			.HeaderPadding(TileHeaderPadding)
-			.ArrowPadding(bFailableBlock
-				? FMargin(8.0f, 4.0f, 3.0f, 0.0f)
-				: FMargin(8.0f, 14.0f, 3.0f, 0.0f))
-			.ShowBody(BodyOverride.IsValid()
-				|| bFailableBlock
-				|| (bExpression && !bIdentifier && !bControl))
+			.HasMainContent(BodyOverride.IsValid() || bFailableBlock)
+			.HasSourcePreview(bHasSourcePreview)
 			.CompactExecutionSpacing(bCompactExecutionSpacing)
 			.FunctionGraphPresentation(Presentation)
-			.ExecutionOutputLabels(MoveTemp(ExecutionOutputLabels))
 			.ConnectedSockets(MoveTemp(ConnectedSockets))
 			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
 			{
@@ -230,9 +215,13 @@ namespace
 			.BodyRenderScope(BodyRenderScope)
 			.OwningRenderScope(OwningRenderScope)
 			.ClauseInsertionBodySpineX(ClauseInsertionBodySpineX)
-			.BodyContent()
+			.MainContent()
 			[
-				Body
+				MainContent
+			]
+			.SourcePreview()
+			[
+				SourcePreview
 			];
 		if (WidgetRegistry != nullptr)
 		{
@@ -1275,21 +1264,14 @@ void SVerseVisualEditor::RefreshActiveDocument(
 
 		if (FunctionGraphPresentation == EVerseFunctionGraphPresentation::Tracks)
 		{
-			TFunction<void(const FVerseVisualTile&, int32,
-				TArray<TWeakPtr<SVerseTile>>)> AddControlTracks;
+			TFunction<void(const FVerseVisualTile&, int32)> AddControlTracks;
 			AddControlTracks = [&, this](
 				const FVerseVisualTile& ControlTile,
-				int32 Depth,
-				TArray<TWeakPtr<SVerseTile>> VisibilityOwners)
+				int32 Depth)
 			{
 				if (ControlTile.ExpressionKind != EVerseExpressionKind::Control)
 				{
 					return;
-				}
-				if (const TSharedPtr<SVerseTile>* ControlWidget =
-					WidgetRegistry.Find(ControlTile.Id))
-				{
-					VisibilityOwners.Add(*ControlWidget);
 				}
 				for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
 					ControlTile.ControlRegions)
@@ -1309,20 +1291,7 @@ void SVerseVisualEditor::RefreshActiveDocument(
 						TrackName = LOCTEXT("TrueExecutionTrack", "True");
 					}
 
-					const auto GetTrackVisibility = [VisibilityOwners]()
-					{
-						for (const TWeakPtr<SVerseTile>& Owner : VisibilityOwners)
-						{
-							const TSharedPtr<SVerseTile> Pinned = Owner.Pin();
-							if (!Pinned.IsValid() || !Pinned->IsExpanded())
-							{
-								return EVisibility::Collapsed;
-							}
-						}
-						return EVisibility::Visible;
-					};
-					const TAttribute<EVisibility> TrackVisibility =
-						TAttribute<EVisibility>::CreateLambda(GetTrackVisibility);
+					const TAttribute<EVisibility> TrackVisibility(EVisibility::Visible);
 					TSharedRef<SHorizontalBox> Track = SNew(SHorizontalBox);
 					TSharedRef<SVerseGraphRenderScope> TrackRenderScope =
 						SNew(SVerseGraphRenderScope)
@@ -1400,14 +1369,13 @@ void SVerseVisualEditor::RefreshActiveDocument(
 					];
 					for (const FVerseVisualTile* NestedControl : NestedControls)
 					{
-						AddControlTracks(
-							*NestedControl, Depth + 1, VisibilityOwners);
+						AddControlTracks(*NestedControl, Depth + 1);
 					}
 				}
 			};
 			for (const FVerseVisualTile& Tile : FunctionTab.GraphTiles)
 			{
-				AddControlTracks(Tile, 1, {});
+				AddControlTracks(Tile, 1);
 			}
 		}
 

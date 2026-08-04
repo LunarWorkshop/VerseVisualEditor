@@ -93,9 +93,8 @@ public:
 	SLATE_BEGIN_ARGS(SVerseTile)
 		: _TileColor(FLinearColor::White)
 		, _UnselectedOutlineColor(FLinearColor::Transparent)
-		, _HeaderPadding(FMargin(0.0f, 6.0f, 8.0f, 6.0f))
-		, _ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
-		, _ShowBody(true)
+		, _HasMainContent(false)
+		, _HasSourcePreview(false)
 		, _Compact(false)
 		, _CompactExecutionSpacing(false)
 		, _FunctionGraphPresentation(EVerseFunctionGraphPresentation::VerticalExecution)
@@ -105,14 +104,12 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<const FVerseDocument>, Document)
 		SLATE_ARGUMENT(FLinearColor, TileColor)
 		SLATE_ARGUMENT(FLinearColor, UnselectedOutlineColor)
-		SLATE_ARGUMENT(FMargin, HeaderPadding)
-		SLATE_ARGUMENT(FMargin, ArrowPadding)
-		SLATE_ARGUMENT(bool, ShowBody)
+		SLATE_ARGUMENT(bool, HasMainContent)
+		SLATE_ARGUMENT(bool, HasSourcePreview)
 		SLATE_ARGUMENT(bool, Compact)
 		SLATE_ARGUMENT(bool, CompactExecutionSpacing)
 		SLATE_ARGUMENT(EVerseFunctionGraphPresentation, FunctionGraphPresentation)
 		SLATE_ARGUMENT(FText, DiagnosticText)
-		SLATE_ARGUMENT(TArray<FText>, ExecutionOutputLabels)
 		SLATE_ARGUMENT(TSet<FVerseVisualSocketId>, ConnectedSockets)
 		SLATE_ATTRIBUTE(bool, IsSelected)
 		SLATE_EVENT(FOnClicked, OnSelected)
@@ -124,7 +121,8 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<SVerseGraphRenderScope>, OwningRenderScope)
 		/** Desired X center of a failable block's top insertion pin in body-local space. */
 		SLATE_ARGUMENT(TOptional<float>, ClauseInsertionBodySpineX)
-		SLATE_NAMED_SLOT(FArguments, BodyContent)
+		SLATE_NAMED_SLOT(FArguments, MainContent)
+		SLATE_NAMED_SLOT(FArguments, SourcePreview)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -143,7 +141,11 @@ public:
 			: OwningRenderScope;
 	}
 	const FVerseVisualTile& GetTile() const { return Tile; }
-	bool IsExpanded() const { return !bCollapsible || bExpanded; }
+#if WITH_DEV_AUTOMATION_TESTS
+	bool HasIdentityBandForTesting() const { return bHasIdentityBand; }
+	bool HasMainContentForTesting() const { return bHasMainContent; }
+	bool HasSourcePreviewForTesting() const { return bHasSourcePreview; }
+#endif
 	void SetMotionTarget(TSharedPtr<SVerseGraphMotionWidget> InMotionTarget)
 	{
 		MotionTarget = MoveTemp(InMotionTarget);
@@ -164,7 +166,9 @@ public:
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 
 private:
-	TSharedRef<SWidget> BuildHeader(bool bCompact, const FText& DiagnosticText) const;
+	TSharedRef<SWidget> BuildIdentityBand(bool bCompact) const;
+	TSharedRef<SWidget> BuildMainIdentity(bool bCompact) const;
+	FOptionalSize GetSourcePreviewMaxWidth() const;
 	TSharedRef<SWidget> BuildSocketColumn(TConstArrayView<FVerseVisualSocket> Sockets, bool bOutput);
 	FReply HandleSocketMouseButtonDown(
 		const FGeometry& Geometry,
@@ -191,12 +195,7 @@ private:
 	FText GetLineText() const;
 	const FSlateBrush* GetIcon() const;
 	FReply HandleTileMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
-	FReply HandleHeaderMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
-	FReply ToggleExpanded();
-	const FSlateBrush* GetExpansionImage() const;
-	const FSlateBrush* GetHeaderBrush() const;
-	const FSlateBrush* GetHeaderHighlightBrush() const;
-	EVisibility GetBodyVisibility() const;
+	FReply HandleIdentityMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent);
 	FSlateColor GetOutlineColor() const;
 	FSlateColor GetShadowColor() const;
 
@@ -211,19 +210,19 @@ private:
 	FLinearColor UnselectedOutlineColor = FLinearColor::Transparent;
 	TMap<FVerseVisualSocketId, TSharedPtr<SWidget>> SocketAnchors;
 	TSet<FVerseVisualSocketId> ConnectedSockets;
-	TSharedPtr<SWidget> OperatorLineWidget;
-	TSharedPtr<SWidget> HeaderSocketRow;
+	TSharedPtr<SWidget> IdentityBandWidget;
+	TSharedPtr<SWidget> MainSocketRowWidget;
 	TSharedPtr<SWidget> ValueInputColumn;
 	TSharedPtr<SWidget> ValueOutputColumn;
-	TSharedPtr<SWidget> HeaderOutputGroupWidget;
+	TSharedPtr<SWidget> ValueOutputDockWidget;
 	TArray<TSharedPtr<SWidget>> ValueInputRows;
 	TArray<TSharedPtr<SWidget>> ValueOutputRows;
 	TWeakPtr<SVerseGraphRenderScope> OwningRenderScope;
 	TWeakPtr<SVerseGraphRenderScope> BodyRenderScope;
 	TWeakPtr<SVerseGraphMotionWidget> MotionTarget;
-	bool bExpanded = true;
-	bool bShowBody = true;
-	bool bCollapsible = true;
+	bool bHasIdentityBand = true;
+	bool bHasMainContent = false;
+	bool bHasSourcePreview = false;
 	bool bCompactExecutionSpacing = false;
 	EVerseFunctionGraphPresentation FunctionGraphPresentation =
 		EVerseFunctionGraphPresentation::VerticalExecution;

@@ -135,7 +135,7 @@ FVector2D GetVerseExecutionPinAnchorCoordinate(
 	{
 		return FVector2D(0.5f, 24.0f / 32.0f);
 	}
-	return FVector2D(0.5f, 8.0f / (bCompact ? 20.0f : 48.0f));
+	return FVector2D(0.5f, 1.0f);
 }
 
 FVector2D GetVerseExecutionPinDesiredSize(
@@ -149,7 +149,7 @@ FVector2D GetVerseExecutionPinDesiredSize(
 	}
 	return bInput
 		? FVector2D(48.0f, 32.0f)
-		: FVector2D(24.0f, bCompact ? 20.0f : 48.0f);
+		: FVector2D(24.0f, 12.0f);
 }
 
 EVerseVisualConnectionAxis GetVerseExecutionPreviewAxis(
@@ -327,10 +327,10 @@ namespace
 	};
 
 	/** A restrained Blueprint-like vertical gloss which leaves rounded corner arcs untouched. */
-	class SVerseTileHeaderGradient final : public SLeafWidget
+	class SVerseTileIdentityGradient final : public SLeafWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SVerseTileHeaderGradient)
+		SLATE_BEGIN_ARGS(SVerseTileIdentityGradient)
 			: _RoundBottom(false)
 		{}
 			SLATE_ATTRIBUTE(bool, RoundBottom)
@@ -391,10 +391,10 @@ namespace
 	};
 
 	/** Extends the same restrained depth cue through expanded tile bodies. */
-	class SVerseTileBodyGradient final : public SLeafWidget
+	class SVerseTileMainGradient final : public SLeafWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SVerseTileBodyGradient) {}
+		SLATE_BEGIN_ARGS(SVerseTileMainGradient) {}
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
@@ -446,6 +446,65 @@ namespace
 		}
 	};
 
+	/** Semantic regions and socket docks used to compose one tile. */
+	struct FVerseTilePresentationSpec
+	{
+		bool bHasIdentityBand = false;
+		bool bHasMainContent = false;
+		bool bHasSourcePreview = false;
+		bool bHorizontalExecution = false;
+		bool bHorizontalImplicitReturnSource = false;
+		bool bHorizontalImplicitReturnTile = false;
+		bool bHorizontalFailureTerminal = false;
+		TArray<FText> ExecutionOutputLabels;
+
+		static FVerseTilePresentationSpec Build(
+			const FVerseVisualTile& Tile,
+			bool bCallerHasMainContent,
+			bool bCallerHasSourcePreview,
+			EVerseFunctionGraphPresentation Presentation)
+		{
+			FVerseTilePresentationSpec Result;
+			const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
+			const bool bOperator = bExpression
+				&& IsVerseOperatorExpression(Tile.ExpressionKind);
+			const bool bIdentifier = bExpression
+				&& Tile.ExpressionKind == EVerseExpressionKind::Identifier;
+			const bool bLiteral = bExpression
+				&& Tile.ExpressionKind == EVerseExpressionKind::Literal;
+			const bool bControl = bExpression
+				&& Tile.ExpressionKind == EVerseExpressionKind::Control;
+			Result.bHasIdentityBand = !(bOperator || bIdentifier || bLiteral
+				|| Tile.Kind == EVerseVisualTileKind::Unknown);
+			Result.bHasMainContent = bCallerHasMainContent || bLiteral
+				|| bControl || Tile.Kind == EVerseVisualTileKind::FailableBlock
+				|| (!Result.bHasIdentityBand
+					&& Tile.Kind != EVerseVisualTileKind::Unknown)
+				|| !Tile.GetValueInputs().IsEmpty()
+				|| !Tile.GetValueOutputs().IsEmpty();
+			Result.bHasSourcePreview = bCallerHasSourcePreview;
+			Result.bHorizontalExecution = Presentation
+				!= EVerseFunctionGraphPresentation::VerticalExecution;
+			const bool bHorizontalLayout = Presentation
+				== EVerseFunctionGraphPresentation::HorizontalExecution;
+			Result.bHorizontalImplicitReturnSource = bHorizontalLayout
+				&& Tile.bImplicitReturnValue;
+			Result.bHorizontalImplicitReturnTile = bHorizontalLayout
+				&& Tile.Kind == EVerseVisualTileKind::FunctionReturn;
+			Result.bHorizontalFailureTerminal = bHorizontalLayout
+				&& Tile.StatementFailure != EVerseStatementFailureDisposition::None;
+			if (bExpression && Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.ControlKind == EVerseControlKind::If)
+			{
+				Result.ExecutionOutputLabels = {
+					LOCTEXT("IfCompletedOutput", "Completed"),
+					LOCTEXT("IfTrueOutput", "True"),
+					LOCTEXT("IfFalseOutput", "False")};
+			}
+			return Result;
+		}
+	};
+
 }
 
 void SVerseTile::Construct(const FArguments& InArgs)
@@ -463,17 +522,24 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	OwningRenderScope = InArgs._OwningRenderScope;
 	BodyRenderScope = InArgs._BodyRenderScope;
 	UnselectedOutlineColor = InArgs._UnselectedOutlineColor;
-	bShowBody = InArgs._ShowBody;
-	bCollapsible = bShowBody && !(
-		Tile.Kind == EVerseVisualTileKind::Expression
-		&& IsVerseOperatorExpression(Tile.ExpressionKind));
-	const bool bHasLabeledExecutionOutputs = !InArgs._ExecutionOutputLabels.IsEmpty();
 	bCompactExecutionSpacing = InArgs._CompactExecutionSpacing;
 	FunctionGraphPresentation = InArgs._FunctionGraphPresentation;
-	const bool bHorizontalExecution = FunctionGraphPresentation
-		!= EVerseFunctionGraphPresentation::VerticalExecution;
+	const FVerseTilePresentationSpec Presentation = FVerseTilePresentationSpec::Build(
+		Tile,
+		InArgs._HasMainContent,
+		InArgs._HasSourcePreview,
+		FunctionGraphPresentation);
+	bHasIdentityBand = Presentation.bHasIdentityBand;
+	bHasMainContent = Presentation.bHasMainContent;
+	bHasSourcePreview = Presentation.bHasSourcePreview;
+	const bool bHorizontalExecution = Presentation.bHorizontalExecution;
 	const bool bHorizontalExecutionLayout = FunctionGraphPresentation
 		== EVerseFunctionGraphPresentation::HorizontalExecution;
+	const bool bHasVerticalExecutionOutputs = !bHorizontalExecution
+		&& Tile.FindSocket({
+			EVerseVisualSocketDirection::Output,
+			EVerseVisualSocketRole::Execution,
+			0}) != nullptr;
 
 	TSharedRef<SVerticalBox> TileWithExecution = SNew(SVerticalBox);
 	TSharedPtr<SVerseTileExecutionPin> ExecutionInputPin;
@@ -509,18 +575,19 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control
 		&& Tile.ControlKind == EVerseControlKind::If;
-	const bool bHorizontalImplicitReturnSource = bHorizontalExecutionLayout
-		&& Tile.bImplicitReturnValue;
-	const bool bHorizontalImplicitReturnTile = bHorizontalExecutionLayout
-		&& Tile.Kind == EVerseVisualTileKind::FunctionReturn;
-	const bool bHorizontalFailureTerminal = bHorizontalExecutionLayout
-		&& Tile.StatementFailure != EVerseStatementFailureDisposition::None;
+	const bool bHorizontalImplicitReturnSource =
+		Presentation.bHorizontalImplicitReturnSource;
+	const bool bHorizontalImplicitReturnTile =
+		Presentation.bHorizontalImplicitReturnTile;
+	const bool bHorizontalFailureTerminal =
+		Presentation.bHorizontalFailureTerminal;
 	const FText OperatorLines = bOperatorTile ? GetLineText() : FText::GetEmpty();
-	TSharedRef<SWidget> BodyContent = InArgs._BodyContent.Widget;
+	TSharedRef<SWidget> MainContent = InArgs._MainContent.Widget;
+	TSharedRef<SWidget> SourcePreview = InArgs._SourcePreview.Widget;
 	if (Tile.ExpressionKind == EVerseExpressionKind::Literal
 		&& Tile.LiteralKind != EVerseLiteralKind::None)
 	{
-		BodyContent = SNew(SBorder)
+		MainContent = SNew(SBorder)
 			.BorderImage(nullptr)
 			.Padding(FMargin(8.0f, 6.0f))
 			[
@@ -610,7 +677,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				+ SHorizontalBox::Slot().AutoWidth()
 				.Padding(FMargin(0.0f, HorizontalBodyTopPadding, 116.0f, 32.0f))
 				[
-					BodyContent
+					MainContent
 				];
 		}
 		else if (bHorizontalExecution)
@@ -627,13 +694,13 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				+ SHorizontalBox::Slot().AutoWidth()
 				.Padding(FMargin(0.0f, 20.0f, 116.0f, 28.0f))
 				[
-					BodyContent
+					MainContent
 				];
 		}
 		else
 		{
-			BodyContent->SlatePrepass();
-			const float BodyWidth = BodyContent->GetDesiredSize().X;
+			MainContent->SlatePrepass();
+			const float BodyWidth = MainContent->GetDesiredSize().X;
 			// Direct failable statements terminate at this scope's right wall.
 			// Keep a marker lane beyond the widest internal tile.
 			const float FailureChainWidth = BodyWidth + 40.0f + 96.0f;
@@ -671,7 +738,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				+ SVerticalBox::Slot().AutoHeight()
 				.Padding(FMargin(20.0f, 20.0f, 20.0f, 28.0f))
 				[
-					BodyContent
+					MainContent
 				];
 		}
 		TSharedPtr<SVerseGraphRenderScope> LocalBodyRenderScope = InArgs._BodyRenderScope;
@@ -682,7 +749,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				.ClipToBounds(true);
 		}
 		LocalBodyRenderScope->SetContent(FailureChain);
-		BodyContent = LocalBodyRenderScope.ToSharedRef();
+		MainContent = LocalBodyRenderScope.ToSharedRef();
 	}
 	TSharedRef<SWidget> FailureContextInputWidget = SNullWidget::NullWidget;
 	if (bIfTile)
@@ -721,10 +788,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		FailureContextOutputWidget = Pin;
 	}
 	TSharedRef<SWidget> ValueOutputWidget = BuildSocketColumn(Tile.GetValueOutputs(), true);
-	TSharedRef<SWidget> HeaderOutputGroup = ValueOutputWidget;
+	TSharedRef<SWidget> ValueOutputDock = ValueOutputWidget;
 	if (bHasFailureOutput && !bHorizontalFailureTerminal)
 	{
-		HeaderOutputGroup =
+		ValueOutputDock =
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -740,168 +807,150 @@ void SVerseTile::Construct(const FArguments& InArgs)
 				ValueOutputWidget
 			];
 	}
-	if (bHorizontalExecution)
-	{
-		int32 ExecutionOutputCount = 0;
-		while (Tile.FindSocket({EVerseVisualSocketDirection::Output,
-			EVerseVisualSocketRole::Execution, ExecutionOutputCount}) != nullptr)
-		{
-			++ExecutionOutputCount;
-		}
-		if (ExecutionOutputCount > 0)
-		{
-			constexpr float ExecutionRowHeight = 24.0f;
-			constexpr float ExecutionRowGap = 3.0f;
-			const float ExecutionColumnHeight =
-				ExecutionOutputCount * ExecutionRowHeight
-				+ (ExecutionOutputCount - 1) * ExecutionRowGap;
-			HeaderOutputGroup =
-				SNew(SBox)
-				.Padding(0.0f, ExecutionColumnHeight, 0.0f, 0.0f)
-				[
-					HeaderOutputGroup
-				];
-		}
-	}
 	if (Tile.StatementFailure != EVerseStatementFailureDisposition::None
 		&& !bHorizontalFailureTerminal)
 	{
-		HeaderOutputGroup =
+		ValueOutputDock =
 			SNew(SBox)
 			.Padding(FMargin(0.0f, 22.0f, 0.0f, 0.0f))
 			[
-				HeaderOutputGroup
+				ValueOutputDock
 			];
 	}
-	HeaderOutputGroupWidget = HeaderOutputGroup;
+	ValueOutputDockWidget = ValueOutputDock;
 	const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
 
-	TSharedRef<SVerticalBox> HeaderContents =
-		SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
+	TSharedPtr<SBox> VerticalExecutionOutputHost;
+	TSharedPtr<SBox> SourceExecutionOutputHost;
+	TSharedPtr<SBox> HorizontalExecutionOutputHost;
+	TSharedRef<SWidget> MainIdentity = bHasIdentityBand
+		? SNullWidget::NullWidget
+		: BuildMainIdentity(InArgs._Compact);
+	TSharedRef<SWidget> MainCenter = bHasMainContent
+		? MainContent
+		: MainIdentity;
+	if (!bHasIdentityBand && bHasMainContent)
+	{
+		MainCenter = SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()[MainIdentity]
+			+ SVerticalBox::Slot().AutoHeight()[MainContent];
+	}
+
+	TSharedRef<SVerticalBox> LeftDock = SNew(SVerticalBox);
+	LeftDock->AddSlot().AutoHeight().HAlign(HAlign_Left)
+		[ bHorizontalExecution && ExecutionInputPin.IsValid()
+			? ExecutionInputPin.ToSharedRef() : SNullWidget::NullWidget ];
+	LeftDock->AddSlot().AutoHeight().HAlign(HAlign_Left)[FailureContextInputWidget];
+	LeftDock->AddSlot().AutoHeight().HAlign(HAlign_Left)
+		[BuildSocketColumn(Tile.GetValueInputs(), false)];
+	TSharedRef<SVerticalBox> RightDock = SNew(SVerticalBox);
+	RightDock->AddSlot().AutoHeight().HAlign(HAlign_Right)
+		[ SAssignNew(HorizontalExecutionOutputHost, SBox)
+			.Visibility(bHorizontalExecution ? EVisibility::Visible : EVisibility::Collapsed) ];
+	RightDock->AddSlot().AutoHeight().HAlign(HAlign_Right)[ValueOutputDock];
+
+	TSharedRef<SHorizontalBox> MainSocketRow =
+		SAssignNew(MainSocketRowWidget, SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			SAssignNew(OperatorLineWidget, STextBlock)
-			.Visibility(bOperatorTile && !OperatorLines.IsEmpty()
-				? EVisibility::Visible
-				: EVisibility::Collapsed)
-			.Text(OperatorLines)
-			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-			.ColorAndOpacity(VerseVisualEditorStyle::GetMetadataTextColor())
-			.Margin(FMargin(5.0f, 2.0f, 0.0f, 0.0f))
+			LeftDock
 		]
-		+ SVerticalBox::Slot()
-		.AutoHeight()
+		+ SHorizontalBox::Slot().FillWidth(1.0f)
+		.VAlign(Tile.Kind == EVerseVisualTileKind::FailableBlock
+			? VAlign_Fill : VAlign_Center)
 		[
-			SAssignNew(HeaderSocketRow, SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
+			SNew(SBorder)
+			.OnMouseButtonDown(this, &SVerseTile::HandleIdentityMouseButtonDown)
+			.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
+			.Padding(Tile.Kind == EVerseVisualTileKind::FailableBlock
+				? FMargin(0.0f) : FMargin(8.0f, 6.0f))
 			[
-				FailureContextInputWidget
+				MainCenter
 			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				BuildSocketColumn(Tile.GetValueInputs(), false)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Top)
-			.Padding(InArgs._ArrowPadding)
-			[
-				SNew(SButton)
-				.Visibility(bCollapsible ? EVisibility::Visible : EVisibility::Collapsed)
-				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-				.ContentPadding(0.0f)
-				.OnClicked(this, &SVerseTile::ToggleExpanded)
-				[
-					SNew(SImage).Image(this, &SVerseTile::GetExpansionImage)
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SNew(SBorder)
-				.OnMouseButtonDown(this, &SVerseTile::HandleHeaderMouseButtonDown)
-				.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
-				.Padding(InArgs._HeaderPadding)
-				[
-					BuildHeader(InArgs._Compact, InArgs._DiagnosticText)
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				HeaderOutputGroup
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				bHasFailureOutput
-					? SNullWidget::NullWidget
-					: FailureContextOutputWidget
-			]
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			RightDock
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			bHasFailureOutput ? SNullWidget::NullWidget : FailureContextOutputWidget
 		];
 
-	TSharedRef<SOverlay> HeaderSurface =
-		SNew(SOverlay)
+	TSharedRef<SOverlay> IdentitySurface =
+		SAssignNew(IdentityBandWidget, SOverlay)
+		.Visibility(bHasIdentityBand ? EVisibility::Visible : EVisibility::Collapsed)
 		+ SOverlay::Slot()
 		[
 			SNew(SBorder)
-			.BorderImage(this, &SVerseTile::GetHeaderBrush)
+			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Identity")))
 			.BorderBackgroundColor(InArgs._TileColor)
 		]
-		+ SOverlay::Slot()
-		[
-			SNew(SVerseTileHeaderGradient)
-			.RoundBottom_Lambda([this]()
-			{
-				return GetBodyVisibility() != EVisibility::Visible;
-			})
-		]
+		+ SOverlay::Slot()[SNew(SVerseTileIdentityGradient).RoundBottom(false)]
 		+ SOverlay::Slot()
 		[
 			SNew(SBorder)
-			.Visibility(EVisibility::HitTestInvisible)
-			.BorderImage(this, &SVerseTile::GetHeaderHighlightBrush)
-		]
-		+ SOverlay::Slot()
-		[
-			HeaderContents
-		];
-
-	TSharedRef<SOverlay> BodySurface =
-		SNew(SOverlay)
-		.Visibility(this, &SVerseTile::GetBodyVisibility)
-		+ SOverlay::Slot()
-		[
-			SNew(SBorder)
-			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Body")))
-			.BorderBackgroundColor(FLinearColor::White)
-			.Padding(0.0f)
-		]
-		+ SOverlay::Slot()
-		[
-			SNew(SVerseTileBodyGradient)
-		]
-		+ SOverlay::Slot()
-		[
-			BodyContent
-		]
-		+ SOverlay::Slot()
-		.VAlign(VAlign_Top)
-		[
-			SNew(SBox)
-			.HeightOverride(1.0f)
+			.OnMouseButtonDown(this, &SVerseTile::HandleIdentityMouseButtonDown)
+			.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
+			.Padding(InArgs._Compact
+				? FMargin(6.0f, 3.0f)
+				: FMargin(9.0f, 6.0f, 9.0f, 7.0f))
 			[
-				SNew(SImage)
-				.Image(VisualStyle.GetBrush(TEXT("Tile.Separator")))
+				BuildIdentityBand(InArgs._Compact)
 			]
 		];
+
+	TSharedRef<SOverlay> MainSurface =
+		SNew(SOverlay)
+		.Visibility(bHasMainContent ? EVisibility::Visible : EVisibility::Collapsed)
+		+ SOverlay::Slot()[SNew(SVerseTileMainGradient)]
+		+ SOverlay::Slot()[MainSocketRow];
+
+	TSharedRef<SWidget> Separator =
+		SNew(SBox).HeightOverride(1.0f)
+		[
+			SNew(SImage).Image(VisualStyle.GetBrush(TEXT("Tile.Separator")))
+		];
+	TSharedRef<SVerticalBox> Regions = SNew(SVerticalBox);
+	Regions->AddSlot().AutoHeight()[IdentitySurface];
+	Regions->AddSlot().AutoHeight()
+		[ SNew(SBox).Visibility(bHasIdentityBand && bHasMainContent
+			? EVisibility::Visible : EVisibility::Collapsed)[Separator] ];
+	Regions->AddSlot().AutoHeight()[MainSurface];
+	Regions->AddSlot().AutoHeight()
+		[ SNew(SBox).Visibility(bHasSourcePreview
+			? EVisibility::Visible : EVisibility::Collapsed)[Separator] ];
+	Regions->AddSlot().AutoHeight()
+		[ SNew(SOverlay)
+			.Visibility(bHasSourcePreview ? EVisibility::Visible : EVisibility::Collapsed)
+			+ SOverlay::Slot()
+			[ SNew(SBorder)
+				.BorderImage(VisualStyle.GetBrush(TEXT("Tile.SourcePreview")))
+				.Padding(FMargin(9.0f, 5.0f, 9.0f, 6.0f))
+				[ SNew(SBox)
+					.MaxDesiredWidth(this, &SVerseTile::GetSourcePreviewMaxWidth)
+					[SourcePreview] ] ]
+			+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Bottom)
+			[ SAssignNew(SourceExecutionOutputHost, SBox)
+				.Visibility(bHasVerticalExecutionOutputs
+					? EVisibility::Visible : EVisibility::Collapsed)
+				.VAlign(VAlign_Bottom) ] ];
+	Regions->AddSlot().AutoHeight()
+		[ SNew(SBorder)
+			.Visibility(InArgs._DiagnosticText.IsEmpty()
+				? EVisibility::Collapsed : EVisibility::Visible)
+			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Diagnostic")))
+			.Padding(FMargin(8.0f, 4.0f))
+			[ SNew(STextBlock)
+				.Text(InArgs._DiagnosticText)
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+				.ColorAndOpacity(FLinearColor(1.0f, 0.28f, 0.20f, 1.0f))
+				.AutoWrapText(true) ] ];
+	Regions->AddSlot().AutoHeight()
+		[ SAssignNew(VerticalExecutionOutputHost, SBox)
+			.Visibility(bHasVerticalExecutionOutputs && !bHasSourcePreview
+				? EVisibility::Visible : EVisibility::Collapsed)
+			.VAlign(VAlign_Bottom) ];
 
 	TSharedRef<SBorder> TileSurface =
 		SNew(SBorder)
@@ -910,26 +959,13 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.BorderBackgroundColor(this, &SVerseTile::GetOutlineColor)
 		.Padding(Tile.Kind == EVerseVisualTileKind::FailableBlock ? 2.0f : 1.0f)
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			SNew(SBorder)
+			.BorderImage(VisualStyle.GetBrush(TEXT("Tile.Surface")))
+			.Padding(0.0f)
 			[
 				SNew(SBox)
-				.MinDesiredWidth(bIfTile && bHorizontalExecutionLayout ? 220.0f : 0.0f)
-				[
-					HeaderSurface
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				BodySurface
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SBox)
-				.HeightOverride(bHasLabeledExecutionOutputs ? 32.0f : 0.0f)
+				.MinDesiredWidth(bIfTile && bHorizontalExecution ? 220.0f : 0.0f)
+				[ Regions ]
 			]
 		]
 	;
@@ -1013,11 +1049,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		[
 			SNew(SBox)
-			.HeightOverride(Tile.FindSocket({EVerseVisualSocketDirection::Output,
-				EVerseVisualSocketRole::Execution, 0}) != nullptr
-				&& !bHorizontalExecution
-				? (bCompactExecutionSpacing ? 12.0f : 41.0f)
-				: 0.0f)
+			.HeightOverride(0.0f)
 		]
 	];
 	auto AddFloatingValuePin = [this, &TileAndOutput](
@@ -1098,7 +1130,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	if (!bHorizontalExecution && Tile.FindSocket({EVerseVisualSocketDirection::Output,
 		EVerseVisualSocketRole::Execution, 0}) != nullptr)
 	{
-		const TArray<FText>& OutputLabels = InArgs._ExecutionOutputLabels;
+		const TArray<FText>& OutputLabels = Presentation.ExecutionOutputLabels;
 		int32 OutputCount = 0;
 		while (Tile.FindSocket({EVerseVisualSocketDirection::Output,
 			EVerseVisualSocketRole::Execution, OutputCount}) != nullptr)
@@ -1184,18 +1216,29 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			];
 			SocketAnchors.Add(OutputId, OutputAnchor);
 		}
-		TileAndOutput->AddSlot()
-		.HAlign(HAlign_Left)
-		.VAlign(VAlign_Bottom)
-		[
-			OutputRow
-		];
+		if (bHasSourcePreview && SourceExecutionOutputHost.IsValid())
+		{
+			SourceExecutionOutputHost->SetContent(OutputRow);
+		}
+		else if (VerticalExecutionOutputHost.IsValid())
+		{
+			VerticalExecutionOutputHost->SetContent(OutputRow);
+		}
+		else
+		{
+			TileAndOutput->AddSlot()
+			.HAlign(HAlign_Left)
+			.VAlign(VAlign_Bottom)
+			[
+				OutputRow
+			];
+		}
 	}
 	else if (bHorizontalExecution && Tile.FindSocket({
 		EVerseVisualSocketDirection::Output,
 		EVerseVisualSocketRole::Execution, 0}) != nullptr)
 	{
-		const TArray<FText>& OutputLabels = InArgs._ExecutionOutputLabels;
+		const TArray<FText>& OutputLabels = Presentation.ExecutionOutputLabels;
 		TSharedRef<SVerticalBox> OutputColumn = SNew(SVerticalBox);
 		int32 OutputIndex = 0;
 		while (Tile.FindSocket({EVerseVisualSocketDirection::Output,
@@ -1267,12 +1310,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			];
 			++OutputIndex;
 		}
-		TileAndOutput->AddSlot()
-		.HAlign(HAlign_Right)
-		.VAlign(VAlign_Top)
-		[
-			OutputColumn
-		];
+		if (HorizontalExecutionOutputHost.IsValid())
+		{
+			HorizontalExecutionOutputHost->SetContent(OutputColumn);
+		}
 	}
 
 	TileWithExecution->AddSlot()
@@ -1282,7 +1323,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	[
 		TileAndOutput
 	];
-	if (ExecutionInputPin.IsValid())
+	if (ExecutionInputPin.IsValid() && !bHorizontalExecution)
 	{
 		ChildSlot
 		[
@@ -1307,24 +1348,23 @@ void SVerseTile::Construct(const FArguments& InArgs)
 
 float SVerseTile::GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const
 {
-	// Execution input consumes 32 Slate units, while the tile surface overlaps
-	// it by 8. The outer one-unit outline precedes the header contents. Both
-	// value-pin columns are vertically centered in HeaderSocketRow.
+	// Layout queries happen before arrangement, so derive the row center from
+	// the same semantic regions and dock widgets that compose the tile.
 	const float ExecutionOffset = Tile.FindSocket({EVerseVisualSocketDirection::Input,
 		EVerseVisualSocketRole::Execution, 0}) != nullptr
 		&& FunctionGraphPresentation == EVerseFunctionGraphPresentation::VerticalExecution
 		? 24.0f : 0.0f;
-	const float OperatorLineHeight = OperatorLineWidget.IsValid()
-		? OperatorLineWidget->GetDesiredSize().Y
+	const float IdentityHeight = bHasIdentityBand && IdentityBandWidget.IsValid()
+		? IdentityBandWidget->GetDesiredSize().Y + 1.0f
 		: 0.0f;
-	const float HeaderRowHeight = HeaderSocketRow.IsValid()
-		? HeaderSocketRow->GetDesiredSize().Y
+	const float MainRowHeight = MainSocketRowWidget.IsValid()
+		? MainSocketRowWidget->GetDesiredSize().Y
 		: 0.0f;
 	const TSharedPtr<SWidget>& Column = bOutput ? ValueOutputColumn : ValueInputColumn;
 	const TArray<TSharedPtr<SWidget>>& Rows = bOutput ? ValueOutputRows : ValueInputRows;
 	if (!Column.IsValid() || !Rows.IsValidIndex(SocketIndex))
 	{
-		return ExecutionOffset + 1.0f + OperatorLineHeight + HeaderRowHeight * 0.5f;
+		return ExecutionOffset + 1.0f + IdentityHeight + MainRowHeight * 0.5f;
 	}
 
 	float RowCenter = 0.0f;
@@ -1333,17 +1373,17 @@ float SVerseTile::GetValueSocketCenterY(int32 SocketIndex, bool bOutput) const
 		RowCenter += Rows[Index]->GetDesiredSize().Y + 2.0f;
 	}
 	RowCenter += 1.0f + Rows[SocketIndex]->GetDesiredSize().Y * 0.5f;
-	float ColumnTop = (HeaderRowHeight - Column->GetDesiredSize().Y) * 0.5f;
-	if (bOutput && HeaderOutputGroupWidget.IsValid())
+	float ColumnTop = (MainRowHeight - Column->GetDesiredSize().Y) * 0.5f;
+	if (bOutput && ValueOutputDockWidget.IsValid())
 	{
-		const float GroupHeight = HeaderOutputGroupWidget->GetDesiredSize().Y;
-		ColumnTop = (HeaderRowHeight - GroupHeight) * 0.5f
+		const float GroupHeight = ValueOutputDockWidget->GetDesiredSize().Y;
+		ColumnTop = (MainRowHeight - GroupHeight) * 0.5f
 			+ GroupHeight - Column->GetDesiredSize().Y;
 	}
-	return ExecutionOffset + 1.0f + OperatorLineHeight + ColumnTop + RowCenter;
+	return ExecutionOffset + 1.0f + IdentityHeight + ColumnTop + RowCenter;
 }
 
-TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& DiagnosticText) const
+TSharedRef<SWidget> SVerseTile::BuildIdentityBand(bool bCompact) const
 {
 	const FText Kind = GetKindText();
 	const FText Name = GetNameText();
@@ -1354,41 +1394,11 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			|| Tile.DefinitionKind == VerseSyntaxKind::Constant)
 		&& !Name.IsEmpty()
 		&& !Type.IsEmpty();
-	const FText HeaderName = bInlineDefinitionType
+	const FText IdentityName = bInlineDefinitionType
 		? FText::Format(LOCTEXT("DefinitionNameAndType", "{0} : {1}"), Name, Type)
 		: Name;
-	TSharedRef<SVerticalBox> Header = SNew(SVerticalBox);
-	if (Tile.Kind == EVerseVisualTileKind::Expression
-		&& IsVerseOperatorExpression(Tile.ExpressionKind))
-	{
-		Header->AddSlot()
-		.AutoHeight()
-		[
-			SNew(SBox)
-			.MinDesiredWidth(72.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Tile.OperatorSpelling))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
-				.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
-				.Justification(ETextJustify::Center)
-				.Margin(FMargin(0.0f, 2.0f))
-			]
-		];
-		if (!DiagnosticText.IsEmpty())
-		{
-			Header->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(DiagnosticText)
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-				.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
-				.AutoWrapText(true)
-			];
-		}
-		return Header;
-	}
-	Header->AddSlot()
+	TSharedRef<SVerticalBox> Identity = SNew(SVerticalBox);
+	Identity->AddSlot()
 	.AutoHeight()
 	[
 		SNew(SHorizontalBox)
@@ -1410,8 +1420,8 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(bCompact ? 10.0f : 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Visibility(bCompact && !HeaderName.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
-			.Text(HeaderName)
+			.Visibility(bCompact && !IdentityName.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
+			.Text(IdentityName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
 			.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 		]
@@ -1425,23 +1435,19 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
 		]
 	];
-	if (!bCompact && !HeaderName.IsEmpty())
+	if (!bCompact && !IdentityName.IsEmpty())
 	{
-		Header->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
+		Identity->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Text(HeaderName)
+			.Text(IdentityName)
 			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 			.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
 		];
 	}
 	if (!Lines.IsEmpty())
 	{
-		const float LineLeftPadding = bShowBody ? -19.0f : 0.0f;
-		const float LineTopPadding =
-			Tile.Kind == EVerseVisualTileKind::FailableBlock ? 10.0f : 6.0f;
-		Header->AddSlot().AutoHeight().Padding(
-			LineLeftPadding, LineTopPadding, 0.0f, 0.0f)
+		Identity->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
 			.Text(Lines)
@@ -1452,25 +1458,86 @@ TSharedRef<SWidget> SVerseTile::BuildHeader(bool bCompact, const FText& Diagnost
 	if (!bCompact && !bInlineDefinitionType && !Type.IsEmpty()
 		&& Tile.Kind == EVerseVisualTileKind::Definition)
 	{
-		Header->AddSlot().AutoHeight()
+		Identity->AddSlot().AutoHeight()
 		[
 			SNew(STextBlock)
 			.Text(FText::Format(LOCTEXT("DefinitionType", "Type: {0}"), Type))
 			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
 		];
 	}
-	if (!DiagnosticText.IsEmpty())
+	return Identity;
+}
+
+TSharedRef<SWidget> SVerseTile::BuildMainIdentity(bool bCompact) const
+{
+	const FText Lines = GetLineText();
+	const bool bOperator = Tile.Kind == EVerseVisualTileKind::Expression
+		&& IsVerseOperatorExpression(Tile.ExpressionKind);
+	const bool bIdentifier = Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Identifier;
+	const bool bLiteral = Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Literal;
+	TSharedRef<SVerticalBox> Main = SNew(SVerticalBox);
+	Main->AddSlot().AutoHeight()
+	[
+		SNew(STextBlock)
+		.Visibility(!Lines.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
+		.Text(Lines)
+		.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+		.ColorAndOpacity(VerseVisualEditorStyle::GetMetadataTextColor())
+	];
+	if (bOperator)
 	{
-		Header->AddSlot().AutoHeight().Padding(-19.0f, 4.0f, 0.0f, 0.0f)
+		Main->AddSlot().AutoHeight()
 		[
-			SNew(STextBlock)
-			.Text(DiagnosticText)
-			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-			.ColorAndOpacity(FLinearColor(1.0f, 0.20f, 0.12f, 1.0f))
-			.AutoWrapText(true)
+			SNew(SBox).MinDesiredWidth(72.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Tile.OperatorSpelling))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+				.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
+				.Justification(ETextJustify::Center)
+				.Margin(FMargin(0.0f, 2.0f))
+			]
 		];
 	}
-	return Header;
+	else if (bIdentifier)
+	{
+		Main->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(GetNameText())
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetPrimaryTextColor())
+		];
+	}
+	else if (bLiteral)
+	{
+		Main->AddSlot().AutoHeight()
+		[
+			SNew(STextBlock)
+			.Text(GetKindText())
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+			.ColorAndOpacity(VerseVisualEditorStyle::GetSecondaryTextColor())
+		];
+	}
+	return Main;
+}
+
+FOptionalSize SVerseTile::GetSourcePreviewMaxWidth() const
+{
+	constexpr float MinimumCoreWidth = 160.0f;
+	constexpr float MaximumPreviewGrowth = 100.0f;
+	constexpr float PreviewHorizontalPadding = 18.0f;
+	const float IdentityWidth = IdentityBandWidget.IsValid()
+		? IdentityBandWidget->GetDesiredSize().X : 0.0f;
+	const float MainWidth = MainSocketRowWidget.IsValid()
+		? MainSocketRowWidget->GetDesiredSize().X : 0.0f;
+	const float MeasuredCoreWidth = FMath::Max(IdentityWidth, MainWidth);
+	const float CoreWidth = MeasuredCoreWidth > 0.0f
+		? MeasuredCoreWidth : MinimumCoreWidth;
+	return FOptionalSize(
+		CoreWidth + MaximumPreviewGrowth - PreviewHorizontalPadding);
 }
 
 TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
@@ -1497,11 +1564,11 @@ TSharedRef<SWidget> SVerseTile::BuildSocketColumn(
 			: Socket.TypeRange.IsSet()
 			? Decode(Socket.TypeRange).ToString()
 			: Socket.IntrinsicTypeName.ToString();
-		const bool bHeaderAlreadyShowsOutputName = bOutput
+		const bool bIdentityAlreadyShowsOutputName = bOutput
 			&& (Tile.Kind == EVerseVisualTileKind::Definition
 				|| (Tile.Kind == EVerseVisualTileKind::Expression
 					&& Tile.ExpressionKind == EVerseExpressionKind::Identifier));
-		const FText Name = bHeaderAlreadyShowsOutputName
+		const FText Name = bIdentityAlreadyShowsOutputName
 			|| (Tile.Kind == EVerseVisualTileKind::Expression
 				&& Tile.OperatorRange.IsSet())
 			? FText::GetEmpty()
@@ -1941,7 +2008,7 @@ FReply SVerseTile::HandleTileMouseButtonDown(
 	return Reply.SetUserFocus(SharedThis(this), EFocusCause::Mouse);
 }
 
-FReply SVerseTile::HandleHeaderMouseButtonDown(
+FReply SVerseTile::HandleIdentityMouseButtonDown(
 	const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
@@ -1959,45 +2026,6 @@ FReply SVerseTile::HandleHeaderMouseButtonDown(
 		Reply.DetectDrag(SharedThis(this), EKeys::LeftMouseButton);
 	}
 	return Reply.SetUserFocus(SharedThis(this), EFocusCause::Mouse);
-}
-
-FReply SVerseTile::ToggleExpanded()
-{
-	if (!bCollapsible)
-	{
-		return FReply::Handled();
-	}
-	bExpanded = !bExpanded;
-	Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
-	return FReply::Handled();
-}
-
-const FSlateBrush* SVerseTile::GetExpansionImage() const
-{
-	return FCoreStyle::Get().GetBrush(bExpanded ? "TreeArrow_Expanded" : "TreeArrow_Collapsed");
-}
-
-const FSlateBrush* SVerseTile::GetHeaderBrush() const
-{
-	const ISlateStyle& Style = VerseVisualEditorStyle::Get();
-	return bShowBody && (!bCollapsible || bExpanded)
-		? Style.GetBrush(TEXT("Tile.Header.Expanded"))
-		: Style.GetBrush(TEXT("Tile.Header.Collapsed"));
-}
-
-const FSlateBrush* SVerseTile::GetHeaderHighlightBrush() const
-{
-	const ISlateStyle& Style = VerseVisualEditorStyle::Get();
-	return bShowBody && (!bCollapsible || bExpanded)
-		? Style.GetBrush(TEXT("Tile.Header.Highlight.Expanded"))
-		: Style.GetBrush(TEXT("Tile.Header.Highlight.Collapsed"));
-}
-
-EVisibility SVerseTile::GetBodyVisibility() const
-{
-	return bShowBody && (!bCollapsible || bExpanded)
-		? EVisibility::Visible
-		: EVisibility::Collapsed;
 }
 
 FSlateColor SVerseTile::GetOutlineColor() const

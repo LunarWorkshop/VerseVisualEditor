@@ -13,6 +13,7 @@
 #include "Styling/SlateStyleRegistry.h"
 #include "Widgets/SCanvas.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -112,10 +113,10 @@ bool FVerseGraphVisualStyleTest::RunTest(const FString& Parameters)
 	for (const FName BrushName : {
 		FName(TEXT("Tile.Shadow")),
 		FName(TEXT("Tile.Outline")),
-		FName(TEXT("Tile.Header.Expanded")),
-		FName(TEXT("Tile.Header.Collapsed")),
-		FName(TEXT("Tile.Header.Highlight.Expanded")),
-		FName(TEXT("Tile.Body")),
+		FName(TEXT("Tile.Surface")),
+		FName(TEXT("Tile.Identity")),
+		FName(TEXT("Tile.SourcePreview")),
+		FName(TEXT("Tile.Diagnostic")),
 		FName(TEXT("Tile.BodyOverlay")),
 		FName(TEXT("Tile.Separator"))})
 	{
@@ -123,7 +124,7 @@ bool FVerseGraphVisualStyleTest::RunTest(const FString& Parameters)
 			Registered->GetBrush(BrushName) != nullptr);
 	}
 	TestTrue(TEXT("Verse chrome does not replace AppStyle node body"),
-		Registered->GetBrush(TEXT("Tile.Body"))
+		Registered->GetBrush(TEXT("Tile.Surface"))
 			!= FAppStyle::GetBrush(TEXT("Graph.Node.Body")));
 
 	const UGraphEditorSettings* BlueprintSettings = GetDefault<UGraphEditorSettings>();
@@ -348,13 +349,13 @@ bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
 		GetVerseExecutionPinAnchorCoordinate(true, false),
 		FVector2D(0.5f, 0.75f));
 	TestEqual(
-		TEXT("Full output home plate uses its painted center"),
+		TEXT("Full output home plate intersects the tile bottom edge"),
 		GetVerseExecutionPinAnchorCoordinate(false, false),
-		FVector2D(0.5f, 1.0f / 6.0f));
+		FVector2D(0.5f, 1.0f));
 	TestEqual(
-		TEXT("Compact output home plate uses its painted center"),
+		TEXT("Compact output uses the same tile-edge dock"),
 		GetVerseExecutionPinAnchorCoordinate(false, true),
-		FVector2D(0.5f, 0.4f));
+		FVector2D(0.5f, 1.0f));
 	for (const EVerseFunctionGraphPresentation Presentation : {
 		EVerseFunctionGraphPresentation::HorizontalExecution,
 		EVerseFunctionGraphPresentation::Tracks})
@@ -400,6 +401,111 @@ bool FVerseExecutionPinAnchorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Lane home-plate previews ease horizontally"),
 		GetVerseExecutionPreviewAxis(EVerseFunctionGraphPresentation::Tracks),
 		EVerseVisualConnectionAxis::Horizontal);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseTileSemanticCompositionTest,
+	"VerseVisualEditor.Graph.Tile.SemanticComposition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseTileSemanticCompositionTest::RunTest(const FString& Parameters)
+{
+	auto MakeWidget = [](FVerseVisualTile Tile, bool bMain = false,
+		bool bSource = false,
+		EVerseFunctionGraphPresentation Presentation =
+			EVerseFunctionGraphPresentation::VerticalExecution)
+	{
+		Tile = FinalizeTestTile(MoveTemp(Tile));
+		TSharedRef<SVerseTile> Widget =
+			SNew(SVerseTile)
+			.Tile(Tile)
+			.TileColor(FLinearColor::Black)
+			.HasMainContent(bMain)
+			.HasSourcePreview(bSource)
+			.FunctionGraphPresentation(Presentation)
+			.MainContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(24.0f)]
+			.SourcePreview()[SNew(STextBlock).Text(FText::FromString(TEXT("preview")))];
+		Widget->SlatePrepass();
+		return Widget;
+	};
+
+	TArray<FVerseVisualTile> IdentityTiles;
+	IdentityTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::Definition;
+	IdentityTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::Comment;
+	FVerseVisualTile& Call = IdentityTiles.AddDefaulted_GetRef();
+	Call.Kind = EVerseVisualTileKind::Expression;
+	Call.ExpressionKind = EVerseExpressionKind::Call;
+	FVerseVisualTile& Control = IdentityTiles.AddDefaulted_GetRef();
+	Control.Kind = EVerseVisualTileKind::Expression;
+	Control.ExpressionKind = EVerseExpressionKind::Control;
+	Control.ControlKind = EVerseControlKind::If;
+	IdentityTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::FailableBlock;
+	IdentityTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::FunctionEntry;
+	IdentityTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::FunctionReturn;
+	for (FVerseVisualTile& Tile : IdentityTiles)
+	{
+		TestTrue(TEXT("Named and structural tiles have an identity band"),
+			MakeWidget(MoveTemp(Tile))->HasIdentityBandForTesting());
+	}
+
+	TArray<FVerseVisualTile> HeaderlessTiles;
+	FVerseVisualTile& Identifier = HeaderlessTiles.AddDefaulted_GetRef();
+	Identifier.Kind = EVerseVisualTileKind::Expression;
+	Identifier.ExpressionKind = EVerseExpressionKind::Identifier;
+	FVerseVisualTile& Literal = HeaderlessTiles.AddDefaulted_GetRef();
+	Literal.Kind = EVerseVisualTileKind::Expression;
+	Literal.ExpressionKind = EVerseExpressionKind::Literal;
+	Literal.LiteralKind = EVerseLiteralKind::Integer;
+	FVerseVisualTile& Operator = HeaderlessTiles.AddDefaulted_GetRef();
+	Operator.Kind = EVerseVisualTileKind::Expression;
+	Operator.ExpressionKind = EVerseExpressionKind::BinaryOperator;
+	Operator.OperatorSpelling = TEXT("+");
+	HeaderlessTiles.AddDefaulted_GetRef().Kind = EVerseVisualTileKind::Unknown;
+	for (FVerseVisualTile& Tile : HeaderlessTiles)
+	{
+		TestFalse(TEXT("Identifiers, literals, operators, and unknown source have no identity band"),
+			MakeWidget(MoveTemp(Tile))->HasIdentityBandForTesting());
+	}
+
+	FVerseVisualTile PreviewCall;
+	PreviewCall.Kind = EVerseVisualTileKind::Expression;
+	PreviewCall.ExpressionKind = EVerseExpressionKind::Call;
+	const TSharedRef<SVerseTile> PreviewWidget = MakeWidget(
+		MoveTemp(PreviewCall), false, true);
+	TestTrue(TEXT("Source preview is a distinct declared region"),
+		PreviewWidget->HasSourcePreviewForTesting());
+	FVerseVisualTile CoreCall;
+	CoreCall.Kind = EVerseVisualTileKind::Expression;
+	CoreCall.ExpressionKind = EVerseExpressionKind::Call;
+	const TSharedRef<SVerseTile> CoreCallWidget = MakeWidget(CoreCall);
+	CoreCall = FinalizeTestTile(MoveTemp(CoreCall));
+	const TSharedRef<SVerseTile> LongPreviewWidget =
+		SNew(SVerseTile)
+		.Tile(CoreCall)
+		.TileColor(FLinearColor::Black)
+		.HasSourcePreview(true)
+		.SourcePreview()
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(FString::ChrN(256, TEXT('W'))))
+			.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+		];
+	LongPreviewWidget->SlatePrepass();
+	TestTrue(TEXT("Source preview grows a tile by no more than 100 Slate units"),
+		LongPreviewWidget->GetDesiredSize().X
+			<= CoreCallWidget->GetDesiredSize().X + 101.0f);
+
+	TestEqual(TEXT("Vertical output homeplates dock to the outer bottom edge"),
+		GetVerseExecutionPinAnchorCoordinate(false, false), FVector2D(0.5f, 1.0f));
+	TestEqual(TEXT("Labeled and unlabeled outputs use the same pin size"),
+		GetVerseExecutionPinDesiredSize(false, false),
+		GetVerseExecutionPinDesiredSize(false, true));
+	TestEqual(TEXT("Horizontal and Tracks use identical homeplate geometry"),
+		GetVerseExecutionPinDesiredSize(false, false,
+			EVerseFunctionGraphPresentation::HorizontalExecution),
+		GetVerseExecutionPinDesiredSize(false, false,
+			EVerseFunctionGraphPresentation::Tracks));
 	return true;
 }
 
@@ -535,8 +641,8 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		SNew(SVerseTile)
 		.Tile(EmptyBlock)
 		.TileColor(FLinearColor::Black)
-		.ShowBody(true)
-		.BodyContent()
+		.HasMainContent(true)
+		.MainContent()
 		[
 			SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)
 		];
@@ -557,9 +663,9 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		SNew(SVerseTile)
 		.Tile(PopulatedBlock)
 		.TileColor(FLinearColor::Black)
-		.ShowBody(true)
+		.HasMainContent(true)
 		.IsSelected(true)
-		.BodyContent()
+		.MainContent()
 		[
 			SNew(SBox).WidthOverride(260.0f).HeightOverride(180.0f)
 		];
@@ -587,14 +693,14 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		SNew(SVerseTile)
 		.Tile(OneBindingBlock)
 		.TileColor(FLinearColor::Black)
-		.ShowBody(true)
-		.BodyContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
+		.HasMainContent(true)
+		.MainContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
 	const TSharedRef<SVerseTile> TwoBindingWidget =
 		SNew(SVerseTile)
 		.Tile(TwoBindingBlock)
 		.TileColor(FLinearColor::Black)
-		.ShowBody(true)
-		.BodyContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
+		.HasMainContent(true)
+		.MainContent()[SNew(SBox).WidthOverride(80.0f).HeightOverride(40.0f)];
 	OneBindingWidget->SlatePrepass();
 	TwoBindingWidget->SlatePrepass();
 	TestTrue(TEXT("Failure and binding pins share one right-edge group"),
@@ -604,8 +710,8 @@ bool FVerseFailableBlockPaintGeometryTest::RunTest(const FString& Parameters)
 		&& OneBindingWidget->GetSocketAnchor(OneBindingBlock.GetValueOutputs()[0].Id).IsValid()
 		&& TwoBindingBlock.GetValueOutputs().Num() >= 2
 		&& TwoBindingWidget->GetSocketAnchor(TwoBindingBlock.GetValueOutputs()[1].Id).IsValid());
-	TestTrue(TEXT("The Condition header grows to contain additional bindings"),
-		TwoBindingWidget->GetDesiredSize().Y > OneBindingWidget->GetDesiredSize().Y);
+	TestTrue(TEXT("Additional binding rows never shrink the Condition tile"),
+		TwoBindingWidget->GetDesiredSize().Y >= OneBindingWidget->GetDesiredSize().Y);
 	return true;
 }
 
@@ -626,8 +732,8 @@ bool FVerseFunctionAutomaticLayoutTest::RunTest(const FString& Parameters)
 			SNew(SVerseTile)
 			.Tile(Model)
 			.TileColor(FLinearColor::Black)
-			.ShowBody(true)
-			.BodyContent()
+			.HasMainContent(true)
+			.MainContent()
 			[
 				SNew(SBox).WidthOverride(BodyWidth).HeightOverride(BodyHeight)
 			];

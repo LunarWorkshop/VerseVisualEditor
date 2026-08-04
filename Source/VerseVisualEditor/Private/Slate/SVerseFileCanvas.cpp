@@ -300,6 +300,8 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 	const bool bDefinition = Tile.Kind == EVerseVisualTileKind::Definition;
 	const FLinearColor TileColor = VerseVisualEditorStyle::GetTileTitleColor(Tile);
 	const bool bHasDiagnostic = HasDiagnosticForTile(TileIndex);
+	const bool bSourceOnly = Tile.Kind == EVerseVisualTileKind::Unknown
+		|| Tile.Kind == EVerseVisualTileKind::Comment;
 	const FVerseByteRange ContentRange = Tile.Kind == EVerseVisualTileKind::Unknown
 		? Tile.Range
 		: Tile.BodyRange;
@@ -308,6 +310,10 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 		.Text(Decode(ContentRange))
 		.IsReadOnly(true)
 		.AutoWrapText(true);
+	const TSharedRef<SWidget> SourcePreview = SNew(STextBlock)
+		.Text(Decode(ContentRange))
+		.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+		.OverflowPolicy(ETextOverflowPolicy::Ellipsis);
 	if (bDefinition && Tile.DefinitionKind == VerseSyntaxKind::Module && !Tile.Children.IsEmpty())
 	{
 		BodyContent = BuildTileSequence(Tile.Children, TileIndex, false);
@@ -334,8 +340,8 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.UnselectedOutlineColor(bHasDiagnostic
 				? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
 				: FLinearColor::Black)
-			.HeaderPadding(FMargin(0.0f, 6.0f, 8.0f, 6.0f))
-			.ArrowPadding(FMargin(8.0f, 14.0f, 3.0f, 0.0f))
+			.HasMainContent(!bSourceOnly)
+			.HasSourcePreview(bSourceOnly)
 			.IsSelected_Lambda([this, Range = Tile.Range]()
 			{
 				return IsTileSelected(Range);
@@ -344,14 +350,18 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildStructuralTile(const FVerseVisualTile
 			.OnOpened(Tile.DefinitionKind == VerseSyntaxKind::Function
 				? FOnClicked::CreateSP(this, &SVerseFileCanvas::OpenFunctionTile, Tile)
 				: FOnClicked())
-			.BodyContent()
+			.MainContent()
 			[
-				SNew(SBorder)
+				bSourceOnly ? SNullWidget::NullWidget : SNew(SBorder)
 				.BorderImage(nullptr)
 				.Padding(10.0f)
 				[
 					BodyContent
 				]
+			]
+			.SourcePreview()
+			[
+				bSourceOnly ? SourcePreview : SNullWidget::NullWidget
 			]
 		];
 }
@@ -462,23 +472,23 @@ TSharedRef<SWidget> SVerseFileCanvas::BuildCompactTile(const FVerseVisualTile& T
 		.UnselectedOutlineColor(bHasDiagnostic
 			? FLinearColor(1.0f, 0.08f, 0.04f, 1.0f)
 			: FLinearColor::Black)
-		.HeaderPadding(FMargin(0.0f, 2.0f, 4.0f, 2.0f))
-		.ArrowPadding(FMargin(4.0f, 3.0f, 3.0f, 0.0f))
+		.HasSourcePreview(true)
 		.IsSelected_Lambda([this, Range = Tile.Range]()
 		{
 			return IsTileSelected(Range);
 		})
 		.OnSelected(FOnClicked::CreateSP(this, &SVerseFileCanvas::SelectTileFromClick, Tile))
 		.OnOpened(FOnClicked())
-		.BodyContent()
+		.SourcePreview()
 		[
 			SNew(SBorder)
 			.BorderImage(nullptr)
 			.Padding(8.0f)
 			[
-				SNew(SMultiLineEditableText)
+				SNew(STextBlock)
 				.Text(Decode(Tile.Range))
-				.IsReadOnly(true)
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 			]
 		]
 		];

@@ -41,21 +41,15 @@ namespace VerseVisualEditorStyle
 			FLinearColor::White, OuterRadius));
 		Style->Set(TEXT("Tile.Outline"), new FSlateRoundedBoxBrush(
 			FLinearColor::White, OuterRadius));
-		Style->Set(TEXT("Tile.Header.Expanded"), new FSlateRoundedBoxBrush(
+		Style->Set(TEXT("Tile.Surface"), new FSlateRoundedBoxBrush(
+			FLinearColor(0.030f, 0.034f, 0.041f, 0.96f), InnerRadius));
+		Style->Set(TEXT("Tile.Identity"), new FSlateRoundedBoxBrush(
 			FLinearColor::White,
 			FVector4(InnerRadius, InnerRadius, 0.0f, 0.0f)));
-		Style->Set(TEXT("Tile.Header.Collapsed"), new FSlateRoundedBoxBrush(
-			FLinearColor::White, InnerRadius));
-		Style->Set(TEXT("Tile.Header.Highlight.Expanded"), new FSlateRoundedBoxBrush(
-			FLinearColor::Transparent,
-			FVector4(InnerRadius, InnerRadius, 0.0f, 0.0f),
-			FLinearColor(1.0f, 1.0f, 1.0f, 0.10f), 1.0f));
-		Style->Set(TEXT("Tile.Header.Highlight.Collapsed"), new FSlateRoundedBoxBrush(
-			FLinearColor::Transparent, InnerRadius,
-			FLinearColor(1.0f, 1.0f, 1.0f, 0.10f), 1.0f));
-		Style->Set(TEXT("Tile.Body"), new FSlateRoundedBoxBrush(
-			FLinearColor(0.030f, 0.034f, 0.041f, 0.94f),
-			FVector4(0.0f, 0.0f, InnerRadius, InnerRadius)));
+		Style->Set(TEXT("Tile.SourcePreview"), new FSlateColorBrush(
+			FLinearColor(0.018f, 0.021f, 0.027f, 0.82f)));
+		Style->Set(TEXT("Tile.Diagnostic"), new FSlateColorBrush(
+			FLinearColor(0.16f, 0.025f, 0.018f, 0.72f)));
 		Style->Set(TEXT("Tile.BodyOverlay"), new FSlateRoundedBoxBrush(
 			FLinearColor::White,
 			FVector4(0.0f, 0.0f, InnerRadius, InnerRadius)));
