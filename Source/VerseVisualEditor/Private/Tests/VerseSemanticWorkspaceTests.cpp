@@ -515,6 +515,14 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			(*NotEqualAction)->DisplayName.ToString(), FString(TEXT("Not Equal (<>)")));
 		TestEqual(TEXT("Not Equal uses the operators category"),
 			(*NotEqualAction)->Category.ToString(), FString(TEXT("Utilities|Operators")));
+		TestTrue(TEXT("Not Equal exposes bang-equals as hidden search metadata"),
+			(*NotEqualAction)->SearchKeywords.ToString().Contains(TEXT("!=")));
+		const FString SearchTerms =
+			BuildVerseExpressionActionSearchKeywords(**NotEqualAction).ToString();
+		TestTrue(TEXT("Action filtering includes canonical Verse spelling"),
+			SearchTerms.Contains(TEXT("<>")));
+		TestTrue(TEXT("Action filtering includes alternate hidden spelling"),
+			SearchTerms.Contains(TEXT("!=")));
 		FString NotEqualSource;
 		TestTrue(TEXT("Not Equal materializes source with a concrete RHS default"),
 			BuildVerseExpressionActionSource(

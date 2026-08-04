@@ -217,7 +217,7 @@ namespace
 				InAction->DisplayName,
 				FText::GetEmpty(),
 				0,
-				FText::FromString(InAction->SourceSpelling))
+				BuildVerseExpressionActionSearchKeywords(*InAction))
 			, ExpressionAction(MoveTemp(InAction))
 		{
 		}

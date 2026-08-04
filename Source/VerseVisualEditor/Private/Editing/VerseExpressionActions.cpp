@@ -234,6 +234,9 @@ namespace
 		Action->DisplayName = Presentation.DisplayName;
 		Action->Category = Presentation.Category;
 		Action->ModuleCategory = GetModuleCategory(*Function);
+		Action->SearchKeywords = IntrinsicPresentation != nullptr
+			? IntrinsicPresentation->SearchKeywords
+			: FText::GetEmpty();
 		Action->ResultTypeName = PresentationKey.ResultType;
 		Action->bUsesFailureCallSyntax =
 			Function->_Signature.GetEffects()[uLang::EEffect::decides];
@@ -492,6 +495,21 @@ namespace
 		}
 		return Candidates;
 	}
+}
+
+FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Action)
+{
+	FString Keywords = Action.SourceSpelling;
+	const FString Aliases = Action.SearchKeywords.ToString().TrimStartAndEnd();
+	if (!Aliases.IsEmpty())
+	{
+		if (!Keywords.IsEmpty())
+		{
+			Keywords.AppendChar(TEXT(' '));
+		}
+		Keywords.Append(Aliases);
+	}
+	return FText::FromString(MoveTemp(Keywords));
 }
 
 TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName)

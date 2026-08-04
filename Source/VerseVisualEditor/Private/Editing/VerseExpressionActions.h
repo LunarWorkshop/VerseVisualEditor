@@ -62,6 +62,8 @@ struct FVerseExpressionAction
 	FText DisplayName;
 	FText Category;
 	FText ModuleCategory;
+	/** Additional filter terms which are never displayed in the action row. */
+	FText SearchKeywords;
 	/** Result/value type used to tint this action's Blueprint-style icon. */
 	FString ResultTypeName;
 	FVerseTextRange IdentifierNameRange;
@@ -79,6 +81,9 @@ struct FVerseExpressionAction
 	TArray<bool> NamedInputs;
 	TOptional<FVerseOperatorRetargetRecipe> OperatorRetarget;
 };
+
+/** Combines canonical source spelling with editor-authored hidden search aliases. */
+FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Action);
 
 /** Returns the canonical source-safe initializer for an editor-supported primitive type. */
 TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName);

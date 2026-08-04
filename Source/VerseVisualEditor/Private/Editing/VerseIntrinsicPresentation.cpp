@@ -33,7 +33,8 @@ namespace
 		const TCHAR* UntypedDefaultSource = nullptr,
 		bool bOmitResultInSignaturePicker = false,
 		bool bGroupOverloadsInActionMenu = false,
-		const TCHAR* PreferredUntypedOperandType = nullptr)
+		const TCHAR* PreferredUntypedOperandType = nullptr,
+		FText SearchKeywords = FText::GetEmpty())
 	{
 		FVerseIntrinsicPresentationDescriptor Result;
 		Result.Key.Form = Form;
@@ -47,6 +48,7 @@ namespace
 		Result.BlueprintFunctionName = BlueprintFunctionName;
 		Result.FallbackDisplayName = MoveTemp(FallbackDisplayName);
 		Result.FallbackCategory = MoveTemp(FallbackCategory);
+		Result.SearchKeywords = MoveTemp(SearchKeywords);
 		Result.DefaultSourceTypeParameterIndices = DefaultSourceTypeParameterIndices;
 		Result.bSymmetricOperands = bSymmetricOperands;
 		Result.bOmitResultInSignaturePicker = bOmitResultInSignaturePicker;
@@ -109,10 +111,9 @@ namespace
 			// Equality's compiler signature retains one operand as abstract
 			// `comparable` after matching a concrete dragged socket. Derive that
 			// operand's placeholder from its counterpart so both actions remain
-			// source-safe. The menu description and source-spelling keyword make
-			// Not Equal searchable by both `!=` and Verse's canonical `<>`.
+			// source-safe. Alternate spellings belong in search-only descriptor data.
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("EqualName", "Equal (==)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true, true, TEXT("int")),
-			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (<>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true, true, TEXT("int")),
+			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<>"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("NotEqualName", "Not Equal (<>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {1, 0}, true, TEXT("0"), true, true, TEXT("int"), LOCTEXT("NotEqualSearchKeywords", "!=")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessName", "Less (<)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT("<="), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("LessEqualName", "Less or Equal (<=)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),
 			MakeDescriptor(EVerseIntrinsicCallableForm::InfixOperator, TEXT(">"), {AnyType, AnyType}, AnyType, EVerseIntrinsicBlueprintLibrary::None, NAME_None, LOCTEXT("GreaterName", "Greater (>)"), LOCTEXT("OperatorsCategory", "Utilities|Operators"), {}, false, nullptr, false, true, TEXT("int")),

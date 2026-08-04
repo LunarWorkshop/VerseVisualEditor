@@ -57,6 +57,8 @@ struct FVerseIntrinsicPresentationDescriptor
 	FName BlueprintFunctionName;
 	FText FallbackDisplayName;
 	FText FallbackCategory;
+	/** Search-only aliases which do not alter the title, tooltip, or source spelling. */
+	FText SearchKeywords;
 };
 
 struct FVerseResolvedExpressionPresentation
