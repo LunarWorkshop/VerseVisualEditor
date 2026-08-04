@@ -595,7 +595,7 @@ bool FVerseControlBranchDeletionTest::RunTest(const FString& Parameters)
 		"        Input\n"
 		"        0\n"
 		"    else:\n"
-		"        -1\n"));
+		"        1\n"));
 	if (!Document.IsValid())
 	{
 		return false;
@@ -678,6 +678,100 @@ bool FVerseControlBranchDeletionTest::RunTest(const FString& Parameters)
 			: nullptr;
 	TestTrue(TEXT("The true branch reparses with only its preceding expression"),
 		RebuiltBody != nullptr && RebuiltBody->OperandCount == 1);
+	const FVerseVisualTile* RemainingBranchExpression = RebuiltIf != nullptr
+		? RebuiltIf->Children.FindByPredicate(
+			[&Session](const FVerseVisualTile& Tile)
+			{
+				return Tile.bStatementLevel
+					&& Session.GetParseSnapshot().GetDocument()
+						->DecodeOriginalRange(Tile.Range) == TEXT("Input");
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("The remaining true-branch expression is represented"),
+		RemainingBranchExpression)
+		|| !TestTrue(TEXT("The remaining expression retains its colon clause"),
+			RemainingBranchExpression->EditableClause.IsSet()
+				&& RemainingBranchExpression->EditableClause->Syntax.Delimiter
+					== EVerseClauseDelimiter::Colon))
+	{
+		return false;
+	}
+	FVerseTextRange ProvisionalRange;
+	Error = FText::GetEmpty();
+	const bool bDeletedFinalTrueExpression = FVerseClauseEditing::DeleteExpression(
+		Session,
+		RemainingBranchExpression->EditableClause.GetValue(),
+		RemainingBranchExpression->ClauseItemIndex,
+		Error,
+		&ProvisionalRange);
+	TestTrue(
+		*FString::Printf(TEXT("Deleting the final colon-body expression succeeds: %s"),
+			*Error.ToString()),
+		bDeletedFinalTrueExpression);
+	if (!bDeletedFinalTrueExpression)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Deleting the final colon-body expression installs a provisional block"),
+		ProvisionalRange.IsSet()
+			&& Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(
+				ProvisionalRange) == TEXT("block {}"));
+	const FString PlaceholderSource(UTF8_TO_TCHAR(*Session.GetCurrentUtf8()));
+	TestTrue(TEXT("The provisional block preserves a non-empty true body"),
+		PlaceholderSource.Contains(TEXT("        block {}\n    else:")));
+	TestFalse(TEXT("The replacement leaves no whitespace-only true-body line"),
+		PlaceholderSource.Contains(TEXT("        \n    else:")));
+	const FVerseVisualTile* PlaceholderFunction = Session.GetTiles().FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.DefinitionKind == VerseSyntaxKind::Function;
+		});
+	const TArray<FVerseVisualTile> PlaceholderGraph = PlaceholderFunction != nullptr
+		? FVerseVisualTileBuilder::BuildFunctionGraph(
+			*PlaceholderFunction, Session.GetParseSnapshot())
+		: TArray<FVerseVisualTile>();
+	const FVerseVisualTile* PlaceholderIf = PlaceholderGraph.FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::If;
+		});
+	const FVerseVisualTile* ElseExpression = PlaceholderIf != nullptr
+		? PlaceholderIf->Children.FindByPredicate(
+			[&Session](const FVerseVisualTile& Tile)
+			{
+				return Tile.bStatementLevel
+					&& Session.GetParseSnapshot().GetDocument()
+						->DecodeOriginalRange(Tile.Range) == TEXT("1");
+			})
+		: nullptr;
+	if (!TestNotNull(TEXT("The sole else-branch expression is represented"), ElseExpression)
+		|| !TestTrue(TEXT("The else expression retains its colon clause"),
+			ElseExpression->EditableClause.IsSet()
+				&& ElseExpression->EditableClause->Syntax.Delimiter
+					== EVerseClauseDelimiter::Colon))
+	{
+		return false;
+	}
+	FVerseTextRange ElseProvisionalRange;
+	Error = FText::GetEmpty();
+	const bool bDeletedFinalElseExpression = FVerseClauseEditing::DeleteExpression(
+		Session,
+		ElseExpression->EditableClause.GetValue(),
+		ElseExpression->ClauseItemIndex,
+		Error,
+		&ElseProvisionalRange);
+	TestTrue(
+		*FString::Printf(TEXT("Deleting the final else expression succeeds: %s"),
+			*Error.ToString()),
+		bDeletedFinalElseExpression);
+	if (!bDeletedFinalElseExpression)
+	{
+		return false;
+	}
+	TestTrue(TEXT("Deleting the final else expression installs a provisional block"),
+		ElseProvisionalRange.IsSet()
+			&& Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(
+				ElseProvisionalRange) == TEXT("block {}"));
 	return true;
 }
 

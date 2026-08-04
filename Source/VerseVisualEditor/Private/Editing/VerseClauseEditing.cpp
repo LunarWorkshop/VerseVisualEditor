@@ -723,9 +723,9 @@ bool FVerseClauseEditing::DeleteExpression(
 	{
 		*OutProvisionalReplacementRange = {};
 	}
-	if (Clause.bRequiresFailablePlaceholder && Clause.Items.Num() == 1)
+	auto ReplaceFinalItemWithProvisional =
+		[&](FStringView Placeholder)
 	{
-		static constexpr FStringView Placeholder = TEXTVIEW("true?");
 		const FVerseByteRange ReplacedRange = Clause.Items[0].Expression.Range;
 		const FVerseDocumentEdit Edit = MakeEdit(
 			Session.GetRevision(), ReplacedRange, Placeholder);
@@ -742,6 +742,21 @@ bool FVerseClauseEditing::DeleteExpression(
 				FVerseByteRange(ReplacedRange.BeginByte, PlaceholderUtf8.Length()));
 		}
 		return true;
+	};
+	if (Clause.Items.Num() == 1)
+	{
+		if (Clause.bRequiresFailablePlaceholder)
+		{
+			return ReplaceFinalItemWithProvisional(TEXTVIEW("true?"));
+		}
+		if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon)
+		{
+			// A colon-delimited ordered clause cannot be empty. Keep the source
+			// syntactically valid after deleting its final visible expression; the
+			// editor marks this no-op block provisional so the next insertion can
+			// replace it rather than append after it.
+			return ReplaceFinalItemWithProvisional(TEXTVIEW("block {}"));
+		}
 	}
 	TArray<FVerseDocumentEdit> Edits;
 	FVerseTextRange DeletedRange = Clause.Items[ItemIndex].Expression.Range;
