@@ -476,6 +476,7 @@ namespace
 				Tile.SemanticType = GetDataValueType(*Tile.SemanticDataDefinition);
 				Tile.SemanticTypeName = GetUserFacingDataType(*Tile.SemanticDataDefinition);
 				Tile.TypeProvenance = EVerseTypeResolutionProvenance::CompilerResolved;
+
 				if (Package != nullptr)
 				{
 					Tile.Outcome = Definition->CanFail(Package)

@@ -861,6 +861,12 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		[ SAssignNew(HorizontalExecutionOutputHost, SBox)
 			.Visibility(bHorizontalExecution ? EVisibility::Visible : EVisibility::Collapsed) ];
 	RightDock->AddSlot().AutoHeight().HAlign(HAlign_Right)[ValueOutputDock];
+	const bool bHasMainSocketDocks =
+		Tile.GetValueInputs().Num() > 0
+		|| Tile.GetValueOutputs().Num() > 0
+		|| (bHorizontalExecution
+			&& (Tile.GetOtherInputs().Num() > 0 || Tile.GetOtherOutputs().Num() > 0));
+	const bool bHasMainRegion = bHasMainContent || bHasMainSocketDocks;
 
 	TSharedRef<SHorizontalBox> MainSocketRow =
 		SAssignNew(MainSocketRowWidget, SHorizontalBox)
@@ -915,7 +921,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 
 	TSharedRef<SOverlay> MainSurface =
 		SNew(SOverlay)
-		.Visibility(bHasMainContent ? EVisibility::Visible : EVisibility::Collapsed)
+		.Visibility(bHasMainRegion ? EVisibility::Visible : EVisibility::Collapsed)
 		+ SOverlay::Slot()[SNew(SVerseTileMainGradient)]
 		+ SOverlay::Slot()[MainSocketRow];
 
@@ -927,7 +933,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	TSharedRef<SVerticalBox> Regions = SNew(SVerticalBox);
 	Regions->AddSlot().AutoHeight()[IdentitySurface];
 	Regions->AddSlot().AutoHeight()
-		[ SNew(SBox).Visibility(bHasIdentityBand && bHasMainContent
+		[ SNew(SBox).Visibility(bHasIdentityBand && bHasMainRegion
 			? EVisibility::Visible : EVisibility::Collapsed)[Separator] ];
 	Regions->AddSlot().AutoHeight()[MainSurface];
 	Regions->AddSlot().AutoHeight()
