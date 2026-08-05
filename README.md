@@ -14,6 +14,8 @@ is designed to preserve that workflow as much as possible.
 You can load any verse file, not just one made in a graph editor. You can edit
 code in the graph without affecting other lines.
 
+![Verse Visual Editor tile editing](TileEditing.webp)
+
 When other people update the Verse code it automatically updates the graph.
 You can merge your changes with those of other people.
 
