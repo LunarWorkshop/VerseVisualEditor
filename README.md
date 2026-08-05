@@ -19,8 +19,12 @@ code in the graph without affecting other lines.
 When other people update the Verse code it automatically updates the graph.
 You can merge your changes with those of other people.
 
+![Verse Visual Editor tile editing](TextEditing.webp)
+
 You can see how Verse's failable blocks work and author <decides> code directly
 from the graph. You can write if and for expressions.
+
+![Verse Visual Editor tile editing](ConditionEditing.webp)
 
 You can write <suspends> functions natively and author sync/race/rush/etc
 code directly from the graph.
