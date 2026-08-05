@@ -247,6 +247,7 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		"WithDefault(Required : int, ?Optional : float = 1.0)<computes> : float = Optional\n"
 		"PrivateSemanticOverlayOnly(Input : int)<computes> : int = Input + 1\n"
 		"PrivateFloatOverlay(Input : float)<computes> : float = Input + 1.0\n"
+		"NestedGroupedDivision()<computes> : float = (1.0 + 2.0) * (3.0 / 4.0)\n"
 		"FloatInitializer()<computes> : float =\n"
 		"    Value : float = 0.0\n"
 		"    Value\n"
@@ -652,6 +653,40 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 		TestTrue(TEXT("Generic inference changes type metadata, not topology"),
 			GenericInt->GetValueInputs()[0].SemanticTypeName == TEXT("int")
 			&& GenericFloat->GetValueInputs()[0].SemanticTypeName == TEXT("float"));
+	}
+	FVerseVisualTile* NestedGroupedDivision =
+		BindNamedFunction(TEXT("NestedGroupedDivision"));
+	if (TestNotNull(TEXT("Nested grouped division fixture binds"),
+		NestedGroupedDivision))
+	{
+		TFunction<FVerseVisualTile*(FVerseVisualTile&)> FindDivision;
+		FindDivision = [&FindDivision](FVerseVisualTile& Tile) -> FVerseVisualTile*
+		{
+			if (Tile.ExpressionKind == EVerseExpressionKind::BinaryOperator
+				&& Tile.OperatorSpelling == TEXT("/"))
+			{
+				return &Tile;
+			}
+			for (FVerseVisualTile& Child : Tile.Children)
+			{
+				if (FVerseVisualTile* Result = FindDivision(Child))
+				{
+					return Result;
+				}
+			}
+			return nullptr;
+		};
+		FVerseVisualTile* Division = FindDivision(*NestedGroupedDivision);
+		if (TestNotNull(TEXT("Nested grouped division tile exists"), Division))
+		{
+			TestTrue(TEXT("Operator-locus VST binding resolves nested division semantics"),
+				Division->SemanticFunction != nullptr
+				&& Division->SemanticSnapshot.IsValid()
+				&& Division->SemanticTypeName == TEXT("float")
+				&& Division->GetValueInputs().Num() == 2
+				&& Division->GetValueInputs()[0].SemanticTypeName == TEXT("float")
+				&& Division->GetValueInputs()[1].SemanticTypeName == TEXT("float"));
+		}
 	}
 	FVerseVisualTile* ComparableFloat = BindNamedFunction(TEXT("CompareFloat"));
 	if (TestNotNull(TEXT("Comparable float invocation binds"), ComparableFloat))

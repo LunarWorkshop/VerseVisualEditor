@@ -95,6 +95,9 @@ namespace
 		return nullptr;
 	}
 
+	const uLang::CExprInvocation* FindMappedInvocation(
+		const Verse::Vst::Node& Node);
+
 	const Verse::Vst::Node* FindExactExpressionSemanticNode(
 		const FVerseSemanticSnapshot& Snapshot,
 		const FString& FilePath,
@@ -135,6 +138,25 @@ namespace
 				Snapshot, FilePath, Layer.Range, Document))
 			{
 				return Node;
+			}
+		}
+
+		// Some operator VST nodes own only the operator locus rather than the
+		// complete operand expression. A nested grouped division, for example,
+		// maps `(A / B)` to an Operator1/ node around `/`; neither the grouped nor
+		// the delimiter-free expression range can match that node exactly. The
+		// visual descriptor already records the source-exact operator token, so
+		// use that unique position as the final operator-only lookup boundary.
+		// Requiring a mapped invocation prevents an unrelated syntax node at the
+		// same position from being accepted as semantic expression ownership.
+		if (IsVerseOperatorExpression(Tile.ExpressionKind)
+			&& Tile.OperatorRange.IsSet())
+		{
+			if (const Verse::Vst::Node* OperatorNode = FindSemanticNode(
+				Snapshot, FilePath, Tile.OperatorRange.BeginByte, Document);
+				OperatorNode != nullptr && FindMappedInvocation(*OperatorNode) != nullptr)
+			{
+				return OperatorNode;
 			}
 		}
 		return nullptr;
