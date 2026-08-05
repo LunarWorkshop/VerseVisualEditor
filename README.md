@@ -17,13 +17,15 @@ You can load any verse file, not just one made in a graph editor. You can edit c
 
 When other people update your Verse code it automatically updates the graph. You can merge your changes with those of other people.
 
-![Verse Visual Editor tile editing](TextEditing.webp)
+![Verse Visual Editor text editing](TextEditing.webp)
 
 You can see how Verse failable blocks work and author `<decides>` code directly from the graph. Write natural Verse if and for expressions.
 
-![Verse Visual Editor tile editing](ConditionEditing.webp)
+![Verse Visual Editor failable context editing](ConditionEditing.webp)
 
 You can write `<suspends>` functions natively and author sync/race/rush/etc code directly from the graph.
+
+![Verse Visual Editor sync editing](SyncEditing.webp)
 
 ## Getting Started
 
