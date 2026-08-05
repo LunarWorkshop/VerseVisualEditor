@@ -148,7 +148,8 @@ public:
 	TWeakPtr<SVerseGraphRenderScope> GetSocketRenderScope(
 		const FVerseVisualSocketId& SocketId) const
 	{
-		return Tile.Kind == EVerseVisualTileKind::FailableBlock
+		return (Tile.Kind == EVerseVisualTileKind::FailableBlock
+				|| Tile.Kind == EVerseVisualTileKind::SyncArm)
 			&& SocketId.Role == EVerseVisualSocketRole::ClauseInsertion
 			? BodyRenderScope
 			: OwningRenderScope;

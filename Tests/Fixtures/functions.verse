@@ -106,6 +106,12 @@ ControlLoop()<computes> : void =
     loop:
         break
 
+ControlSync()<suspends> : tuple(int, int) =
+    sync:
+        block:
+            1
+        2
+
 LocalDefinitions(Input : int)<computes> : int =
     var Total : int = Input
     Offset : int = 1

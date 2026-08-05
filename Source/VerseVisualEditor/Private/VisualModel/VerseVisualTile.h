@@ -22,6 +22,8 @@ enum class EVerseVisualTileKind : uint8
 	Comment,
 	Expression,
 	FailableBlock,
+	/** Invisible structural container for one top-level sync expression. */
+	SyncArm,
 	FunctionEntry,
 	FunctionReturn,
 	Unknown
@@ -93,6 +95,7 @@ enum class EVerseGraphRenderScopeBackground : uint8
 {
 	Root,
 	Failable,
+	Synchronization,
 };
 
 struct FVerseGraphRenderScope
@@ -337,6 +340,12 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange EmptyBodyInsertionAnchor;
 	/** This clause must retain one source-safe failable expression. */
 	bool bRequiresFailablePlaceholder = false;
+	/** This clause is the visually flattened sequential body of one sync arm. */
+	bool bSyncArm = false;
+	/** Entire direct expression or explicit block wrapper represented by the arm. */
+	FVerseTextRange SyncArmSourceRange;
+	/** True when SyncArmSourceRange currently includes an explicit block wrapper. */
+	bool bSyncArmUsesBlock = false;
 	TArray<FVerseVisualClauseItemDescriptor> Items;
 };
 
@@ -410,6 +419,7 @@ struct FVerseVisualTile
 	FVerseTextRange HeaderRange;
 	FVerseTextRange BodyRange;
 	FVerseVisualClauseDescriptor BodyClause;
+	/** Owning sync clause and source-order index, used by arm add/remove controls. */
 	TArray<FVerseVisualTile> Children;
 	TArray<FVerseVisualExpressionDescriptor::FControlRegion> ControlRegions;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;

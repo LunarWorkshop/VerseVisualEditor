@@ -505,6 +505,35 @@ int32 SVerseGraphRenderScope::OnPaint(
 		}
 		++BackgroundLayer;
 	}
+	else if (Background == EVerseGraphRenderScopeBackground::Synchronization)
+	{
+		const FLinearColor WidgetTint = InWidgetStyle.GetColorAndOpacityTint();
+		const ISlateStyle& VisualStyle = VerseVisualEditorStyle::Get();
+		FSlateDrawElement::MakeBox(
+			OutDrawElements,
+			BackgroundLayer,
+			AllottedGeometry.ToPaintGeometry(),
+			VisualStyle.GetBrush(TEXT("Tile.BodyOverlay")),
+			ESlateDrawEffect::None,
+			VisualStyle.GetColor(TEXT("Color.SynchronizationGlass")) * WidgetTint);
+		const FLinearColor ThreadColor =
+			VisualStyle.GetColor(TEXT("Color.SynchronizationThread")) * WidgetTint;
+		const FVector2D Size = AllottedGeometry.GetLocalSize();
+		for (float Y = 18.0f; Y < Size.Y; Y += 24.0f)
+		{
+			TArray<FVector2f> Points({FVector2f(0.0f, Y), FVector2f(Size.X, Y)});
+			FSlateDrawElement::MakeLines(
+				OutDrawElements,
+				BackgroundLayer + 1,
+				AllottedGeometry.ToPaintGeometry(),
+				MoveTemp(Points),
+				ESlateDrawEffect::None,
+				ThreadColor,
+				true,
+				1.0f);
+		}
+		++BackgroundLayer;
+	}
 
 	const int32 ConnectionLayer = BackgroundLayer + 1;
 	const FVerseGraphArrangedEndpointMap ArrangedEndpoints =

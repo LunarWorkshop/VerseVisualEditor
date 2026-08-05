@@ -242,10 +242,17 @@ bool FVerseFormattingStyleEmitterTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Brace if templates are multiline"),
 		FVerseSyntaxEmitter::IfTemplate(Style),
 		TEXT("if (true?) {\r\n}"));
-	Style.BodyDelimiter = EVerseClauseDelimiter::Colon;
-	TestEqual(TEXT("Colon if templates contain a provisional no-op expression"),
-		FVerseSyntaxEmitter::IfTemplate(Style),
-		TEXT("if (true?):\r\n    block {}"));
+        Style.BodyDelimiter = EVerseClauseDelimiter::Colon;
+        TestEqual(TEXT("Colon if templates contain a provisional no-op expression"),
+                FVerseSyntaxEmitter::IfTemplate(Style),
+                TEXT("if (true?):\r\n    block {}"));
+        TestEqual(TEXT("Colon sync templates contain exactly two provisional arms"),
+                FVerseSyntaxEmitter::SyncTemplate(Style),
+                TEXT("sync:\r\n    block {}\r\n    block {}"));
+        Style.BodyDelimiter = EVerseClauseDelimiter::Braces;
+        TestEqual(TEXT("Brace sync templates contain exactly two provisional arms"),
+                FVerseSyntaxEmitter::SyncTemplate(Style),
+                TEXT("sync {\r\n    block {};\r\n    block {}\r\n}"));
 	return true;
 }
 

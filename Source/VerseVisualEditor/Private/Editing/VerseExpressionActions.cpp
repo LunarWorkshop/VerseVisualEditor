@@ -624,6 +624,16 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 	Result.Add(MoveTemp(IfAction));
 
+	TSharedPtr<FVerseExpressionAction> SyncAction = MakeShared<FVerseExpressionAction>();
+	SyncAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	SyncAction->StructuralKind = EVerseStructuralExpressionKind::Sync;
+	SyncAction->SourceSpelling = FVerseSyntaxEmitter::SyncTemplate(Style);
+	SyncAction->ProvisionalContentTarget = EVerseProvisionalContentTarget::SyncArms;
+	SyncAction->DisplayName = LOCTEXT("CreateSyncExpression", "Sync");
+	SyncAction->Category = LOCTEXT("ConcurrencyCategory", "Flow Control|Concurrency");
+	SyncAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+	Result.Add(MoveTemp(SyncAction));
+
 	TSharedPtr<FVerseExpressionAction> VariableAction = MakeShared<FVerseExpressionAction>();
 	VariableAction->SourceForm = EVerseExpressionSourceForm::Definition;
 	VariableAction->SourceSpelling = FVerseSyntaxEmitter::Definition(

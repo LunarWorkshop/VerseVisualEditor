@@ -693,14 +693,32 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 			&& For->ControlKind == EVerseControlKind::For
 			&& For->ControlRegions.Num() >= 2);
 	}
-	if (const FVerseExpressionDescriptor* Loop = FindOnlyExpression(UTF8TEXTVIEW("ControlLoop")))
-	{
+        if (const FVerseExpressionDescriptor* Loop = FindOnlyExpression(UTF8TEXTVIEW("ControlLoop")))
+        {
 		TestTrue(TEXT("Verse loop creates its own body region"),
 			Loop->Kind == EVerseExpressionKind::Control
 			&& Loop->ControlKind == EVerseControlKind::Loop
 			&& Loop->ControlRegions.Num() == 1
-			&& Loop->ControlRegions[0].Kind == EVerseControlRegionKind::Body);
-	}
+                                && Loop->ControlRegions[0].Kind == EVerseControlRegionKind::Body);
+        }
+        if (const FVerseExpressionDescriptor* Sync = FindOnlyExpression(UTF8TEXTVIEW("ControlSync")))
+        {
+                const FVerseExpressionControlRegion* Body =
+                        Sync->ControlRegions.FindByPredicate(
+                                [](const FVerseExpressionControlRegion& Region)
+                                {
+                                        return Region.Kind == EVerseControlRegionKind::Body;
+                                });
+                TestTrue(TEXT("Sync retains its ordered top-level arms"),
+                        Sync->Kind == EVerseExpressionKind::Control
+                                && Sync->ControlKind == EVerseControlKind::Sync
+                                && Body != nullptr
+                                && Body->OperandCount == 2
+                                && Body->Items.Num() == 2
+                                && Sync->Operands.IsValidIndex(Body->FirstOperandIndex)
+                                && Sync->Operands[Body->FirstOperandIndex].ControlKind
+                                        == EVerseControlKind::Block);
+        }
 	const FVerseSourceRegion* LocalDefinitions = VerseParseSnapshotBuilderTests::FindTypedRegion(
 		Snapshot, Snapshot.GetSourceRegions(), UTF8TEXTVIEW("LocalDefinitions"));
 	if (TestNotNull(TEXT("Local-definition fixture exists"), LocalDefinitions)

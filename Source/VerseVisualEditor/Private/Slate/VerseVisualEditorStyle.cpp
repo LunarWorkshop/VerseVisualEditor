@@ -92,9 +92,15 @@ namespace VerseVisualEditorStyle
 		Style->Set(TEXT("Color.FailureGlass"),
 			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("2e2a14")))
 			.CopyWithNewOpacity(0.72f));
-		Style->Set(TEXT("Color.FailurePattern"),
-			FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b")))
-			.CopyWithNewOpacity(0.34f));
+	Style->Set(TEXT("Color.FailurePattern"),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4d451b")))
+		.CopyWithNewOpacity(0.34f));
+	Style->Set(TEXT("Color.SynchronizationGlass"),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("18283d")))
+		.CopyWithNewOpacity(0.76f));
+	Style->Set(TEXT("Color.SynchronizationThread"),
+		FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("7894bd")))
+		.CopyWithNewOpacity(0.18f));
 		Style->Set(TEXT("Metric.TileCornerRadius"), InnerRadius);
 
 		FSlateStyleRegistry::RegisterSlateStyle(*Style);
@@ -174,6 +180,10 @@ namespace VerseVisualEditorStyle
 			}
 			if (Tile.ExpressionKind == EVerseExpressionKind::Control)
 			{
+				if (Tile.ControlKind == EVerseControlKind::Sync)
+				{
+					return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("334f78")));
+				}
 				return Get().GetColor(TEXT("Color.NeutralTitle"));
 			}
 			if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)

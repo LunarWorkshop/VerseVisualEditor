@@ -945,6 +945,66 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 					NestedSubtract->OperatorRange) == TEXT("-"));
 	}
 
+	const FVerseVisualTile* SyncFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot,
+		Tiles,
+		UTF8TEXTVIEW("ControlSync"));
+	if (TestNotNull(TEXT("Sync visual fixture exists"), SyncFunction))
+	{
+		const TArray<FVerseVisualTile> SyncGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*SyncFunction, Snapshot);
+		const FVerseVisualTile* SyncTile = SyncGraph.FindByPredicate([](const FVerseVisualTile& Tile)
+		{
+			return Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.ControlKind == EVerseControlKind::Sync;
+		});
+		if (TestNotNull(TEXT("Sync is represented by one control tile"), SyncTile)
+			&& TestEqual(TEXT("Sync retains its two ordered arms"), SyncTile->Children.Num(), 2))
+		{
+			const FVerseVisualTile& BlockArm = SyncTile->Children[0];
+			const FVerseVisualTile& DirectArm = SyncTile->Children[1];
+			TestTrue(TEXT("Explicit block arm is flattened into a synchronization arm"),
+				BlockArm.Kind == EVerseVisualTileKind::SyncArm
+					&& BlockArm.BodyClause.bSyncArmUsesBlock
+					&& BlockArm.Children.Num() == 1);
+			TestTrue(TEXT("Direct expression remains a direct synchronization arm"),
+				DirectArm.Kind == EVerseVisualTileKind::SyncArm
+					&& !DirectArm.BodyClause.bSyncArmUsesBlock
+					&& DirectArm.Children.Num() == 1);
+			TestTrue(TEXT("Every sync arm exposes one clause insertion homeplate"),
+				VerseVisualTileTests::HasSocket(
+					BlockArm,
+					EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::ClauseInsertion)
+				&& VerseVisualTileTests::HasSocket(
+					DirectArm,
+					EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::ClauseInsertion));
+
+			const TArray<FVerseVisualConnection> Connections =
+				FVerseVisualTileBuilder::BuildConnections(SyncGraph);
+			const TArray<FVerseGraphRenderScope> Scopes =
+				FVerseVisualTileBuilder::BuildRenderScopes(SyncGraph);
+			for (const FVerseVisualTile* Arm : {&BlockArm, &DirectArm})
+			{
+				const FVerseGraphRenderScope* ArmScope = Scopes.FindByPredicate([Arm](
+					const FVerseGraphRenderScope& Scope)
+				{
+					return Scope.OwnerTile == Arm->Id;
+				});
+				TestTrue(TEXT("Each sync arm owns a synchronization render scope"),
+					ArmScope != nullptr
+						&& ArmScope->Background == EVerseGraphRenderScopeBackground::Synchronization);
+			}
+			FString Diagnostic;
+			TestTrue(TEXT("Sync connections reference valid immutable sockets"),
+				FVerseVisualTileBuilder::ValidateConnections(SyncGraph, Connections, &Diagnostic));
+			TestTrue(TEXT("Sync render-scope tree is valid"),
+				FVerseVisualTileBuilder::ValidateRenderScopes(
+					SyncGraph, Scopes, Connections, &Diagnostic));
+		}
+	}
+
 	const FVerseVisualTile* EmptyFunction = VerseVisualTileTests::FindDefinition(
 		Snapshot,
 		Tiles,

@@ -33,6 +33,8 @@ enum class EVerseProvisionalContentTarget : uint8
 	FirstConditionExpression,
 	/** Condition placeholder plus the no-op expression required by a colon body. */
 	FirstConditionAndBodyExpressions,
+	/** Both generated top-level sync arms. */
+	SyncArms,
 };
 
 /** Editor-owned structural recipe materialized against its destination clause. */
@@ -40,6 +42,7 @@ enum class EVerseStructuralExpressionKind : uint8
 {
 	None,
 	If,
+	Sync,
 };
 
 /** Atomic recipe for replacing one operand while retargeting an operator's literal defaults. */

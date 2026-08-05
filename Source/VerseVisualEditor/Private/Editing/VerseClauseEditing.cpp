@@ -149,10 +149,10 @@ namespace
 		FString& OutSource,
 		FText& OutError)
 	{
-		if (Action.StructuralKind != EVerseStructuralExpressionKind::If)
+		if (Action.StructuralKind == EVerseStructuralExpressionKind::None)
 		{
 			return BuildVerseExpressionActionSource(
-				Action, BoundExpressionSource, OutSource, OutError);
+					Action, BoundExpressionSource, OutSource, OutError);
 		}
 		FVerseFormattingStyleProfile CreationStyle = Style;
 		// New block punctuation is an explicit project/user default. Local source
@@ -160,7 +160,9 @@ namespace
 		// a requested colon block back into braces (or vice versa).
 		CreationStyle.BodyDelimiter =
 			FVerseFormattingStyleResolver::ResolveDefaults().BodyDelimiter;
-		OutSource = FVerseSyntaxEmitter::IfTemplate(CreationStyle);
+		OutSource = Action.StructuralKind == EVerseStructuralExpressionKind::Sync
+				? FVerseSyntaxEmitter::SyncTemplate(CreationStyle)
+				: FVerseSyntaxEmitter::IfTemplate(CreationStyle);
 		return true;
 	}
 
@@ -432,9 +434,70 @@ bool FVerseClauseEditing::InsertExpression(
 	const FString LineEnding = FVerseSyntaxEmitter::LineEnding(Style);
 	FString ExpressionSource;
 	if (!BuildDestinationExpressionSource(
-		Action, BoundExpressionSource, Style, ExpressionSource, OutError))
+			Action, BoundExpressionSource, Style, ExpressionSource, OutError))
 	{
 		return false;
+	}
+	if (Clause.bSyncArm)
+	{
+		if (!Clause.SyncArmSourceRange.IsSet()
+				|| Clause.SyncArmSourceRange.Revision != Session.GetRevision())
+		{
+			OutError = LOCTEXT("InvalidSyncArm", "The sync arm is no longer valid.");
+			return false;
+		}
+
+		FString Replacement;
+		int32 ExpressionOffsetCharacters = 0;
+		if (Clause.bSyncArmUsesBlock && Clause.Items.IsEmpty())
+		{
+			// Empty block wrappers are provisional source safety, not visible graph nodes.
+			Replacement = ExpressionSource;
+		}
+		else if (!Clause.bSyncArmUsesBlock && Clause.Items.Num() == 1)
+		{
+			const FString Existing = Decode(Session, Clause.Items[0].Expression.Range);
+			const FString ArmIndent = IndentationAt(Source, Clause.SyncArmSourceRange.BeginByte);
+			const FString ChildIndent = ArmIndent
+					+ (Style.IndentationUnit.IsEmpty() ? TEXT("    ") : Style.IndentationUnit);
+			const FString ExistingRebased = RebaseMultilineSource(Existing, LineEnding, ChildIndent);
+			const FString NewRebased = RebaseMultilineSource(ExpressionSource, LineEnding, ChildIndent);
+			if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+			{
+				const FString Prefix = TEXT("block {") + LineEnding + ChildIndent;
+				Replacement = Prefix + ExistingRebased + TEXT(";") + LineEnding
+						+ ChildIndent + NewRebased + LineEnding + ArmIndent + TEXT("}");
+				ExpressionOffsetCharacters = Prefix.Len() + ExistingRebased.Len()
+						+ 1 + LineEnding.Len() + ChildIndent.Len();
+			}
+			else
+			{
+				const FString Prefix = TEXT("block:") + LineEnding + ChildIndent;
+				Replacement = Prefix + ExistingRebased + LineEnding + ChildIndent + NewRebased;
+				ExpressionOffsetCharacters = Prefix.Len() + ExistingRebased.Len()
+						+ LineEnding.Len() + ChildIndent.Len();
+			}
+		}
+		if (!Replacement.IsEmpty())
+		{
+			const FVerseDocumentEdit Edit = MakeEdit(
+					Session.GetRevision(), Clause.SyncArmSourceRange, Replacement);
+			if (!Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+			{
+				return false;
+			}
+			if (OutInsertedRange != nullptr)
+			{
+				const FTCHARToUTF8 PrefixUtf8(*Replacement, ExpressionOffsetCharacters);
+				const FTCHARToUTF8 ExpressionUtf8(*ExpressionSource);
+				*OutInsertedRange = FVerseTextRange(
+						Session.GetRevision(),
+						FVerseByteRange(
+								Clause.SyncArmSourceRange.BeginByte + PrefixUtf8.Length(),
+								ExpressionUtf8.Length()));
+			}
+			return true;
+		}
 	}
 	const EVerseSeparatorToken SeparatorToken = Clause.bRequiresFailablePlaceholder
 		? Style.FailureSeparatorToken : Style.StatementSeparatorToken;
@@ -743,6 +806,43 @@ bool FVerseClauseEditing::DeleteExpression(
 		}
 		return true;
 	};
+	if (Clause.bSyncArm)
+	{
+		if (!Clause.SyncArmSourceRange.IsSet()
+				|| Clause.SyncArmSourceRange.Revision != Session.GetRevision())
+		{
+			OutError = LOCTEXT("InvalidSyncArmDeletion", "The sync arm is no longer valid.");
+			return false;
+		}
+		if (Clause.Items.Num() == 1)
+		{
+			const FVerseDocumentEdit Edit = MakeEdit(
+					Session.GetRevision(), Clause.SyncArmSourceRange, TEXTVIEW("block {}"));
+			if (!Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError))
+			{
+				return false;
+			}
+			if (OutProvisionalReplacementRange != nullptr)
+			{
+				const FTCHARToUTF8 PlaceholderUtf8(TEXT("block {}"));
+				*OutProvisionalReplacementRange = FVerseTextRange(
+						Session.GetRevision(),
+						FVerseByteRange(
+								Clause.SyncArmSourceRange.BeginByte,
+								PlaceholderUtf8.Length()));
+			}
+			return true;
+		}
+		if (Clause.bSyncArmUsesBlock && Clause.Items.Num() == 2)
+		{
+			const int32 RemainingIndex = ItemIndex == 0 ? 1 : 0;
+			const FString Remaining = Decode(
+					Session, Clause.Items[RemainingIndex].Expression.Range);
+			const FVerseDocumentEdit Edit = MakeEdit(
+					Session.GetRevision(), Clause.SyncArmSourceRange, Remaining);
+			return Session.ReplaceMany(MakeArrayView(&Edit, 1), OutError);
+		}
+	}
 	if (Clause.Items.Num() == 1)
 	{
 		if (Clause.bRequiresFailablePlaceholder)

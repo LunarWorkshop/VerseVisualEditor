@@ -84,8 +84,10 @@ namespace
 {
 	DECLARE_DELEGATE_RetVal_OneParam(
 		FReply, FOnVerseFunctionGraphTileSelected, const FVerseVisualTile&);
-	DECLARE_DELEGATE_RetVal_OneParam(
-		bool, FIsVerseFunctionGraphTileSelected, FVerseTextRange);
+        DECLARE_DELEGATE_RetVal_OneParam(
+                bool, FIsVerseFunctionGraphTileSelected, FVerseTextRange);
+        DECLARE_DELEGATE_RetVal_TwoParams(
+                FReply, FOnVerseSyncArmControl, const FVerseVisualClauseDescriptor&, int32);
 
 	FText FormatSourceLines(int32 FirstLine, int32 LastLine)
 	{
@@ -137,10 +139,10 @@ namespace
 		TSharedPtr<SWidget> BodyOverride = nullptr,
 		bool bCompactExecutionSpacing = false,
 		TSharedPtr<SVerseGraphRenderScope> BodyRenderScope = nullptr,
-		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
-		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
-		FOnVerseClauseReordered OnClauseReordered = {},
-		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
+                FOnVerseFunctionGraphTileSelected OnTileSelected = {},
+                FIsVerseFunctionGraphTileSelected IsTileSelected = {},
+                FOnVerseClauseReordered OnClauseReordered = {},
+                TConstArrayView<FVerseVisualConnection> ModelConnections = {},
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
 		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
 		EVerseFunctionGraphPresentation Presentation =
@@ -161,6 +163,7 @@ namespace
 		}
 		const bool bExpression = Tile.Kind == EVerseVisualTileKind::Expression;
 		const bool bFailableBlock = Tile.Kind == EVerseVisualTileKind::FailableBlock;
+		const bool bSyncArm = Tile.Kind == EVerseVisualTileKind::SyncArm;
 		const bool bIdentifier = bExpression
 			&& Tile.ExpressionKind == EVerseExpressionKind::Identifier;
 		const bool bControl = bExpression
@@ -201,16 +204,16 @@ namespace
 			.EndpointRegistry(WidgetRegistry != nullptr
 				? TSharedPtr<FVerseGraphEndpointRegistry>(WidgetRegistry->Endpoints)
 				: nullptr)
-			.IsSelected_Lambda([Range = Tile.Range, IsTileSelected]()
-			{
-				return IsTileSelected.IsBound()
-					&& IsTileSelected.Execute(Range);
-			})
-			.OnSelected(FOnClicked::CreateLambda([Tile, OnTileSelected]()
-			{
-				return OnTileSelected.IsBound()
-					? OnTileSelected.Execute(Tile)
-					: FReply::Unhandled();
+				.IsSelected_Lambda([Range = Tile.Range, IsTileSelected, bSyncArm]()
+				{
+					return !bSyncArm && IsTileSelected.IsBound()
+						&& IsTileSelected.Execute(Range);
+				})
+				.OnSelected(FOnClicked::CreateLambda([Tile, OnTileSelected, bSyncArm]()
+				{
+					return !bSyncArm && OnTileSelected.IsBound()
+						? OnTileSelected.Execute(Tile)
+						: FReply::Unhandled();
 			}))
 			.OnSocketDragStarted(OnSocketDragStarted)
 			.OnInlineLiteralCommitted(OnInlineLiteralCommitted)
@@ -376,10 +379,11 @@ namespace
 		FOnVerseSocketDragStarted OnSocketDragStarted,
 		FOnVerseInlineLiteralCommitted OnInlineLiteralCommitted,
 		bool bCompactOperands = false,
-		FOnVerseFunctionGraphTileSelected OnTileSelected = {},
-		FIsVerseFunctionGraphTileSelected IsTileSelected = {},
-		FOnVerseClauseReordered OnClauseReordered = {},
-		TConstArrayView<FVerseVisualConnection> ModelConnections = {},
+                FOnVerseFunctionGraphTileSelected OnTileSelected = {},
+                FIsVerseFunctionGraphTileSelected IsTileSelected = {},
+                FOnVerseClauseReordered OnClauseReordered = {},
+                FOnVerseSyncArmControl OnSyncArmControl = {},
+                TConstArrayView<FVerseVisualConnection> ModelConnections = {},
 		FVerseTileWidgetRegistry* WidgetRegistry = nullptr,
 		TSharedPtr<SVerseGraphRenderScope> OwningRenderScope = nullptr,
 		EVerseFunctionGraphPresentation Presentation =
@@ -446,8 +450,11 @@ namespace
 			Row.Widget = MotionWidget;
 			return Row;
 		};
-		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
-		{
+                if (Tile.Kind == EVerseVisualTileKind::FailableBlock
+                        || Tile.Kind == EVerseVisualTileKind::SyncArm)
+                {
+                        const bool bFailableContext =
+                                Tile.Kind == EVerseVisualTileKind::FailableBlock;
 			TSharedPtr<SHorizontalBox> HorizontalChain;
 			TSharedPtr<SVerseStatementLayoutPanel> AutomaticChain;
 			TSharedRef<SWidget> Chain = SNullWidget::NullWidget;
@@ -463,10 +470,12 @@ namespace
 				HorizontalChain = SNew(SHorizontalBox);
 				Chain = HorizontalChain.ToSharedRef();
 			}
-			TSharedRef<SVerseGraphRenderScope> RenderScope =
-				SNew(SVerseGraphRenderScope)
-				.Background(EVerseGraphRenderScopeBackground::Failable)
-				.ClipToBounds(true);
+                        TSharedRef<SVerseGraphRenderScope> RenderScope =
+                                SNew(SVerseGraphRenderScope)
+                                .Background(bFailableContext
+                                        ? EVerseGraphRenderScopeBackground::Failable
+                                        : EVerseGraphRenderScopeBackground::Synchronization)
+                                .ClipToBounds(true);
 			for (int32 ChildIndex = 0; ChildIndex < Tile.Children.Num(); ++ChildIndex)
 			{
 				FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
@@ -474,10 +483,11 @@ namespace
 					Document,
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
-					true,
+						true,
 					OnTileSelected,
 					IsTileSelected,
 					OnClauseReordered,
+					OnSyncArmControl,
 					ModelConnections,
 					WidgetRegistry,
 					RenderScope,
@@ -512,10 +522,10 @@ namespace
 				Chain,
 				bCompactOperands,
 				RenderScope,
-				OnTileSelected,
-				IsTileSelected,
-				OnClauseReordered,
-				ModelConnections,
+                                                OnTileSelected,
+                                                IsTileSelected,
+                                                OnClauseReordered,
+                                                ModelConnections,
 				WidgetRegistry,
 				OwningRenderScope,
 				Presentation,
@@ -550,7 +560,146 @@ namespace
 				BlockTile,
 				[BlockOffset]() { return FVector2D(BlockOffset, 0.0f); }});
 		}
-		if (Presentation != EVerseFunctionGraphPresentation::Tracks
+                if (Tile.ExpressionKind == EVerseExpressionKind::Control
+                        && Tile.ControlKind == EVerseControlKind::Sync)
+                {
+                        TSharedRef<SWidget> Arms = SNullWidget::NullWidget;
+                        if (Presentation == EVerseFunctionGraphPresentation::VerticalExecution)
+                        {
+                                TSharedRef<SHorizontalBox> Columns = SNew(SHorizontalBox);
+                                for (int32 ArmIndex = 0; ArmIndex < Tile.Children.Num(); ++ArmIndex)
+                                {
+                                        FBuiltFunctionGraphRow Arm = BuildFunctionGraphRow(
+                                                Tile.Children[ArmIndex], Document, OnSocketDragStarted,
+                                                OnInlineLiteralCommitted, true, OnTileSelected, IsTileSelected,
+                                                OnClauseReordered, OnSyncArmControl,
+                                                ModelConnections, WidgetRegistry,
+                                                OwningRenderScope, Presentation, MotionController, MotionKey);
+                                        Columns->AddSlot().AutoWidth().VAlign(VAlign_Top)
+                                        .Padding(ArmIndex == 0 ? 0.0f : 18.0f, 0.0f, 0.0f, 0.0f)
+                                        [
+                                                SNew(SVerticalBox)
+                                                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
+                                                [
+                                                        SNew(SButton)
+                                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                                        .ContentPadding(FMargin(3.0f))
+                                                        .IsEnabled(Tile.Children.Num() > 2)
+                                                        .ToolTipText(Tile.Children.Num() > 2
+                                                                ? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
+                                                                : LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
+                                                        .OnClicked_Lambda([OnSyncArmControl,
+                                                                Clause = Tile.BodyClause, ArmIndex]() mutable
+                                                        {
+                                                                return OnSyncArmControl.IsBound()
+                                                                        ? OnSyncArmControl.Execute(Clause, ArmIndex)
+                                                                        : FReply::Unhandled();
+                                                        })
+                                                        [
+                                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
+                                                        ]
+                                                ]
+                                                + SVerticalBox::Slot().AutoHeight()
+                                                [
+                                                        Arm.Widget
+                                                ]
+                                        ];
+                                }
+                                Columns->AddSlot().AutoWidth().VAlign(VAlign_Top)
+                                .Padding(12.0f, 2.0f, 0.0f, 0.0f)
+                                [
+                                        SNew(SButton)
+                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                        .ToolTipText(LOCTEXT("AddSyncArmTooltip", "Add a concurrent arm"))
+                                        .OnClicked_Lambda([OnSyncArmControl, Clause = Tile.BodyClause]() mutable
+                                        {
+                                                return OnSyncArmControl.IsBound()
+                                                        ? OnSyncArmControl.Execute(Clause, INDEX_NONE)
+                                                        : FReply::Unhandled();
+                                        })
+                                        [
+                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))
+                                        ]
+                                ];
+                                Arms = SNew(SBox).Padding(FMargin(10.0f))[Columns];
+                        }
+                        else
+                        {
+                                TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+                                for (int32 ArmIndex = 0; ArmIndex < Tile.Children.Num(); ++ArmIndex)
+                                {
+                                        FBuiltFunctionGraphRow Arm = BuildFunctionGraphRow(
+                                                Tile.Children[ArmIndex], Document, OnSocketDragStarted,
+                                                OnInlineLiteralCommitted, true, OnTileSelected, IsTileSelected,
+                                                OnClauseReordered, OnSyncArmControl,
+                                                ModelConnections, WidgetRegistry,
+                                                OwningRenderScope, Presentation, MotionController, MotionKey);
+                                        if (ArmIndex > 0)
+                                        {
+                                                Rows->AddSlot().AutoHeight().Padding(8.0f, 5.0f)
+                                                [
+                                                        SNew(SSeparator)
+                                                        .Thickness(1.0f)
+                                                        .ColorAndOpacity(FLinearColor(0.35f, 0.48f, 0.65f, 0.45f))
+                                                ];
+                                        }
+                                        Rows->AddSlot().AutoHeight()
+                                        [
+                                                SNew(SHorizontalBox)
+                                                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
+                                                .Padding(0.0f, 2.0f, 5.0f, 0.0f)
+                                                [
+                                                        SNew(SButton)
+                                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                                        .ContentPadding(FMargin(3.0f))
+                                                        .IsEnabled(Tile.Children.Num() > 2)
+                                                        .ToolTipText(Tile.Children.Num() > 2
+                                                                ? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
+                                                                : LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
+                                                        .OnClicked_Lambda([OnSyncArmControl,
+                                                                Clause = Tile.BodyClause, ArmIndex]() mutable
+                                                        {
+                                                                return OnSyncArmControl.IsBound()
+                                                                        ? OnSyncArmControl.Execute(Clause, ArmIndex)
+                                                                        : FReply::Unhandled();
+                                                        })
+                                                        [
+                                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
+                                                        ]
+                                                ]
+                                                + SHorizontalBox::Slot().AutoWidth()
+                                                [
+                                                        Arm.Widget
+                                                ]
+                                        ];
+                                }
+                                Rows->AddSlot().AutoHeight().HAlign(HAlign_Left)
+                                .Padding(2.0f, 10.0f, 0.0f, 0.0f)
+                                [
+                                        SNew(SButton)
+                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                        .ToolTipText(LOCTEXT("AddSyncArmTooltip", "Add a concurrent arm"))
+                                        .OnClicked_Lambda([OnSyncArmControl, Clause = Tile.BodyClause]() mutable
+                                        {
+                                                return OnSyncArmControl.IsBound()
+                                                        ? OnSyncArmControl.Execute(Clause, INDEX_NONE)
+                                                        : FReply::Unhandled();
+                                        })
+                                        [
+                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))
+                                        ]
+                                ];
+                                Arms = SNew(SBox).Padding(FMargin(10.0f))[Rows];
+                        }
+
+                        const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
+                                Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted,
+                                Arms, bCompactOperands, nullptr, OnTileSelected, IsTileSelected,
+                                OnClauseReordered, ModelConnections, WidgetRegistry,
+                                OwningRenderScope, Presentation);
+                        return FinishRow({RootTile, RootTile});
+                }
+                if (Presentation != EVerseFunctionGraphPresentation::Tracks
 			&& Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
@@ -571,10 +720,11 @@ namespace
 					OnSocketDragStarted,
 					OnInlineLiteralCommitted,
 					true,
-					OnTileSelected,
-					IsTileSelected,
-					OnClauseReordered,
-					ModelConnections,
+							OnTileSelected,
+							IsTileSelected,
+							OnClauseReordered,
+							OnSyncArmControl,
+							ModelConnections,
 					WidgetRegistry,
 					OwningRenderScope,
 					Presentation,
@@ -627,10 +777,11 @@ namespace
 							OnSocketDragStarted,
 							OnInlineLiteralCommitted,
 							bCompactOperands,
-							OnTileSelected,
-							IsTileSelected,
-							OnClauseReordered,
-							ModelConnections,
+                                OnTileSelected,
+                                IsTileSelected,
+                                OnClauseReordered,
+							OnSyncArmControl,
+                                ModelConnections,
 							WidgetRegistry,
 							OwningRenderScope,
 							Presentation,
@@ -843,10 +994,11 @@ namespace
 						OnSocketDragStarted,
 						OnInlineLiteralCommitted,
 						bCompactOperands,
-						OnTileSelected,
-						IsTileSelected,
-						OnClauseReordered,
-						ModelConnections,
+                                OnTileSelected,
+                                IsTileSelected,
+                                OnClauseReordered,
+                                OnSyncArmControl,
+                                ModelConnections,
 						WidgetRegistry,
 						OwningRenderScope,
 						Presentation,
@@ -965,10 +1117,11 @@ namespace
 				OnSocketDragStarted,
 				OnInlineLiteralCommitted,
 				true,
-				OnTileSelected,
-				IsTileSelected,
-				OnClauseReordered,
-				ModelConnections,
+                                OnTileSelected,
+                                IsTileSelected,
+                                OnClauseReordered,
+                                OnSyncArmControl,
+                                ModelConnections,
 				WidgetRegistry,
 				OwningRenderScope,
 				Presentation,
@@ -1158,6 +1311,8 @@ void SVerseVisualEditor::RefreshActiveDocument(
 				IsFunctionTileSelected,
 				FOnVerseClauseReordered::CreateSP(
 					this, &SVerseVisualEditor::HandleClauseReordered),
+				FOnVerseSyncArmControl::CreateSP(
+					this, &SVerseVisualEditor::HandleSyncArmControl),
 				ModelConnections,
 				&WidgetRegistry,
 				nullptr,
@@ -1343,6 +1498,8 @@ void SVerseVisualEditor::RefreshActiveDocument(
 							IsFunctionTileSelected,
 							FOnVerseClauseReordered::CreateSP(
 								this, &SVerseVisualEditor::HandleClauseReordered),
+							FOnVerseSyncArmControl::CreateSP(
+								this, &SVerseVisualEditor::HandleSyncArmControl),
 							ModelConnections,
 							&WidgetRegistry,
 							TrackRenderScope,

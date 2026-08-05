@@ -141,9 +141,26 @@ namespace
 			FVerseVisualTile* ControlTile =
 				FindInsertedControlTile(Tab.GraphTiles, InsertedControlRange);
 			if (ControlTile == nullptr
-				|| ControlTile->ExpressionKind != EVerseExpressionKind::Control)
+					|| ControlTile->ExpressionKind != EVerseExpressionKind::Control)
 			{
 				continue;
+			}
+			if (Target == EVerseProvisionalContentTarget::SyncArms)
+			{
+				int32 RecordedArms = 0;
+				for (FVerseVisualTile& Arm : ControlTile->Children)
+				{
+					if (Arm.Kind != EVerseVisualTileKind::SyncArm || !Arm.Range.IsSet())
+					{
+						continue;
+					}
+					Document.ProvisionalTiles.Add(
+							Arm.Range,
+							Document.Session->GetParseSnapshot().GetDocument()->GetOriginalUtf8View());
+					Arm.bIsProvisional = true;
+					++RecordedArms;
+				}
+				return RecordedArms >= 2;
 			}
 			FVerseVisualTile* Condition = ControlTile->Children.FindByPredicate(
 				[](const FVerseVisualTile& Child)
@@ -1409,6 +1426,71 @@ FReply SVerseVisualEditor::HandleClauseReordered(
 		ActiveDocument->LoadError = Error;
 		bLocalCompilePanelOpen = true;
 		return FReply::Handled();
+	}
+	ActiveDocument->SelectedTile.Reset();
+	ActiveDocument->LoadError = FText::GetEmpty();
+	ActiveDocument->bIsTemporary = false;
+	QueueSemanticAnalysis(true);
+	InvalidateCompilationResult(ActiveDocument);
+	if (CompilationMode == EVerseCompilationMode::Continuous)
+	{
+		QueueCompilation(ActiveDocument, true);
+	}
+	ReconcileFunctionTabs(
+		*ActiveDocument,
+		FindExactSemanticSnapshot(SemanticWorkspace.Get(), *ActiveDocument));
+	RebuildDocumentTabs();
+	RefreshActiveDocument();
+	return FReply::Handled();
+}
+
+FReply SVerseVisualEditor::HandleSyncArmControl(
+	const FVerseVisualClauseDescriptor& Clause,
+	int32 ArmIndex)
+{
+	if (!ActiveDocument.IsValid() || !ActiveDocument->Session.IsValid())
+	{
+		return FReply::Unhandled();
+	}
+
+	FText Error;
+	FVerseTextRange ProvisionalRange;
+	bool bChanged = false;
+	if (ArmIndex == INDEX_NONE)
+	{
+		FVerseExpressionAction Placeholder;
+		Placeholder.SourceForm = EVerseExpressionSourceForm::Literal;
+		Placeholder.SourceSpelling = TEXT("block {}");
+		bChanged = FVerseClauseEditing::InsertExpression(
+			*ActiveDocument->Session,
+			Clause,
+			Clause.Items.Num(),
+			Placeholder,
+			Error,
+			&ProvisionalRange);
+	}
+	else if (Clause.Items.Num() > 2 && Clause.Items.IsValidIndex(ArmIndex))
+	{
+		bChanged = FVerseClauseEditing::DeleteExpression(
+			*ActiveDocument->Session, Clause, ArmIndex, Error);
+	}
+	else
+	{
+		Error = LOCTEXT(
+			"SyncRequiresTwoArms",
+			"Verse sync expressions require at least two concurrent arms.");
+	}
+
+	if (!bChanged)
+	{
+		ActiveDocument->LoadError = Error;
+		bLocalCompilePanelOpen = true;
+		return FReply::Handled();
+	}
+	if (ProvisionalRange.IsSet())
+	{
+		ActiveDocument->ProvisionalTiles.Add(
+			ProvisionalRange, ActiveDocument->Session->GetCurrentUtf8());
 	}
 	ActiveDocument->SelectedTile.Reset();
 	ActiveDocument->LoadError = FText::GetEmpty();

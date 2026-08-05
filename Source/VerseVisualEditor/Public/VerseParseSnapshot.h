@@ -93,6 +93,9 @@ enum class EVerseControlKind : uint8
 	If,
 	For,
 	Loop,
+	Sync,
+	/** Source-only sequential wrapper used by a sync arm. */
+	Block,
 };
 
 enum class EVerseControlRegionKind : uint8

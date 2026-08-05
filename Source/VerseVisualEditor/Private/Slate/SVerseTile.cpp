@@ -476,9 +476,11 @@ namespace
 			const bool bControl = bExpression
 				&& Tile.ExpressionKind == EVerseExpressionKind::Control;
 			Result.bHasIdentityBand = !(bOperator || bIdentifier || bLiteral
-				|| Tile.Kind == EVerseVisualTileKind::Unknown);
+				|| Tile.Kind == EVerseVisualTileKind::Unknown
+				|| Tile.Kind == EVerseVisualTileKind::SyncArm);
 			Result.bHasMainContent = bCallerHasMainContent || bLiteral
 				|| bControl || Tile.Kind == EVerseVisualTileKind::FailableBlock
+				|| Tile.Kind == EVerseVisualTileKind::SyncArm
 				|| (!Result.bHasIdentityBand
 					&& Tile.Kind != EVerseVisualTileKind::Unknown)
 				|| !Tile.GetValueInputs().IsEmpty()
@@ -604,8 +606,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 					}))
 			];
 	}
-	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+	if (Tile.Kind == EVerseVisualTileKind::FailableBlock
+		|| Tile.Kind == EVerseVisualTileKind::SyncArm)
 	{
+		const bool bFailableContext = Tile.Kind == EVerseVisualTileKind::FailableBlock;
 		TSharedPtr<SWidget> EntryPinButton;
 		const FVerseVisualSocketId ClauseInsertionId{
 			EVerseVisualSocketDirection::Output,
@@ -677,7 +681,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 						: SNullWidget::NullWidget
 				]
 				+ SHorizontalBox::Slot().AutoWidth()
-				.Padding(FMargin(0.0f, HorizontalBodyTopPadding, 116.0f, 32.0f))
+				.Padding(FMargin(0.0f, HorizontalBodyTopPadding,
+					bFailableContext ? 116.0f : 28.0f, 32.0f))
 				[
 					MainContent
 				];
@@ -694,7 +699,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 						: SNullWidget::NullWidget
 				]
 				+ SHorizontalBox::Slot().AutoWidth()
-				.Padding(FMargin(0.0f, 20.0f, 116.0f, 28.0f))
+				.Padding(FMargin(0.0f, 20.0f,
+					bFailableContext ? 116.0f : 28.0f, 28.0f))
 				[
 					MainContent
 				];
@@ -705,7 +711,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			const float BodyWidth = MainContent->GetDesiredSize().X;
 			// Direct failable statements terminate at this scope's right wall.
 			// Keep a marker lane beyond the widest internal tile.
-			const float FailureChainWidth = BodyWidth + 40.0f + 96.0f;
+			const float FailureChainWidth = BodyWidth + 40.0f
+				+ (bFailableContext ? 96.0f : 0.0f);
 			if (EntryPinButton.IsValid())
 			{
 				EntryPinButton->SlatePrepass();
@@ -747,7 +754,9 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		if (!LocalBodyRenderScope.IsValid())
 		{
 			LocalBodyRenderScope = SNew(SVerseGraphRenderScope)
-				.Background(EVerseGraphRenderScopeBackground::Failable)
+				.Background(bFailableContext
+					? EVerseGraphRenderScopeBackground::Failable
+					: EVerseGraphRenderScopeBackground::Synchronization)
 				.ClipToBounds(true);
 		}
 		LocalBodyRenderScope->SetContent(FailureChain);
@@ -2004,6 +2013,8 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::FailableBlock:
 		return LOCTEXT("FailableBlockConditionKind", "Condition");
+	case EVerseVisualTileKind::SyncArm:
+		return FText::GetEmpty();
 	case EVerseVisualTileKind::Expression:
 		if (Tile.ExpressionKind == EVerseExpressionKind::Identifier)
 		{
@@ -2032,6 +2043,8 @@ FText SVerseTile::GetKindText() const
 			case EVerseControlKind::If: return LOCTEXT("IfKind", "If");
 			case EVerseControlKind::For: return LOCTEXT("ForKind", "For");
 			case EVerseControlKind::Loop: return LOCTEXT("LoopKind", "Loop");
+			case EVerseControlKind::Sync: return LOCTEXT("SyncKind", "Sync");
+			case EVerseControlKind::Block: return LOCTEXT("BlockKind", "Block");
 			default: return LOCTEXT("ControlKind", "Control");
 			}
 		}

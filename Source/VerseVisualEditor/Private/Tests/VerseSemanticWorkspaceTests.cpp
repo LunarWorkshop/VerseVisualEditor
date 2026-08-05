@@ -872,35 +872,42 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 			Workspace.GetLastSuccessfulSnapshot(),
 			Document.FilePath,
 			*ParsedDocument);
-		TArray<const FVerseVisualTile*> Operators;
-		TFunction<void(TConstArrayView<FVerseVisualTile>)> CollectOperators =
-			[&](TConstArrayView<FVerseVisualTile> Tiles)
+		struct FOperatorWithStatementScope
+		{
+			const FVerseVisualTile* Operator = nullptr;
+			FVerseTextRange StatementScope;
+		};
+		TArray<FOperatorWithStatementScope> Operators;
+		TFunction<void(TConstArrayView<FVerseVisualTile>, TOptional<FVerseTextRange>)> CollectOperators =
+			[&](TConstArrayView<FVerseVisualTile> Tiles, TOptional<FVerseTextRange> StatementScope)
 			{
 				for (const FVerseVisualTile& Tile : Tiles)
 				{
+					const TOptional<FVerseTextRange> TileStatementScope = Tile.bStatementLevel
+						? TOptional<FVerseTextRange>(Tile.Range)
+						: StatementScope;
 					if (Tile.OperatorSpelling == TEXT("-")
 						|| Tile.OperatorSpelling == TEXT("/"))
 					{
-						Operators.Add(&Tile);
+						Operators.Add({&Tile, TileStatementScope.Get(Tile.Range)});
 					}
-					CollectOperators(Tile.Children);
+					CollectOperators(Tile.Children, TileStatementScope);
 				}
 			};
-		CollectOperators(OperandAcceptance->GraphTiles);
+		CollectOperators(OperandAcceptance->GraphTiles, {});
 		TestEqual(TEXT("Identifier and literal operator fixtures are found"),
 			Operators.Num(), 2);
-		const FVerseVisualTile* Entry = OperandAcceptance->GraphTiles.FindByPredicate(
-			[](const FVerseVisualTile& Tile)
-			{
-				return Tile.Kind == EVerseVisualTileKind::FunctionEntry;
-			});
-		const FVerseVisualSocket* FloatProvider = Entry != nullptr
-			&& !Entry->GetValueOutputs().IsEmpty()
-			? &Entry->GetValueOutputs()[0]
+		FVerseVisualSocket FloatProvider;
+		FloatProvider.SemanticTypeName = TEXT("float");
+		FloatProvider.SemanticType = ComparableFloat != nullptr
+			? ComparableFloat->SemanticType
 			: nullptr;
-		TestNotNull(TEXT("Float provider socket is compiler-backed"), FloatProvider);
-		for (const FVerseVisualTile* Operator : Operators)
+		FloatProvider.SemanticSnapshot = Workspace.GetLastSuccessfulSnapshot();
+		TestNotNull(TEXT("Float provider uses a compiler-owned type"),
+			FloatProvider.SemanticType);
+		for (const FOperatorWithStatementScope& OperatorWithScope : Operators)
 		{
+			const FVerseVisualTile* Operator = OperatorWithScope.Operator;
 			if (!TestTrue(TEXT("Each binary operator has two inputs"),
 				Operator != nullptr && Operator->GetValueInputs().Num() == 2))
 			{
@@ -914,16 +921,16 @@ bool FVerseSemanticWorkspaceUnregisteredFileTest::RunTest(const FString& Paramet
 					Input.AcceptedSemanticType != nullptr
 						&& Input.AcceptedSemanticSnapshot
 							== Workspace.GetLastSuccessfulSnapshot());
-				if (FloatProvider != nullptr)
-				{
+			if (FloatProvider.SemanticType != nullptr)
+			{
 					TestTrue(
 						*FString::Printf(TEXT("%s input accepts a float provider"),
 							*Operator->OperatorSpelling),
 						FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
 							Document.FilePath,
-							Operator->Range.BeginByte,
+							OperatorWithScope.StatementScope.BeginByte,
 							*ParsedDocument,
-							*FloatProvider,
+							FloatProvider,
 							Input));
 				}
 			}

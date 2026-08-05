@@ -207,6 +207,9 @@ private:
 		const FVerseVisualClauseDescriptor& Clause,
 		int32 FromIndex,
 		int32 ToIndex);
+	FReply HandleSyncArmControl(
+		const FVerseVisualClauseDescriptor& Clause,
+		int32 ArmIndex);
 	TArray<struct FVerseSemanticDocumentInput> CollectSemanticDocumentInputs(
 		bool bOnlyCleanDocuments = false) const;
 	void QueueSemanticAnalysis(bool bDebounce);

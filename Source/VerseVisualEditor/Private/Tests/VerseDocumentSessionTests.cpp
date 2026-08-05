@@ -1041,4 +1041,125 @@ bool FVerseRenameAndExternalChangePolicyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseSyncArmEditingTest,
+	"VerseVisualEditor.FunctionGraph.Sync.ArmEditing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseSyncArmEditingTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"ControlSync()<suspends> : tuple(int, int) =\n"
+		"    sync:\n"
+		"        block {}\n"
+		"        2\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	TArray<FVerseVisualTile> StableGraph;
+	auto FindSync = [&Session, &StableGraph]() -> const FVerseVisualTile*
+	{
+		const FVerseVisualTile* Function = Session.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		if (Function == nullptr)
+		{
+			return nullptr;
+		}
+		const TArray<FVerseVisualTile> Graph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*Function, Session.GetParseSnapshot());
+		StableGraph = Graph;
+		return StableGraph.FindByPredicate([](const FVerseVisualTile& Tile)
+		{
+			return Tile.ControlKind == EVerseControlKind::Sync;
+		});
+	};
+
+	FVerseExpressionAction Literal;
+	Literal.SourceForm = EVerseExpressionSourceForm::Literal;
+	Literal.SourceSpelling = TEXT("1");
+	FText Error;
+	const FVerseVisualTile* Sync = FindSync();
+	if (!TestNotNull(TEXT("Sync reparses into the function graph"), Sync)
+		|| !TestEqual(TEXT("Sync begins with two arms"), Sync->Children.Num(), 2))
+	{
+		return false;
+	}
+	TestTrue(*FString::Printf(TEXT("Empty arm accepts its first direct expression: %s"), *Error.ToString()),
+		FVerseClauseEditing::InsertExpression(
+			Session, Sync->Children[0].BodyClause, 0, Literal, Error));
+	TestFalse(TEXT("First insertion removes the invisible provisional block wrapper"),
+		FString(UTF8_TO_TCHAR(*Session.GetCurrentUtf8())).Contains(TEXT("block {}")));
+
+	Sync = FindSync();
+	if (!TestNotNull(TEXT("Direct arm reparses"), Sync))
+	{
+		return false;
+	}
+	Literal.SourceSpelling = TEXT("3");
+	TestTrue(*FString::Printf(TEXT("Second arm statement creates a hidden block: %s"), *Error.ToString()),
+		FVerseClauseEditing::InsertExpression(
+			Session, Sync->Children[0].BodyClause, 1, Literal, Error));
+	Sync = FindSync();
+	TestTrue(TEXT("Two sequential statements are represented by one flattened arm"),
+		Sync != nullptr && Sync->Children[0].BodyClause.bSyncArmUsesBlock
+			&& Sync->Children[0].Children.Num() == 2);
+
+	if (Sync == nullptr)
+	{
+		return false;
+	}
+	TestTrue(*FString::Printf(TEXT("Deleting to one statement unwraps the arm: %s"), *Error.ToString()),
+		FVerseClauseEditing::DeleteExpression(
+			Session, Sync->Children[0].BodyClause, 1, Error));
+	Sync = FindSync();
+	TestTrue(TEXT("One remaining statement is direct source again"),
+		Sync != nullptr && !Sync->Children[0].BodyClause.bSyncArmUsesBlock
+			&& Sync->Children[0].Children.Num() == 1);
+
+	if (Sync == nullptr)
+	{
+		return false;
+	}
+	FVerseTextRange ProvisionalRange;
+	TestTrue(*FString::Printf(TEXT("Deleting the final statement restores a provisional arm: %s"),
+		*Error.ToString()),
+		FVerseClauseEditing::DeleteExpression(
+			Session, Sync->Children[0].BodyClause, 0, Error, &ProvisionalRange));
+	TestTrue(TEXT("Final deletion restores exact source-safe block placeholder"),
+		ProvisionalRange.IsSet()
+			&& Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(ProvisionalRange)
+				== TEXT("block {}"));
+
+	Sync = FindSync();
+	if (Sync == nullptr)
+	{
+		return false;
+	}
+	FVerseExpressionAction EmptyArm;
+	EmptyArm.SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	EmptyArm.SourceSpelling = TEXT("block {}");
+	TestTrue(*FString::Printf(TEXT("A third arm can be appended atomically: %s"), *Error.ToString()),
+		FVerseClauseEditing::InsertExpression(
+			Session, Sync->BodyClause, Sync->BodyClause.Items.Num(), EmptyArm, Error));
+	Sync = FindSync();
+	TestTrue(TEXT("Added arm retains source order"), Sync != nullptr && Sync->Children.Num() == 3);
+	if (Sync != nullptr)
+	{
+		TestTrue(*FString::Printf(TEXT("The additional arm can be removed atomically: %s"),
+			*Error.ToString()),
+			FVerseClauseEditing::DeleteExpression(Session, Sync->BodyClause, 2, Error));
+		Sync = FindSync();
+		TestTrue(TEXT("Removing the third arm restores the compiler minimum"),
+			Sync != nullptr && Sync->Children.Num() == 2);
+	}
+	return true;
+}
+
 #endif

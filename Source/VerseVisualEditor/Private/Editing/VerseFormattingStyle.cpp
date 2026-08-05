@@ -352,3 +352,18 @@ FString FVerseSyntaxEmitter::IfTemplate(const FVerseFormattingStyleProfile& Styl
 	return Condition + TEXT(":") + Newline
 		+ Style.IndentationUnit + TEXT("block {}");
 }
+
+FString FVerseSyntaxEmitter::SyncTemplate(const FVerseFormattingStyleProfile& Style)
+{
+	const FString Newline = LineEnding(Style);
+	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+	{
+		return TEXT("sync {") + Newline
+				+ Style.IndentationUnit + TEXT("block {};") + Newline
+				+ Style.IndentationUnit + TEXT("block {}") + Newline
+				+ TEXT("}");
+	}
+	return TEXT("sync:") + Newline
+			+ Style.IndentationUnit + TEXT("block {}") + Newline
+			+ Style.IndentationUnit + TEXT("block {}");
+}

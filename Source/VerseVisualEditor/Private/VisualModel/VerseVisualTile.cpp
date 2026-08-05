@@ -6,6 +6,12 @@
 
 namespace
 {
+	bool OwnsNestedRenderScope(const FVerseVisualTile& Tile)
+	{
+		return Tile.Kind == EVerseVisualTileKind::FailableBlock
+				|| Tile.Kind == EVerseVisualTileKind::SyncArm;
+	}
+
 	const FVerseVisualTile* FindTileById(
 		TConstArrayView<FVerseVisualTile> Tiles,
 		FVerseVisualTileId Id)
@@ -418,12 +424,17 @@ namespace
 		Tile.bStatementLevel = bStatementLevel;
 		Tile.bValueConsumed = bValueConsumed;
 		Tile.bProducesValue = Descriptor.Kind == EVerseExpressionKind::Identifier
-			|| Descriptor.Kind == EVerseExpressionKind::Literal
-			|| IsVerseOperatorExpression(Descriptor.Kind)
-			|| Descriptor.Kind == EVerseExpressionKind::Call;
+				|| Descriptor.Kind == EVerseExpressionKind::Literal
+				|| IsVerseOperatorExpression(Descriptor.Kind)
+				|| Descriptor.Kind == EVerseExpressionKind::Call
+				|| (Descriptor.Kind == EVerseExpressionKind::Control
+						&& Descriptor.ControlKind == EVerseControlKind::Sync);
 		if (Tile.bProducesValue)
 		{
 			Tile.bProducesValue = Descriptor.IntrinsicTypeName != TEXT("void")
+				&& (Descriptor.SemanticTypeName.IsEmpty()
+					|| !Descriptor.SemanticTypeName.TrimStartAndEnd()
+						.Equals(TEXT("void"), ESearchCase::IgnoreCase))
 				&& (!Descriptor.TypeRange.IsSet()
 					|| !Snapshot.GetDocument()->DecodeOriginalRange(Descriptor.TypeRange)
 						.TrimStartAndEnd().Equals(TEXT("void"), ESearchCase::IgnoreCase));
@@ -482,7 +493,7 @@ namespace
 			}
 		}
 		if (Descriptor.Kind == EVerseExpressionKind::Control
-			&& Descriptor.ControlKind == EVerseControlKind::If)
+				&& Descriptor.ControlKind == EVerseControlKind::If)
 		{
 			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
 				Descriptor.ControlRegions.FindByPredicate(
@@ -549,6 +560,89 @@ namespace
 					else if (Region.FirstOperandIndex >= FirstConditionIndex)
 					{
 						Region.FirstOperandIndex += IndexDelta;
+					}
+				}
+			}
+		}
+		if (Descriptor.Kind == EVerseExpressionKind::Control
+				&& Descriptor.ControlKind == EVerseControlKind::Sync)
+		{
+			const FVerseVisualExpressionDescriptor::FControlRegion* BodyRegion =
+					Descriptor.ControlRegions.FindByPredicate(
+						[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+						{
+							return Region.Kind == EVerseControlRegionKind::Body;
+						});
+			if (BodyRegion != nullptr
+				&& BodyRegion->FirstOperandIndex >= 0
+				&& BodyRegion->FirstOperandIndex + BodyRegion->OperandCount <= Tile.Children.Num())
+			{
+				Tile.BodyClause = MakeVisualControlClauseDescriptor(Descriptor, *BodyRegion);
+				TArray<FVerseVisualTile> Arms;
+				Arms.Reserve(BodyRegion->OperandCount);
+				for (int32 Offset = 0; Offset < BodyRegion->OperandCount; ++Offset)
+				{
+					const int32 OperandIndex = BodyRegion->FirstOperandIndex + Offset;
+					const FVerseVisualExpressionDescriptor& ArmDescriptor =
+							Descriptor.Operands[OperandIndex];
+				FVerseVisualTile ParsedArm = MoveTemp(Tile.Children[OperandIndex]);
+				FVerseVisualTile& Arm = Arms.AddDefaulted_GetRef();
+				Arm.Kind = EVerseVisualTileKind::SyncArm;
+				Arm.Range = ArmDescriptor.Range;
+					Arm.FirstSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(
+							ArmDescriptor.Range.BeginByte);
+					Arm.LastSourceLine = Snapshot.GetDocument()->GetOriginalLineNumber(FMath::Max(
+							ArmDescriptor.Range.BeginByte, ArmDescriptor.Range.EndByte() - 1));
+					Arm.BodyClause.bSyncArm = true;
+					Arm.BodyClause.SyncArmSourceRange = ArmDescriptor.Range;
+
+					const bool bExplicitBlock = ArmDescriptor.Kind == EVerseExpressionKind::Control
+							&& ArmDescriptor.ControlKind == EVerseControlKind::Block;
+					Arm.BodyClause.bSyncArmUsesBlock = bExplicitBlock;
+					if (bExplicitBlock)
+					{
+						const auto* BlockBody = ArmDescriptor.ControlRegions.FindByPredicate(
+								[](const FVerseVisualExpressionDescriptor::FControlRegion& Region)
+								{
+									return Region.Kind == EVerseControlRegionKind::Body;
+								});
+						if (BlockBody != nullptr)
+						{
+							Arm.BodyClause = MakeVisualControlClauseDescriptor(
+									ArmDescriptor, *BlockBody);
+							Arm.BodyClause.bSyncArm = true;
+							Arm.BodyClause.bSyncArmUsesBlock = true;
+							Arm.BodyClause.SyncArmSourceRange = ArmDescriptor.Range;
+							Arm.Children = MoveTemp(ParsedArm.Children);
+						}
+					}
+					else
+					{
+						FVerseVisualClauseItemDescriptor& Item =
+								Arm.BodyClause.Items.AddDefaulted_GetRef();
+						Item.Expression = ArmDescriptor;
+						Item.bIsFinalValuePosition = true;
+						Arm.BodyClause.InteriorRange = ArmDescriptor.Range;
+						Arm.BodyClause.EmptyBodyInsertionAnchor = FVerseTextRange(
+								ArmDescriptor.Range.Revision,
+								FVerseByteRange::FromBounds(
+										ArmDescriptor.Range.EndByte(), ArmDescriptor.Range.EndByte()));
+						Arm.Children.Add(MoveTemp(ParsedArm));
+					}
+
+					for (int32 ChildIndex = 0; ChildIndex < Arm.Children.Num(); ++ChildIndex)
+					{
+						Arm.Children[ChildIndex].EditableClause = Arm.BodyClause;
+						Arm.Children[ChildIndex].ClauseItemIndex = ChildIndex;
+					}
+				}
+				Tile.Children = MoveTemp(Arms);
+				for (FVerseVisualExpressionDescriptor::FControlRegion& Region : Tile.ControlRegions)
+				{
+					if (Region.Kind == EVerseControlRegionKind::Body)
+					{
+						Region.FirstOperandIndex = 0;
+						Region.OperandCount = Tile.Children.Num();
 					}
 				}
 			}
@@ -776,8 +870,8 @@ private:
 			}
 			return;
 		}
-		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
-		{
+                if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+                {
 			const FVerseVisualSocketId ClauseInsertion{
 				EVerseVisualSocketDirection::Output,
 				EVerseVisualSocketRole::ClauseInsertion, 0};
@@ -821,8 +915,20 @@ private:
 						? Tile.BodyClause.Items.Num()
 						: Child.ClauseItemIndex + 1);
 			}
-			return;
-		}
+                        return;
+                }
+                if (Tile.Kind == EVerseVisualTileKind::SyncArm)
+                {
+                        const FVerseVisualSocketId ClauseInsertion{
+                                EVerseVisualSocketDirection::Output,
+                                EVerseVisualSocketRole::ClauseInsertion, 0};
+                        AddOther(Tile, ClauseInsertion.Direction,
+                                ClauseInsertion.Role, ClauseInsertion.Index);
+                        AddInsertionTarget(
+                                Tile, ClauseInsertion, Tile.BodyClause,
+                                Tile.BodyClause.Items.Num());
+                        return;
+                }
 
 		if (Tile.bStatementLevel)
 		{
@@ -1162,7 +1268,7 @@ namespace
 		{
 			return;
 		}
-		FVerseVisualConnection& Connection = Connections.AddDefaulted_GetRef();
+                FVerseVisualConnection& Connection = Connections.AddDefaulted_GetRef();
 		Connection.Source = {SourceTile.Id, SourceSocket};
 		Connection.Axis = EVerseVisualConnectionAxis::Horizontal;
 		Connection.Outcome = EVerseExpressionOutcome::FailureOnly;
@@ -1212,9 +1318,9 @@ namespace
 		FVerseGraphRenderScopeId ParentScope)
 	{
 		const FVerseGraphRenderScopeId ContentScope =
-			Tile.Kind == EVerseVisualTileKind::FailableBlock
-				? FVerseGraphRenderScopeId::ForTile(Tile.Id)
-				: ParentScope;
+				OwnsNestedRenderScope(Tile)
+						? FVerseGraphRenderScopeId::ForTile(Tile.Id)
+						: ParentScope;
 		for (const FVerseVisualTile& Child : Tile.Children)
 		{
 			BuildNestedConnections(Child, Connections, ContentScope);
@@ -1281,6 +1387,27 @@ namespace
 			return;
 		}
 
+		if (Tile.Kind == EVerseVisualTileKind::SyncArm)
+		{
+			TArray<const FVerseVisualTile*> Sequence;
+			for (const FVerseVisualTile& Child : Tile.Children)
+			{
+				if (Child.FindSocket({EVerseVisualSocketDirection::Input,
+						EVerseVisualSocketRole::Execution, 0}))
+				{
+					Sequence.Add(&Child);
+				}
+			}
+			AddSequentialConnections(
+					Connections,
+					Sequence,
+					&Tile,
+					{EVerseVisualSocketDirection::Output,
+							EVerseVisualSocketRole::ClauseInsertion, 0},
+					ContentScope);
+			return;
+		}
+
 		if (Tile.ExpressionKind == EVerseExpressionKind::Control
 			&& Tile.ControlKind == EVerseControlKind::If)
 		{
@@ -1341,14 +1468,16 @@ namespace
 		TArray<FVerseGraphRenderScope>& Scopes)
 	{
 		FVerseGraphRenderScopeId ContentScope = ParentScope;
-		if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
+		if (OwnsNestedRenderScope(Tile))
 		{
 			ContentScope = FVerseGraphRenderScopeId::ForTile(Tile.Id);
 			Scopes.Add({
 				ContentScope,
 				ParentScope,
 				Tile.Id,
-				EVerseGraphRenderScopeBackground::Failable,
+				Tile.Kind == EVerseVisualTileKind::FailableBlock
+						? EVerseGraphRenderScopeBackground::Failable
+						: EVerseGraphRenderScopeBackground::Synchronization,
 				true});
 		}
 		for (const FVerseVisualTile& Child : Tile.Children)
@@ -1493,9 +1622,9 @@ bool FVerseVisualTileBuilder::ValidateRenderScopes(
 			TileScopes.Add(Tile.Id, ContainingScope);
 			TilesById.Add(Tile.Id, &Tile);
 			const FVerseGraphRenderScopeId ContentScope =
-				Tile.Kind == EVerseVisualTileKind::FailableBlock
-					? FVerseGraphRenderScopeId::ForTile(Tile.Id)
-					: ContainingScope;
+					OwnsNestedRenderScope(Tile)
+							? FVerseGraphRenderScopeId::ForTile(Tile.Id)
+							: ContainingScope;
 			for (const FVerseVisualTile& Child : Tile.Children)
 			{
 				RegisterTiles(Child, ContentScope);
@@ -1511,8 +1640,8 @@ bool FVerseVisualTileBuilder::ValidateRenderScopes(
 		const FVerseVisualTile* const* Tile = TilesById.Find(Endpoint.Tile);
 		const FVerseGraphRenderScopeId* ContainingScope = TileScopes.Find(Endpoint.Tile);
 		if (Tile != nullptr && ContainingScope != nullptr
-			&& (*Tile)->Kind == EVerseVisualTileKind::FailableBlock
-			&& Endpoint.Socket.Role == EVerseVisualSocketRole::ClauseInsertion)
+				&& OwnsNestedRenderScope(**Tile)
+				&& Endpoint.Socket.Role == EVerseVisualSocketRole::ClauseInsertion)
 		{
 			return FVerseGraphRenderScopeId::ForTile(Endpoint.Tile);
 		}

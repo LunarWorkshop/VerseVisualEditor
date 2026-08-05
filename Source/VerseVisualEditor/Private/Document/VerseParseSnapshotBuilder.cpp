@@ -1078,12 +1078,28 @@ namespace VerseParseSnapshotBuilder
 			const FUtf8StringView NameText = NameRange.IsSet()
 				? SourceIndex.GetSource().Mid(NameRange.BeginByte, NameRange.NumBytes)
 				: FUtf8StringView();
-			if (NameText == UTF8TEXTVIEW("for") || NameText == UTF8TEXTVIEW("loop"))
+			if (NameText == UTF8TEXTVIEW("for")
+					|| NameText == UTF8TEXTVIEW("loop")
+					|| NameText == UTF8TEXTVIEW("sync")
+					|| NameText == UTF8TEXTVIEW("block"))
 			{
 				Result.Kind = EVerseExpressionKind::Control;
-				Result.ControlKind = NameText == UTF8TEXTVIEW("for")
-					? EVerseControlKind::For
-					: EVerseControlKind::Loop;
+				if (NameText == UTF8TEXTVIEW("for"))
+				{
+					Result.ControlKind = EVerseControlKind::For;
+				}
+				else if (NameText == UTF8TEXTVIEW("loop"))
+				{
+					Result.ControlKind = EVerseControlKind::Loop;
+				}
+				else if (NameText == UTF8TEXTVIEW("sync"))
+				{
+					Result.ControlKind = EVerseControlKind::Sync;
+				}
+				else
+				{
+					Result.ControlKind = EVerseControlKind::Block;
+				}
 				Result.OperatorRange = NameRange;
 				const int32 ClauseCount = Macro->GetChildCount() - 1;
 				for (int32 ClauseIndex = 0; ClauseIndex < ClauseCount; ++ClauseIndex)
@@ -1091,8 +1107,8 @@ namespace VerseParseSnapshotBuilder
 					AppendControlRegion(
 						*Macro->GetClause(ClauseIndex),
 						Result.ControlKind == EVerseControlKind::For && ClauseIndex == 0
-							? EVerseControlRegionKind::Condition
-							: EVerseControlRegionKind::Body);
+								? EVerseControlRegionKind::Condition
+								: EVerseControlRegionKind::Body);
 				}
 				return Result;
 			}

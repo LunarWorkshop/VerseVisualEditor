@@ -88,4 +88,6 @@ public:
 		const FVerseFormattingStyleProfile& Style);
 	/** Complete, source-safe initial if expression for the selected project body syntax. */
 	static FString IfTemplate(const FVerseFormattingStyleProfile& Style);
+	/** Complete sync expression with the compiler-required two provisional arms. */
+	static FString SyncTemplate(const FVerseFormattingStyleProfile& Style);
 };
