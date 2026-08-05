@@ -6,6 +6,7 @@
 #include "Slate/VerseGraphCoordinates.h"
 #include "Slate/VerseGraphMotion.h"
 #include "Slate/VerseVisualEditorStyle.h"
+#include "VerseParseSnapshotBuilder.h"
 
 #include "GraphEditorSettings.h"
 #include "Misc/AutomationTest.h"

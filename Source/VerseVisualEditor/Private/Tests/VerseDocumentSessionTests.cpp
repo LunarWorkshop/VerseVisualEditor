@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Document/VerseDocumentSession.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "Editing/VerseClauseEditing.h"
 #include "Editing/VerseExpressionActions.h"
 #include "Editing/VerseFormattingStyle.h"

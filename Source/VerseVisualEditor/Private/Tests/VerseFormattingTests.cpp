@@ -3,6 +3,7 @@
 #include "Document/VerseDocumentSession.h"
 #include "Editing/VerseFormattingEdit.h"
 #include "Editing/VerseFormattingStyle.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "VisualModel/VerseTileProperties.h"
 
 #include "Interfaces/IPluginManager.h"

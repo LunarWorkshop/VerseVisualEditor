@@ -1,3 +1,5 @@
+using { /Verse.org/Simulation }
+
 # Global-scope visual tile corpus: first comment.
 # A continuation of the first comment.
 <# Global-scope visual tile corpus: second comment. #>
@@ -137,6 +139,22 @@ Control := module:
             if (Variable >= Input):
                 break
         69.0
+
+Suspends := module:
+    LoadGizmo()<suspends> : void =
+        Sleep(1.0)
+
+    LoadDoodad()<suspends> : void =
+        Sleep(2.0)
+
+    LoadWidget()<suspends> : void =
+        Sleep(3.0)
+
+    CorpusFunctionSync()<suspends> : void =
+        sync:
+            LoadGizmo()
+            LoadDoodad()
+            LoadWidget()
 
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"
