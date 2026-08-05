@@ -3,31 +3,27 @@
 Verse Visual Editor presents Verse code as a visual workspace inspired by both
 Blueprint and block-based programming tools like Scratch.
 
-> Verse Visual Editor is in early development and is not yet ready for
-> production use.
+> [!CAUTION]
+> **Verse Visual Editor is in early development and is not yet ready for
+> production use.**
 
 ## About
 
-You're used to coding in Blueprints and you want to keep doing it. This editor
-is designed to preserve that workflow as much as possible.
+You're used to coding in Blueprints and you want to keep doing it. This editor is designed to preserve that workflow as much as possible.
 
-You can load any verse file, not just one made in a graph editor. You can edit
-code in the graph without affecting other lines.
+You can load any verse file, not just one made in a graph editor. You can edit code in the graph without affecting surrounding lines.
 
 ![Verse Visual Editor tile editing](TileEditing.webp)
 
-When other people update the Verse code it automatically updates the graph.
-You can merge your changes with those of other people.
+When other people update your Verse code it automatically updates the graph. You can merge your changes with those of other people.
 
 ![Verse Visual Editor tile editing](TextEditing.webp)
 
-You can see how Verse's failable blocks work and author <decides> code directly
-from the graph. You can write if and for expressions.
+You can see how Verse failable blocks work and author `<decides>` code directly from the graph. Write natural Verse if and for expressions.
 
 ![Verse Visual Editor tile editing](ConditionEditing.webp)
 
-You can write <suspends> functions natively and author sync/race/rush/etc
-code directly from the graph.
+You can write `<suspends>` functions natively and author sync/race/rush/etc code directly from the graph.
 
 ## Getting Started
 
