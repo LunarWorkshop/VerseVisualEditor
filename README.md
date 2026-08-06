@@ -1,7 +1,6 @@
 # Verse Visual Editor
 
-Verse Visual Editor presents Verse code as a visual workspace inspired by both
-Blueprint and block-based programming tools like Scratch.
+Verse Visual Editor presents Verse code as a visual workspace inspired by Blueprint, that directly reads and writes regular Verse code so that you can work seamlessly with others who edit the text directly.
 
 > [!CAUTION]
 > **Verse Visual Editor is in early development and is not yet ready for
