@@ -8,9 +8,9 @@ Verse Visual Editor presents Verse code as a visual workspace inspired by Bluepr
 
 ## About
 
-You're used to coding in Blueprints and you want to keep doing it. This editor is designed to preserve that workflow as much as possible.
+You're used to coding in Blueprints and you want to keep doing it. This editor is designed to preserve that workflow as much as possible, while letting you work along side text edits and take control of the full power of Verse.
 
-You can load any verse file, not just one made in a graph editor. You can edit code in the graph without affecting surrounding lines.
+You can load any Verse file, not just one made in a graph editor. You can edit code in the graph without affecting surrounding lines.
 
 ![Verse Visual Editor tile editing](TileEditing.webp)
 
