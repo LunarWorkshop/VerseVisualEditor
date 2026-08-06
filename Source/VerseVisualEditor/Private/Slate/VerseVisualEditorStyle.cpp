@@ -5,6 +5,7 @@
 #include "GraphEditorSettings.h"
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
+#include "VerseParseSnapshotBuilder.h"
 #include "VisualModel/VerseVisualTile.h"
 
 namespace VerseVisualEditorStyle
