@@ -18,11 +18,11 @@ When other people update your Verse code it automatically updates the graph. You
 
 ![Verse Visual Editor text editing](TextEditing.webp)
 
-You can see how Verse failable blocks work and author `<decides>` code directly from the graph. Write natural Verse if and for expressions.
+You can see how Verse failable blocks work and author `<decides>` code directly from the graph. Write natural Verse `if` and `for` expressions.
 
 ![Verse Visual Editor failable context editing](ConditionEditing.webp)
 
-You can write `<suspends>` functions natively and author sync/race/rush/etc code directly from the graph.
+You can write `<suspends>` functions natively and author `sync`/`race`/`rush`/etc code directly from the graph.
 
 ![Verse Visual Editor sync editing](SyncEditing.webp)
 
