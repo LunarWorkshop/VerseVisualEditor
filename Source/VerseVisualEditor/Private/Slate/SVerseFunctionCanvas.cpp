@@ -9,6 +9,7 @@ void SVerseFunctionCanvas::Construct(
 	[
 		SAssignNew(Surface, SVerseGraphSurface, InitialViewState, bCenterInitially)
 		.UseEdgePanPadding(true)
+		.BackgroundTint(InArgs._BackgroundTint)
 		.InitialAnchor(InArgs._InitialAnchor)
 		.Connections(InArgs._Connections)
 		.MotionController(InArgs._MotionController)
@@ -31,13 +32,15 @@ void SVerseFunctionCanvas::RefreshContent(
 	TSharedRef<SWidget> InContent,
 	TArray<FVerseGraphConnection> InConnections,
 	TSharedPtr<SWidget> InInitialAnchor,
-	TSharedPtr<FVerseGraphEndpointRegistry> InEndpointRegistry)
+	TSharedPtr<FVerseGraphEndpointRegistry> InEndpointRegistry,
+	FLinearColor InBackgroundTint)
 {
 	if (Surface.IsValid())
 	{
 		Surface->SetContentAndAnchor(InContent, MoveTemp(InInitialAnchor));
 		Surface->SetConnections(MoveTemp(InConnections));
 		Surface->SetEndpointRegistry(MoveTemp(InEndpointRegistry));
+		Surface->SetBackgroundTint(InBackgroundTint);
 	}
 }
 

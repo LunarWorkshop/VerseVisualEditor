@@ -153,10 +153,12 @@ DECLARE_DELEGATE_ThreeParams(
 class SVerseGraphSurface final : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseGraphSurface)
-		: _UseEdgePanPadding(false)
-	{}
-		SLATE_ARGUMENT(bool, UseEdgePanPadding)
+        SLATE_BEGIN_ARGS(SVerseGraphSurface)
+                : _UseEdgePanPadding(false)
+				, _BackgroundTint(FLinearColor::Transparent)
+        {}
+                SLATE_ARGUMENT(bool, UseEdgePanPadding)
+				SLATE_ARGUMENT(FLinearColor, BackgroundTint)
 		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
@@ -183,8 +185,9 @@ public:
 		TSharedRef<SWidget> InContent,
 		TSharedPtr<SWidget> InAnchor);
 	void SetInitialAnchor(TSharedPtr<SWidget> InAnchor);
-	void SetConnections(TArray<FVerseGraphConnection> InConnections);
-	void SetEndpointRegistry(TSharedPtr<FVerseGraphEndpointRegistry> InRegistry);
+        void SetConnections(TArray<FVerseGraphConnection> InConnections);
+        void SetEndpointRegistry(TSharedPtr<FVerseGraphEndpointRegistry> InRegistry);
+		void SetBackgroundTint(FLinearColor InBackgroundTint);
 	TSharedRef<FVerseGraphMotionController> GetMotionController() const
 	{
 		return MotionController.ToSharedRef();
@@ -262,8 +265,9 @@ private:
 	FOnVerseGraphConnectionTargetDropped OnConnectionDropped;
 	FSimpleDelegate OnConnectionCancelled;
 	FSimpleDelegate OnBackgroundClicked;
-	float Zoom = 1.0f;
-	bool bUseEdgePanPadding = false;
+        float Zoom = 1.0f;
+		FLinearColor BackgroundTint = FLinearColor::Transparent;
+        bool bUseEdgePanPadding = false;
 	bool bPendingInitialCenter = false;
 	bool bIsPanning = false;
 	bool bPreviewFrozen = false;

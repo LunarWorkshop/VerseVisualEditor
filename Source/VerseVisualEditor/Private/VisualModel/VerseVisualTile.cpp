@@ -1166,6 +1166,9 @@ TArray<FVerseVisualTile> FVerseVisualTileBuilder::BuildFunctionGraph(
 		? Snapshot.GetDocument()->GetOriginalLineNumber(
 			FMath::Max(FunctionTile.HeaderRange.BeginByte, FunctionTile.HeaderRange.EndByte() - 1))
 		: FunctionTile.FirstSourceLine;
+	Entry.FunctionEffectSpecifierRanges = FunctionTile.FunctionEffectSpecifierRanges;
+	Entry.SemanticFunction = FunctionTile.SemanticFunction;
+	Entry.SemanticSnapshot = FunctionTile.SemanticSnapshot;
 	Entry.FunctionParameters = FunctionTile.FunctionParameters;
 	Entry.EditableClause = FunctionTile.BodyClause;
 	Entry.ClauseItemIndex = INDEX_NONE;

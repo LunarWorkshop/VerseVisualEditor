@@ -156,6 +156,14 @@ Suspends := module:
             LoadDoodad()
             LoadWidget()
 
+    CorpusFunctionSyncBlock()<suspends> : void =
+        sync:
+            block {
+                LoadGizmo()
+                LoadDoodad()
+            }
+            LoadWidget()
+
 CorpusConstantOne : string = "one"
 CorpusConstantTwo : string = "two"
 

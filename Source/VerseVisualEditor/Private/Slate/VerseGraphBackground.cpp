@@ -8,9 +8,10 @@ void PaintVerseGraphBackground(
 	const FPaintGeometry& CanvasPaintGeometry,
 	FVector2D CanvasSize,
 	FVector2D GraphOrigin,
-	float Zoom,
-	FSlateWindowElementList& OutDrawElements,
-	int32 LayerId)
+        float Zoom,
+        FSlateWindowElementList& OutDrawElements,
+        int32 LayerId,
+        FLinearColor BackgroundTint)
 {
 	const UEditorStyleSettings* Settings = GetDefault<UEditorStyleSettings>();
 	const FSlateBrush* DefaultBackground = FAppStyle::GetBrush(TEXT("Graph.Panel.SolidBackground"));
@@ -23,8 +24,20 @@ void PaintVerseGraphBackground(
 		LayerId,
 		CanvasPaintGeometry,
 		Background,
-		ESlateDrawEffect::None,
-		Background->TintColor.GetSpecifiedColor());
+                ESlateDrawEffect::None,
+                Background->TintColor.GetSpecifiedColor());
+
+	if (BackgroundTint.A > 0.0f)
+	{
+		FSlateDrawElement::MakeBox(
+			OutDrawElements,
+			LayerId + 1,
+			CanvasPaintGeometry,
+			FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")),
+			ESlateDrawEffect::None,
+			BackgroundTint);
+		++LayerId;
+	}
 
 	if (!Settings->bUseGrid)
 	{

@@ -46,6 +46,7 @@
 #include "Editing/VerseExpressionActions.h"
 #include "Document/VerseExternalChange.h"
 #include "VisualModel/VerseFunctionNavigation.h"
+#include "VisualModel/VerseFunctionEffects.h"
 #include "Editing/VerseIdentifier.h"
 #include "Editing/VerseProvisionalState.h"
 #include "Semantics/VerseSemanticCandidates.h"
@@ -578,31 +579,29 @@ namespace
                                         Columns->AddSlot().AutoWidth().VAlign(VAlign_Top)
                                         .Padding(ArmIndex == 0 ? 0.0f : 18.0f, 0.0f, 0.0f, 0.0f)
                                         [
-                                                SNew(SVerticalBox)
-                                                + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
-                                                [
-                                                        SNew(SButton)
-                                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                                        .ContentPadding(FMargin(3.0f))
-                                                        .IsEnabled(Tile.Children.Num() > 2)
-                                                        .ToolTipText(Tile.Children.Num() > 2
-                                                                ? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
-                                                                : LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
-                                                        .OnClicked_Lambda([OnSyncArmControl,
-                                                                Clause = Tile.BodyClause, ArmIndex]() mutable
-                                                        {
-                                                                return OnSyncArmControl.IsBound()
-                                                                        ? OnSyncArmControl.Execute(Clause, ArmIndex)
-                                                                        : FReply::Unhandled();
-                                                        })
-                                                        [
-                                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
-                                                        ]
-                                                ]
-                                                + SVerticalBox::Slot().AutoHeight()
-                                                [
-                                                        Arm.Widget
-                                                ]
+						SNew(SOverlay)
+						+ SOverlay::Slot()[Arm.Widget]
+						+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top)
+						.Padding(FMargin(4.0f))
+						[
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(3.0f))
+							.IsEnabled(Tile.Children.Num() > 2)
+							.ToolTipText(Tile.Children.Num() > 2
+								? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
+								: LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
+							.OnClicked_Lambda([OnSyncArmControl,
+								Clause = Tile.BodyClause, ArmIndex]() mutable
+							{
+								return OnSyncArmControl.IsBound()
+									? OnSyncArmControl.Execute(Clause, ArmIndex)
+									: FReply::Unhandled();
+							})
+							[
+								SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
+							]
+						]
                                         ];
                                 }
                                 Columns->AddSlot().AutoWidth().VAlign(VAlign_Top)
@@ -621,7 +620,7 @@ namespace
                                                 SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))
                                         ]
                                 ];
-                                Arms = SNew(SBox).Padding(FMargin(10.0f))[Columns];
+                                Arms = SNew(SBox).Padding(FMargin(0.0f))[Columns];
                         }
                         else
                         {
@@ -645,32 +644,29 @@ namespace
                                         }
                                         Rows->AddSlot().AutoHeight()
                                         [
-                                                SNew(SHorizontalBox)
-                                                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
-                                                .Padding(0.0f, 2.0f, 5.0f, 0.0f)
-                                                [
-                                                        SNew(SButton)
-                                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                                        .ContentPadding(FMargin(3.0f))
-                                                        .IsEnabled(Tile.Children.Num() > 2)
-                                                        .ToolTipText(Tile.Children.Num() > 2
-                                                                ? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
-                                                                : LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
-                                                        .OnClicked_Lambda([OnSyncArmControl,
-                                                                Clause = Tile.BodyClause, ArmIndex]() mutable
-                                                        {
-                                                                return OnSyncArmControl.IsBound()
-                                                                        ? OnSyncArmControl.Execute(Clause, ArmIndex)
-                                                                        : FReply::Unhandled();
-                                                        })
-                                                        [
-                                                                SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
-                                                        ]
-                                                ]
-                                                + SHorizontalBox::Slot().AutoWidth()
-                                                [
-                                                        Arm.Widget
-                                                ]
+						SNew(SOverlay)
+						+ SOverlay::Slot()[Arm.Widget]
+						+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top)
+						.Padding(FMargin(4.0f))
+						[
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(3.0f))
+							.IsEnabled(Tile.Children.Num() > 2)
+							.ToolTipText(Tile.Children.Num() > 2
+								? LOCTEXT("RemoveSyncArmTooltip", "Remove this concurrent arm")
+								: LOCTEXT("SyncMinimumArmsTooltip", "Verse sync expressions require at least two arms"))
+							.OnClicked_Lambda([OnSyncArmControl,
+								Clause = Tile.BodyClause, ArmIndex]() mutable
+							{
+								return OnSyncArmControl.IsBound()
+									? OnSyncArmControl.Execute(Clause, ArmIndex)
+									: FReply::Unhandled();
+							})
+							[
+								SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))
+							]
+						]
                                         ];
                                 }
                                 Rows->AddSlot().AutoHeight().HAlign(HAlign_Left)
@@ -689,7 +685,7 @@ namespace
                                                 SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))
                                         ]
                                 ];
-                                Arms = SNew(SBox).Padding(FMargin(10.0f))[Rows];
+                                Arms = SNew(SBox).Padding(FMargin(0.0f))[Rows];
                         }
 
                         const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
@@ -1566,13 +1562,24 @@ void SVerseVisualEditor::RefreshActiveDocument(
 			SourceDocument,
 			FVerseGraphRenderScopeId::Root(),
 			FunctionGraphPresentation);
+		const FVerseVisualTile* FunctionEntryTile = FunctionTab.GraphTiles.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.Kind == EVerseVisualTileKind::FunctionEntry;
+			});
+		const bool bSuspendingFunction = FunctionEntryTile != nullptr
+			&& IsVerseSuspendingFunctionTile(*FunctionEntryTile, *SourceDocument);
+		const FLinearColor FunctionBackgroundTint = bSuspendingFunction
+			? VerseVisualEditorStyle::Get().GetColor(TEXT("Color.SynchronizationGlass"))
+			: FLinearColor::Transparent;
 		if (FunctionTab.FunctionCanvas.IsValid())
 		{
 			FunctionTab.FunctionCanvas->RefreshContent(
 				FunctionContent,
 				MoveTemp(GraphConnections),
 				FunctionEntryAnchor,
-				WidgetRegistry.Endpoints);
+				WidgetRegistry.Endpoints,
+				FunctionBackgroundTint);
 			ActiveView = FunctionTab.FunctionCanvas.ToSharedRef();
 		}
 		else
@@ -1582,6 +1589,7 @@ void SVerseVisualEditor::RefreshActiveDocument(
 				SVerseFunctionCanvas,
 				FunctionTab.ViewState,
 				!FunctionTab.bHasViewState)
+				.BackgroundTint(FunctionBackgroundTint)
 				.InitialAnchor(FunctionEntryAnchor)
 				.Connections(GraphConnections)
 				.MotionController(FunctionTab.MotionController)

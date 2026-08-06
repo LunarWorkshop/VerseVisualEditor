@@ -566,6 +566,7 @@ void SVerseGraphSurface::Construct(
 {
 	Zoom = FMath::Clamp(InitialViewState.Zoom, MinimumZoom, MaximumZoom);
 	bUseEdgePanPadding = InArgs._UseEdgePanPadding;
+	BackgroundTint = InArgs._BackgroundTint;
 	bPendingInitialCenter = bCenterInitially;
 	InitialAnchor = InArgs._InitialAnchor;
 	Connections = InArgs._Connections;
@@ -745,6 +746,12 @@ void SVerseGraphSurface::SetEndpointRegistry(
 		EndpointRegistry->ClearDragStates();
 	}
 	EndpointRegistry = MoveTemp(InRegistry);
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SVerseGraphSurface::SetBackgroundTint(FLinearColor InBackgroundTint)
+{
+	BackgroundTint = InBackgroundTint;
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
@@ -938,7 +945,8 @@ int32 SVerseGraphSurface::OnPaint(
 		CanvasSize, FSlateLayoutTransform(FVector2D::ZeroVector));
 	OutDrawElements.PushClip(FSlateClippingZone(CanvasGeometry));
 	PaintVerseGraphBackground(
-		CanvasGeometry, CanvasSize, GetGraphOrigin(), Zoom, OutDrawElements, LayerId);
+		CanvasGeometry, CanvasSize, GetGraphOrigin(), Zoom, OutDrawElements, LayerId,
+		BackgroundTint);
 	OutDrawElements.PopClip();
 
 	const int32 ContentLayer = SCompoundWidget::OnPaint(

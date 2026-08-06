@@ -13,6 +13,7 @@
 #include "Slate/VerseDefinitionIcon.h"
 #include "VerseDocument.h"
 #include "VerseParseSnapshotBuilder.h"
+#include "VisualModel/VerseFunctionEffects.h"
 #include "Slate/VerseVisualEditorStyle.h"
 #include "Slate/VerseGraphMotion.h"
 #include "Widgets/Images/SImage.h"
@@ -579,6 +580,10 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bIfTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control
 		&& Tile.ControlKind == EVerseControlKind::If;
+	const bool bSyncTile = Tile.Kind == EVerseVisualTileKind::Expression
+		&& Tile.ExpressionKind == EVerseExpressionKind::Control
+		&& Tile.ControlKind == EVerseControlKind::Sync;
+	const bool bSuspendingFunction = IsVerseSuspendingFunctionTile(Tile, *Document);
 	const bool bHorizontalImplicitReturnSource =
 		Presentation.bHorizontalImplicitReturnSource;
 	const bool bHorizontalImplicitReturnTile =
@@ -846,6 +851,13 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight()[MainIdentity]
 			+ SVerticalBox::Slot().AutoHeight()[MainContent];
 	}
+	if (bSyncTile)
+	{
+		MainCenter = SNew(SBox)
+			.MinDesiredWidth(300.0f)
+			.Padding(FMargin(4.0f, 0.0f))
+			[MainCenter];
+	}
 
 	TSharedRef<SVerticalBox> LeftDock = SNew(SVerticalBox);
 	HorizontalExecutionInputDockWidget = LeftDock;
@@ -872,7 +884,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		SAssignNew(MainSocketRowWidget, SHorizontalBox)
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			LeftDock
+			bSyncTile ? SNullWidget::NullWidget : LeftDock
 		]
 		+ SHorizontalBox::Slot().FillWidth(1.0f)
 		.VAlign(Tile.Kind == EVerseVisualTileKind::FailableBlock
@@ -882,6 +894,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 			.OnMouseButtonDown(this, &SVerseTile::HandleIdentityMouseButtonDown)
 			.BorderImage(FCoreStyle::Get().GetBrush("NoBorder"))
 			.Padding(Tile.Kind == EVerseVisualTileKind::FailableBlock
+				|| Tile.Kind == EVerseVisualTileKind::SyncArm
+				|| bSyncTile
 				? FMargin(0.0f) : FMargin(8.0f, 6.0f))
 			[
 				MainCenter
@@ -889,7 +903,7 @@ void SVerseTile::Construct(const FArguments& InArgs)
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			RightDock
+			bSyncTile ? SNullWidget::NullWidget : RightDock
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
@@ -922,8 +936,24 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	TSharedRef<SOverlay> MainSurface =
 		SNew(SOverlay)
 		.Visibility(bHasMainRegion ? EVisibility::Visible : EVisibility::Collapsed)
+		+ SOverlay::Slot()
+		[
+			SNew(SBorder)
+			.Visibility(bSyncTile ? EVisibility::HitTestInvisible : EVisibility::Collapsed)
+			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(
+				VerseVisualEditorStyle::Get().GetColor(TEXT("Color.SynchronizationGlass")))
+		]
 		+ SOverlay::Slot()[SNew(SVerseTileMainGradient)]
-		+ SOverlay::Slot()[MainSocketRow];
+		+ SOverlay::Slot()[MainSocketRow]
+		+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Center)
+		[
+			bSyncTile ? LeftDock : SNullWidget::NullWidget
+		]
+		+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Center)
+		[
+			bSyncTile ? RightDock : SNullWidget::NullWidget
+		];
 
 	TSharedRef<SWidget> Separator =
 		SNew(SBox).HeightOverride(1.0f)
@@ -1006,6 +1036,17 @@ void SVerseTile::Construct(const FArguments& InArgs)
 
 	TSharedRef<SOverlay> Decorated = SNew(SOverlay);
 	Decorated->AddSlot()[ChromeSurface];
+	Decorated->AddSlot()
+	.HAlign(HAlign_Right)
+	.VAlign(VAlign_Top)
+	.Padding(FMargin(0.0f, -8.0f, -8.0f, 0.0f))
+	[
+		SNew(SImage)
+		.Visibility(bSuspendingFunction
+			? EVisibility::HitTestInvisible : EVisibility::Collapsed)
+		.Image(FAppStyle::GetBrush(TEXT("Graph.Latent.LatentIcon")))
+		.DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+	];
 	const FLinearColor FailureColor = GetVerseFailureDecorationColor();
 	if (Tile.Kind == EVerseVisualTileKind::FailableBlock)
 	{
@@ -1601,6 +1642,9 @@ TSharedRef<SWidget> SVerseTile::BuildMainIdentity(bool bCompact) const
 		&& Tile.ExpressionKind == EVerseExpressionKind::Literal;
 	TSharedRef<SVerticalBox> Main = SNew(SVerticalBox);
 	Main->AddSlot().AutoHeight()
+	.Padding(Tile.Kind == EVerseVisualTileKind::SyncArm
+		? FMargin(4.0f, 3.0f, 4.0f, 0.0f)
+		: FMargin(0.0f))
 	[
 		SNew(STextBlock)
 		.Visibility(!Lines.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed)
@@ -2088,6 +2132,17 @@ FText SVerseTile::GetSpecifierText() const
 	FString Result;
 	for (const FVerseTextRange& Range : Tile.SpecifierRanges)
 	{
+		const bool bFunctionEffect = Tile.FunctionEffectSpecifierRanges.ContainsByPredicate(
+			[&Range](const FVerseTextRange& EffectRange)
+			{
+				return EffectRange.Revision == Range.Revision
+					&& EffectRange.BeginByte == Range.BeginByte
+					&& EffectRange.EndByte() == Range.EndByte();
+			});
+		if (bFunctionEffect)
+		{
+			continue;
+		}
 		Result += TEXT("<");
 		Result += Decode(Range).ToString();
 		Result += TEXT(">");

@@ -7,8 +7,9 @@
 class SVerseFunctionCanvas final : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SVerseFunctionCanvas) {}
-		SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
+        SLATE_BEGIN_ARGS(SVerseFunctionCanvas) {}
+				SLATE_ARGUMENT(FLinearColor, BackgroundTint)
+                SLATE_ARGUMENT(TSharedPtr<SWidget>, InitialAnchor)
 		SLATE_ARGUMENT(TArray<FVerseGraphConnection>, Connections)
 		SLATE_ARGUMENT(TSharedPtr<FVerseGraphMotionController>, MotionController)
 		SLATE_ARGUMENT(TSharedPtr<FVerseGraphEndpointRegistry>, EndpointRegistry)
@@ -22,9 +23,10 @@ public:
 	FVerseCanvasViewState GetViewState() const;
 	void RefreshContent(
 		TSharedRef<SWidget> InContent,
-		TArray<FVerseGraphConnection> InConnections,
-		TSharedPtr<SWidget> InInitialAnchor,
-		TSharedPtr<FVerseGraphEndpointRegistry> InEndpointRegistry);
+                TArray<FVerseGraphConnection> InConnections,
+                TSharedPtr<SWidget> InInitialAnchor,
+                TSharedPtr<FVerseGraphEndpointRegistry> InEndpointRegistry,
+				FLinearColor InBackgroundTint);
 	FReply BeginConnectionDrag(
 		const FVerseSocketDragStart& DragStart,
 		TMap<FVerseVisualSocketEndpoint, EVerseSocketDragVisualState> DragStates);
