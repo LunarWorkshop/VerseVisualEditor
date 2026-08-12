@@ -505,6 +505,13 @@ namespace
 					LOCTEXT("IfTrueOutput", "True"),
 					LOCTEXT("IfFalseOutput", "False")};
 			}
+			else if (bExpression && Tile.ExpressionKind == EVerseExpressionKind::Control
+				&& Tile.ControlKind == EVerseControlKind::For)
+			{
+				Result.ExecutionOutputLabels = {
+					LOCTEXT("ForCompletedOutput", "Completed"),
+					LOCTEXT("ForBodyOutput", "Loop")};
+			}
 			return Result;
 		}
 	};
@@ -583,7 +590,8 @@ void SVerseTile::Construct(const FArguments& InArgs)
 	const bool bSyncTile = Tile.Kind == EVerseVisualTileKind::Expression
 		&& Tile.ExpressionKind == EVerseExpressionKind::Control
 		&& Tile.ControlKind == EVerseControlKind::Sync;
-	const bool bSuspendingFunction = IsVerseSuspendingFunctionTile(Tile, *Document);
+	const bool bSuspendingFunction = Document.IsValid()
+		&& IsVerseSuspendingFunctionTile(Tile, *Document);
 	const bool bHorizontalImplicitReturnSource =
 		Presentation.bHorizontalImplicitReturnSource;
 	const bool bHorizontalImplicitReturnTile =
@@ -2062,7 +2070,9 @@ FText SVerseTile::GetKindText() const
 	case EVerseVisualTileKind::Definition: return FText::FromName(Tile.DefinitionKind);
 	case EVerseVisualTileKind::Comment: return LOCTEXT("CommentKind", "Comment");
 	case EVerseVisualTileKind::FailableBlock:
-		return LOCTEXT("FailableBlockConditionKind", "Condition");
+		return Tile.ControlKind == EVerseControlKind::For
+			? LOCTEXT("FailableBlockForKind", "Iteration")
+			: LOCTEXT("FailableBlockConditionKind", "Condition");
 	case EVerseVisualTileKind::SyncArm:
 		return FText::GetEmpty();
 	case EVerseVisualTileKind::Expression:

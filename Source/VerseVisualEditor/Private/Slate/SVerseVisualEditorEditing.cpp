@@ -162,6 +162,38 @@ namespace
 				}
 				return RecordedArms >= 2;
 			}
+			if (Target
+				== EVerseProvisionalContentTarget::FirstForGeneratorAndBodyExpressions)
+			{
+				FVerseVisualTile* Iteration = ControlTile->Children.FindByPredicate(
+					[](const FVerseVisualTile& Child)
+					{
+						return Child.Kind == EVerseVisualTileKind::FailableBlock
+							&& Child.ControlKind == EVerseControlKind::For;
+					});
+				if (Iteration == nullptr || Iteration->Children.IsEmpty())
+				{
+					return false;
+				}
+				const FUtf8StringView Source = Document.Session->GetParseSnapshot()
+					.GetDocument()->GetOriginalUtf8View();
+				Document.ProvisionalTiles.Add(Iteration->Children[0].Range, Source);
+				Iteration->Children[0].bIsProvisional = true;
+				const auto* Body = ControlTile->ControlRegions.FindByPredicate(
+					[](const auto& Region)
+					{
+						return Region.Kind == EVerseControlRegionKind::Body;
+					});
+				if (Body != nullptr && Body->OperandCount > 0
+					&& ControlTile->Children.IsValidIndex(Body->FirstOperandIndex))
+				{
+					FVerseVisualTile& BodyPlaceholder =
+						ControlTile->Children[Body->FirstOperandIndex];
+					Document.ProvisionalTiles.Add(BodyPlaceholder.Range, Source);
+					BodyPlaceholder.bIsProvisional = true;
+				}
+				return true;
+			}
 			FVerseVisualTile* Condition = ControlTile->Children.FindByPredicate(
 				[](const FVerseVisualTile& Child)
 				{
@@ -968,6 +1000,20 @@ void SVerseVisualEditor::OpenExpressionSearch(FVerseDesktopPoint DesktopPosition
 				? SocketDrag->SemanticScopeRange
 				: SocketDrag->TileRange,
 			ActiveDocument->FilePath, SemanticSnapshots);
+	if (bClauseInsertion && SocketDrag->Clause.IsSet()
+		&& SocketDrag->Clause->OwningControlKind == EVerseControlKind::For
+		&& SocketDrag->Clause->ControlRegionKind == EVerseControlRegionKind::Condition)
+	{
+		TSharedPtr<FVerseExpressionAction> Generator =
+			MakeShared<FVerseExpressionAction>();
+		Generator->SourceForm = EVerseExpressionSourceForm::Definition;
+		const FString Name = MakeUniqueVerseIdentifier(Document, TEXTVIEW("Item"));
+		Generator->SourceSpelling = FString::Printf(TEXT("%s : array{}"), *Name);
+		Generator->DisplayName = LOCTEXT("CreateForGenerator", "Generator");
+		Generator->Category = LOCTEXT("ForFlowControlCategory", "Flow Control|For");
+		Generator->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+		ExpressionActions.Add(MoveTemp(Generator));
+	}
 	bool bCompatibleOperatorOperandSearch = false;
 	TArray<FString> CompatibleOperandTypes;
 	if (!bClauseInsertion

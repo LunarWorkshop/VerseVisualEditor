@@ -599,6 +599,22 @@ namespace VerseParseSnapshotBuilder
 		return nullptr;
 	}
 
+	void CollectIdentifiers(
+		const Verse::Vst::Node& Node,
+		TArray<const Verse::Vst::Identifier*>& OutIdentifiers)
+	{
+		if (const Verse::Vst::Identifier* Identifier =
+			Node.AsNullable<Verse::Vst::Identifier>())
+		{
+			OutIdentifiers.Add(Identifier);
+			return;
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			CollectIdentifiers(*Child, OutIdentifiers);
+		}
+	}
+
 	const Verse::Vst::PrePostCall* FindFunctionCall(const Verse::Vst::Node& Node)
 	{
 		if (const Verse::Vst::PrePostCall* Call = Node.AsNullable<Verse::Vst::PrePostCall>())
@@ -999,8 +1015,44 @@ namespace VerseParseSnapshotBuilder
 				const Verse::Vst::Node* Expression = UnwrapSingleClause(Child.Get());
 				if (Expression != nullptr && !Expression->IsA<Verse::Vst::Comment>())
 				{
-					Result.Operands.Add(BuildWrappedExpressionDescriptor(
-						*Child, SourceIndex, Parameters));
+					FVerseExpressionDescriptor Operand = BuildWrappedExpressionDescriptor(
+						*Child, SourceIndex, Parameters);
+					// The official VST represents a for generator (`Item : Iterable`)
+					// as a top-level TypeSpec rather than a Definition. Translate that
+					// syntax at this parser boundary so later graph passes receive a
+					// definition-shaped operand with an explicit generator identity.
+					if (Result.ControlKind == EVerseControlKind::For
+						&& Kind == EVerseControlRegionKind::Condition)
+					{
+						const Verse::Vst::TypeSpec* Generator =
+							Expression->AsNullable<Verse::Vst::TypeSpec>();
+						if (Generator != nullptr && Generator->HasLhs())
+						{
+							Operand.Kind = EVerseExpressionKind::Definition;
+							Operand.bForGenerator = true;
+							Operand.DefinitionKind = VerseSyntaxKind::Constant;
+							TArray<const Verse::Vst::Identifier*> BindingNames;
+							CollectIdentifiers(*Generator->GetLhs(), BindingNames);
+							if (!BindingNames.IsEmpty())
+							{
+								const Verse::Vst::Identifier* Name = BindingNames.Pop();
+								Operand.NameRange = TrimSourceWhitespace(
+									SourceIndex.GetSource(), SourceIndex.ToRange(Name->Whence()));
+								for (const Verse::Vst::Identifier* AdditionalName : BindingNames)
+								{
+									Operand.AdditionalBindingNameRanges.Add(
+										TrimSourceWhitespace(
+											SourceIndex.GetSource(),
+											SourceIndex.ToRange(AdditionalName->Whence())));
+								}
+							}
+							Operand.DeclaredTypeRange = {};
+							Operand.Operands.Reset();
+							Operand.Operands.Add(BuildWrappedExpressionDescriptor(
+								*Generator->GetRhs(), SourceIndex, Parameters));
+						}
+					}
+					Result.Operands.Add(MoveTemp(Operand));
 				}
 			}
 			Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;

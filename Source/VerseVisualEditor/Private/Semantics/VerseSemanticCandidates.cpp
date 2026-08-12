@@ -392,6 +392,22 @@ namespace
 		return nullptr;
 	}
 
+	void CollectMappedDataDefinitions(
+		const Verse::Vst::Node& Node,
+		TArray<const uLang::CExprDataDefinition*>& OutDefinitions)
+	{
+		if (const uLang::CAstNode* Ast = Node.GetMappedAstNode();
+			Ast != nullptr && Ast->GetNodeType() == uLang::EAstNodeType::Definition_Data)
+		{
+			OutDefinitions.AddUnique(
+				static_cast<const uLang::CExprDataDefinition*>(Ast));
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			CollectMappedDataDefinitions(*Child, OutDefinitions);
+		}
+	}
+
 	const uLang::CTypeBase* GetDataValueType(
 		const uLang::CDataDefinition& Definition)
 	{
@@ -464,9 +480,32 @@ namespace
 			: nullptr;
 		if (Tile.Kind == EVerseVisualTileKind::Definition)
 		{
-			const uLang::CExprDataDefinition* Definition = Node != nullptr
-				? FindMappedDataDefinition(*Node)
-				: nullptr;
+			TArray<const uLang::CExprDataDefinition*> Definitions;
+			if (Node != nullptr)
+			{
+				CollectMappedDataDefinitions(*Node, Definitions);
+			}
+			auto FindDefinitionByName = [&](FVerseTextRange NameRange)
+				-> const uLang::CExprDataDefinition*
+			{
+				const FString SourceName = NameRange.IsSet()
+					? Document.DecodeOriginalRange(NameRange)
+					: FString();
+				const uLang::CExprDataDefinition* const* Match = Definitions.FindByPredicate(
+					[&](const uLang::CExprDataDefinition* Candidate)
+					{
+						return Candidate != nullptr && Candidate->_DataMember
+							&& ToFString(Candidate->_DataMember->AsNameStringView())
+								== SourceName;
+					});
+				return Match != nullptr ? *Match : nullptr;
+			};
+			const uLang::CExprDataDefinition* Definition =
+				FindDefinitionByName(Tile.NameRange);
+			if (Definition == nullptr && !Definitions.IsEmpty())
+			{
+				Definition = Definitions[0];
+			}
 			if (Definition != nullptr)
 			{
 				Tile.SemanticDataDefinition = Definition->_DataMember.Get();
@@ -483,6 +522,21 @@ namespace
 						? EVerseExpressionOutcome::FailableValue
 						: EVerseExpressionOutcome::Ordinary;
 				}
+			}
+			for (const FVerseTextRange& NameRange : Tile.AdditionalBindingNameRanges)
+			{
+				const uLang::CExprDataDefinition* Additional =
+					FindDefinitionByName(NameRange);
+				if (Additional == nullptr || !Additional->_DataMember)
+				{
+					continue;
+				}
+				Tile.AdditionalSemanticDataDefinitions.Add(Additional->_DataMember.Get());
+				Tile.AdditionalSemanticTypes.Add(GetDataValueType(*Additional->_DataMember));
+				Tile.AdditionalSemanticTypeNames.Add(
+					GetUserFacingDataType(*Additional->_DataMember));
+				Tile.AdditionalSemanticDefinitionNames.Add(
+					ToFString(Additional->_DataMember->AsNameStringView()));
 			}
 			return;
 		}
@@ -574,6 +628,79 @@ namespace
 							&& Binding.SemanticDataDefinition != nullptr)
 						{
 							Binding.LegalConsumerScopes.AddUnique(ThenScope);
+						}
+					}
+				}
+			}
+		}
+		else if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::For)
+		{
+			const auto* IterationRegion = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+			const auto* BodyRegion = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (IterationRegion != nullptr && BodyRegion != nullptr
+				&& Tile.Children.IsValidIndex(IterationRegion->FirstOperandIndex))
+			{
+				FVerseVisualTile& Iteration =
+					Tile.Children[IterationRegion->FirstOperandIndex];
+				if (Iteration.Kind == EVerseVisualTileKind::FailableBlock)
+				{
+					TArray<const uLang::CScope*> LaterScopes;
+					LaterScopes.SetNum(Iteration.Children.Num());
+					for (int32 Index = 0; Index < Iteration.Children.Num(); ++Index)
+					{
+						const Verse::Vst::Node* ChildNode = FindSemanticNode(
+							*Snapshot, FilePath,
+							Iteration.Children[Index].Range.BeginByte, Document);
+						LaterScopes[Index] = ChildNode != nullptr
+							? FindActiveScope(*ChildNode, Program)
+							: nullptr;
+					}
+					const int32 BodyProbeByte = BodyRegion->OperandCount > 0
+						&& Tile.Children.IsValidIndex(BodyRegion->FirstOperandIndex)
+						? Tile.Children[BodyRegion->FirstOperandIndex].Range.BeginByte
+						: (BodyRegion->InteriorRange.IsSet()
+							? BodyRegion->InteriorRange.BeginByte
+							: BodyRegion->Range.BeginByte);
+					const Verse::Vst::Node* BodyNode = FindSemanticNode(
+						*Snapshot, FilePath, BodyProbeByte, Document);
+					const uLang::CScope* BodyScope = BodyNode != nullptr
+						? FindActiveScope(*BodyNode, Program)
+						: nullptr;
+
+					for (int32 BindingIndex = 0;
+						BindingIndex < Iteration.Children.Num(); ++BindingIndex)
+					{
+						FVerseVisualTile& Binding = Iteration.Children[BindingIndex];
+						if (Binding.Kind != EVerseVisualTileKind::Definition
+							|| Binding.SemanticDataDefinition == nullptr)
+						{
+							continue;
+						}
+						Binding.LegalConsumerRange = FVerseTextRange(
+							Tile.Range.Revision,
+							FVerseByteRange::FromBounds(
+								Binding.Range.EndByte(), Tile.Range.EndByte()));
+						for (int32 LaterIndex = BindingIndex + 1;
+							LaterIndex < LaterScopes.Num(); ++LaterIndex)
+						{
+							if (LaterScopes[LaterIndex] != nullptr)
+							{
+								Binding.LegalConsumerScopes.AddUnique(
+									LaterScopes[LaterIndex]);
+							}
+						}
+						if (BodyScope != nullptr)
+						{
+							Binding.LegalConsumerScopes.AddUnique(BodyScope);
 						}
 					}
 				}
@@ -1264,6 +1391,12 @@ bool FVerseSemanticCandidateProvider::CanConnectDataSocketsAt(
 	}
 	if (Provider.SemanticDataDefinition != nullptr
 		&& !Provider.SemanticDataDefinition->IsAccessibleFrom(*ConsumerScope))
+	{
+		return false;
+	}
+	if (Provider.LegalConsumerRange.IsSet()
+		&& (ConsumerExpressionBeginByte < Provider.LegalConsumerRange.BeginByte
+			|| ConsumerExpressionBeginByte >= Provider.LegalConsumerRange.EndByte()))
 	{
 		return false;
 	}

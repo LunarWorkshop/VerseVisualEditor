@@ -20,6 +20,42 @@
 
 namespace
 {
+	FString MakeUniqueVerseIdentifierInternal(
+		const FVerseDocument& Document,
+		FStringView BaseName)
+	{
+		const FUtf8StringView Utf8 = Document.GetOriginalUtf8View();
+		const FUTF8ToTCHAR Converted(
+			reinterpret_cast<const ANSICHAR*>(Utf8.GetData()), Utf8.Len());
+		const FString Source(Converted.Length(), Converted.Get());
+		for (int32 Suffix = 1; ; ++Suffix)
+		{
+			const FString Candidate = Suffix == 1
+				? FString(BaseName)
+				: FString::Printf(TEXT("%s%d"), *FString(BaseName), Suffix);
+			bool bFound = false;
+			for (int32 At = Source.Find(Candidate); At != INDEX_NONE;
+				At = Source.Find(Candidate, ESearchCase::CaseSensitive,
+					ESearchDir::FromStart, At + Candidate.Len()))
+			{
+				const bool bLeftBoundary = At == 0
+					|| !(FChar::IsAlnum(Source[At - 1]) || Source[At - 1] == TEXT('_'));
+				const int32 End = At + Candidate.Len();
+				const bool bRightBoundary = End == Source.Len()
+					|| !(FChar::IsAlnum(Source[End]) || Source[End] == TEXT('_'));
+				if (bLeftBoundary && bRightBoundary)
+				{
+					bFound = true;
+					break;
+				}
+			}
+			if (!bFound)
+			{
+				return Candidate;
+			}
+		}
+	}
+
 	FString SemanticTextToString(uLang::CUTF8StringView Text)
 	{
 		const FUTF8ToTCHAR Converted(
@@ -512,6 +548,13 @@ FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Act
 	return FText::FromString(MoveTemp(Keywords));
 }
 
+FString MakeUniqueVerseIdentifier(
+	const FVerseDocument& Document,
+	FStringView BaseName)
+{
+	return MakeUniqueVerseIdentifierInternal(Document, BaseName);
+}
+
 TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName)
 {
 	const FString NormalizedType = NormalizeActionType(FString(TypeName));
@@ -623,6 +666,20 @@ TArray<TSharedPtr<FVerseExpressionAction>> FVerseExpressionActionQuery::BuildAll
 	IfAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
 	IfAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
 	Result.Add(MoveTemp(IfAction));
+
+	TSharedPtr<FVerseExpressionAction> ForAction = MakeShared<FVerseExpressionAction>();
+	ForAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;
+	ForAction->StructuralKind = EVerseStructuralExpressionKind::For;
+	const FString ForGeneratorName = MakeUniqueVerseIdentifier(Document, TEXTVIEW("Item"));
+	ForAction->InputNames.Add(ForGeneratorName);
+	ForAction->SourceSpelling = FVerseSyntaxEmitter::ForTemplate(
+		Style, ForGeneratorName);
+	ForAction->ProvisionalContentTarget =
+		EVerseProvisionalContentTarget::FirstForGeneratorAndBodyExpressions;
+	ForAction->DisplayName = LOCTEXT("CreateForExpression", "For");
+	ForAction->Category = LOCTEXT("FlowControlCategory", "Flow Control");
+	ForAction->ModuleCategory = LOCTEXT("CurrentModuleCategory", "Current Module");
+	Result.Add(MoveTemp(ForAction));
 
 	TSharedPtr<FVerseExpressionAction> SyncAction = MakeShared<FVerseExpressionAction>();
 	SyncAction->SourceForm = EVerseExpressionSourceForm::StructuralExpression;

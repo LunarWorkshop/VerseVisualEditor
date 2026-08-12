@@ -915,6 +915,93 @@ namespace
 					return FVector2D(ExecutionSpineOffset, 0.0f);
 				}});
 		}
+		if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::For)
+		{
+			const auto* IterationRegion = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition
+						&& Region.OperandCount > 0;
+				});
+			TSharedRef<SWidget> IterationContent = SNullWidget::NullWidget;
+			if (IterationRegion != nullptr
+				&& Tile.Children.IsValidIndex(IterationRegion->FirstOperandIndex))
+			{
+				IterationContent = BuildFunctionGraphRow(
+					Tile.Children[IterationRegion->FirstOperandIndex],
+					Document,
+					OnSocketDragStarted,
+					OnInlineLiteralCommitted,
+					true,
+					OnTileSelected,
+					IsTileSelected,
+					OnClauseReordered,
+					OnSyncArmControl,
+					ModelConnections,
+					WidgetRegistry,
+					OwningRenderScope,
+					Presentation,
+					MotionController,
+					MotionKey,
+					false,
+					false,
+					TEXT("ForIteration")).Widget;
+			}
+
+			const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
+				Tile, Document, OnSocketDragStarted, OnInlineLiteralCommitted,
+				IterationContent, bCompactOperands, nullptr, OnTileSelected,
+				IsTileSelected, OnClauseReordered, ModelConnections, WidgetRegistry,
+				OwningRenderScope, Presentation);
+			if (Presentation == EVerseFunctionGraphPresentation::Tracks)
+			{
+				return FinishRow({RootTile, RootTile});
+			}
+
+			TSharedRef<SVerseStatementLayoutPanel> Body =
+				SNew(SVerseStatementLayoutPanel)
+				.Presentation(Presentation)
+				.StatementGap(16.0f);
+			const auto* BodyRegion = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (BodyRegion != nullptr)
+			{
+				for (int32 Offset = 0; Offset < BodyRegion->OperandCount; ++Offset)
+				{
+					const int32 ChildIndex = BodyRegion->FirstOperandIndex + Offset;
+					if (!Tile.Children.IsValidIndex(ChildIndex))
+					{
+						continue;
+					}
+					const FBuiltFunctionGraphRow ChildRow = BuildFunctionGraphRow(
+						Tile.Children[ChildIndex], Document, OnSocketDragStarted,
+						OnInlineLiteralCommitted, bCompactOperands, OnTileSelected,
+						IsTileSelected, OnClauseReordered, OnSyncArmControl,
+						ModelConnections, WidgetRegistry, OwningRenderScope,
+						Presentation, MotionController, MotionKey);
+					Body->AddStatement(
+						ChildRow.Widget, ChildRow.RootTile,
+						[ChildRow]() { return ChildRow.GetRootPosition(); }, 0.0f);
+				}
+			}
+			if (Presentation == EVerseFunctionGraphPresentation::HorizontalExecution)
+			{
+				return FinishRow({
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth()[RootTile]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(48.0f, 36.0f, 0.0f, 0.0f)[Body],
+					RootTile});
+			}
+			return FinishRow({
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[RootTile]
+				+ SVerticalBox::Slot().AutoHeight().Padding(72.0f, 24.0f, 0.0f, 0.0f)[Body],
+				RootTile});
+		}
 		const TSharedRef<SVerseTile> RootTile = BuildFunctionGraphTile(
 			Tile,
 			Document,
@@ -1449,6 +1536,13 @@ void SVerseVisualEditor::RefreshActiveDocument(
 				for (const FVerseVisualExpressionDescriptor::FControlRegion& Region :
 					ControlTile.ControlRegions)
 				{
+					// The ordered generator/filter context is rendered inside the for
+					// tile. Tracks still materializes the loop body as its own track.
+					if (ControlTile.ControlKind == EVerseControlKind::For
+						&& Region.Kind == EVerseControlRegionKind::Condition)
+					{
+						continue;
+					}
 					TArray<const FVerseVisualTile*> NestedControls;
 					FText TrackName = LOCTEXT("BodyExecutionTrack", "Body");
 					if (Region.Kind == EVerseControlRegionKind::Condition)

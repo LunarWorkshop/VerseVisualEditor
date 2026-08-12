@@ -102,6 +102,17 @@ ControlFor(Values : []int)<computes> : void =
     for (Value : Values):
         Value
 
+ControlForMultiple(Values : []int)<computes> : void =
+    for (Value : Values, Value > 0, Other : Values, Other <> Value):
+        Value + Other
+
+ControlForBraces(Values : []int)<computes> : void =
+    for (Value : Values) { Value }
+
+ControlForMap(Values : [int]int)<computes> : void =
+    for (Key -> Value : Values):
+        Key + Value
+
 ControlLoop()<computes> : void =
     loop:
         break

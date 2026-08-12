@@ -1059,7 +1059,6 @@ bool FVerseSyncArmEditingTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-
 	FVerseDocumentSession Session(Document.ToSharedRef());
 	TArray<FVerseVisualTile> StableGraph;
 	auto FindSync = [&Session, &StableGraph]() -> const FVerseVisualTile*
@@ -1160,6 +1159,94 @@ bool FVerseSyncArmEditingTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Removing the third arm restores the compiler minimum"),
 			Sync != nullptr && Sync->Children.Num() == 2);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseForIterationEditingTest,
+	"VerseVisualEditor.FunctionGraph.For.IterationEditing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseForIterationEditingTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(*this, UTF8TEXTVIEW(
+		"ControlFor(Values : []int)<computes> : void =\n"
+		"    for (Value : Values):\n"
+		"        Value\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("Generated for bindings avoid identifiers already in the document"),
+		MakeUniqueVerseIdentifier(*Document, TEXTVIEW("Value")), FString(TEXT("Value2")));
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	TArray<FVerseVisualTile> StableGraph;
+	auto FindIteration = [&]() -> const FVerseVisualTile*
+	{
+		const FVerseVisualTile* Function = Session.GetTiles().FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.DefinitionKind == VerseSyntaxKind::Function;
+			});
+		if (Function == nullptr)
+		{
+			return nullptr;
+		}
+		StableGraph = FVerseVisualTileBuilder::BuildFunctionGraph(
+			*Function, Session.GetParseSnapshot());
+		const FVerseVisualTile* For = StableGraph.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ControlKind == EVerseControlKind::For;
+			});
+		return For != nullptr
+			? For->Children.FindByPredicate(
+				[](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::FailableBlock;
+				})
+			: nullptr;
+	};
+
+	const FVerseVisualTile* Iteration = FindIteration();
+	if (!TestNotNull(TEXT("For exposes its editable iteration context"), Iteration))
+	{
+		return false;
+	}
+	FVerseExpressionAction Generator;
+	Generator.SourceForm = EVerseExpressionSourceForm::Definition;
+	Generator.SourceSpelling = TEXT("Other : array{}");
+	FText Error;
+	TestTrue(*FString::Printf(TEXT("A generator can be appended: %s"), *Error.ToString()),
+		FVerseClauseEditing::InsertExpression(
+			Session, Iteration->BodyClause, 1, Generator, Error));
+	Iteration = FindIteration();
+	TestTrue(TEXT("Mixed for iteration items retain source order"),
+		Iteration != nullptr && Iteration->Children.Num() == 2
+			&& Iteration->Children[0].bForGenerator
+			&& Iteration->Children[1].bForGenerator);
+	if (Iteration == nullptr)
+	{
+		return false;
+	}
+	TestTrue(TEXT("An added generator can be removed"),
+		FVerseClauseEditing::DeleteExpression(
+			Session, Iteration->BodyClause, 1, Error));
+	Iteration = FindIteration();
+	if (!TestNotNull(TEXT("For iteration reparses after generator removal"), Iteration))
+	{
+		return false;
+	}
+	FVerseTextRange ProvisionalRange;
+	TestTrue(TEXT("Deleting the final generator restores a source-safe generator"),
+		FVerseClauseEditing::DeleteExpression(
+			Session, Iteration->BodyClause, 0, Error, &ProvisionalRange));
+	TestTrue(TEXT("The restored generator is returned for provisional tracking"),
+		ProvisionalRange.IsSet()
+			&& Session.GetParseSnapshot().GetDocument()->DecodeOriginalRange(
+				ProvisionalRange) == TEXT("Item : array{}"));
 	return true;
 }
 

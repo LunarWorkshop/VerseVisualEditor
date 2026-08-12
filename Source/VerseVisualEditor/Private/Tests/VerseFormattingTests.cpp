@@ -247,10 +247,16 @@ bool FVerseFormattingStyleEmitterTest::RunTest(const FString& Parameters)
         TestEqual(TEXT("Colon if templates contain a provisional no-op expression"),
                 FVerseSyntaxEmitter::IfTemplate(Style),
                 TEXT("if (true?):\r\n    block {}"));
+	TestEqual(TEXT("Colon for templates contain a generator and provisional body"),
+		FVerseSyntaxEmitter::ForTemplate(Style, TEXTVIEW("Element")),
+		TEXT("for (Element : array{}):\r\n    block {}"));
         TestEqual(TEXT("Colon sync templates contain exactly two provisional arms"),
                 FVerseSyntaxEmitter::SyncTemplate(Style),
                 TEXT("sync:\r\n    block {}\r\n    block {}"));
         Style.BodyDelimiter = EVerseClauseDelimiter::Braces;
+	TestEqual(TEXT("Brace for templates retain an empty source-safe body"),
+		FVerseSyntaxEmitter::ForTemplate(Style, TEXTVIEW("Element")),
+		TEXT("for (Element : array{}) {\r\n}"));
         TestEqual(TEXT("Brace sync templates contain exactly two provisional arms"),
                 FVerseSyntaxEmitter::SyncTemplate(Style),
                 TEXT("sync {\r\n    block {};\r\n    block {}\r\n}"));

@@ -88,6 +88,10 @@ public:
 		const FVerseFormattingStyleProfile& Style);
 	/** Complete, source-safe initial if expression for the selected project body syntax. */
 	static FString IfTemplate(const FVerseFormattingStyleProfile& Style);
+	/** Complete for expression with one source-safe provisional generator. */
+	static FString ForTemplate(
+		const FVerseFormattingStyleProfile& Style,
+		FStringView GeneratorName = TEXTVIEW("Item"));
 	/** Complete sync expression with the compiler-required two provisional arms. */
 	static FString SyncTemplate(const FVerseFormattingStyleProfile& Style);
 };

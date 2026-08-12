@@ -35,6 +35,8 @@ enum class EVerseProvisionalContentTarget : uint8
 	FirstConditionAndBodyExpressions,
 	/** Both generated top-level sync arms. */
 	SyncArms,
+	/** Generated for iterator plus the no-op required by a colon body. */
+	FirstForGeneratorAndBodyExpressions,
 };
 
 /** Editor-owned structural recipe materialized against its destination clause. */
@@ -42,6 +44,7 @@ enum class EVerseStructuralExpressionKind : uint8
 {
 	None,
 	If,
+	For,
 	Sync,
 };
 
@@ -103,6 +106,11 @@ struct FVerseExpressionParentSyntax
 
 /** Combines canonical source spelling with editor-authored hidden search aliases. */
 FText BuildVerseExpressionActionSearchKeywords(const FVerseExpressionAction& Action);
+
+/** Returns a source-safe identifier not already present in the current document. */
+FString MakeUniqueVerseIdentifier(
+	const FVerseDocument& Document,
+	FStringView BaseName);
 
 /** Returns the canonical source-safe initializer for an editor-supported primitive type. */
 TOptional<FString> GetDefaultVerseLiteralSourceForType(FStringView TypeName);

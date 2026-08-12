@@ -791,6 +791,93 @@ bool FVerseFunctionTilePresentationTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	const FVerseVisualTile* ForFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlFor"));
+	if (TestNotNull(TEXT("For visual fixture exists"), ForFunction))
+	{
+		const TArray<FVerseVisualTile> ForGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*ForFunction, Snapshot);
+		const FVerseVisualTile* ForTile = ForGraph.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ExpressionKind == EVerseExpressionKind::Control
+					&& Tile.ControlKind == EVerseControlKind::For;
+			});
+		const FVerseVisualTile* Iteration = ForTile != nullptr
+			? ForTile->Children.FindByPredicate(
+				[](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::FailableBlock;
+				})
+			: nullptr;
+		if (TestNotNull(TEXT("For owns one nested failable iteration context"), Iteration)
+			&& TestTrue(TEXT("For iteration retains its generator"),
+				Iteration->Children.Num() == 1
+					&& Iteration->Children[0].bForGenerator))
+		{
+			TestTrue(TEXT("For iteration exposes insertion and binding sockets only"),
+				VerseVisualTileTests::HasSocket(
+					*Iteration, EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::ClauseInsertion)
+				&& VerseVisualTileTests::HasSocket(
+					*Iteration, EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::BoundaryBinding)
+				&& !VerseVisualTileTests::HasSocket(
+					*Iteration, EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::FailureContext));
+			TestTrue(TEXT("Generator iterable is represented by its left value input"),
+				Iteration->Children[0].GetValueInputs().Num() == 1);
+		}
+		if (TestNotNull(TEXT("For control tile is present"), ForTile))
+		{
+			TestTrue(TEXT("For declares completed and loop execution outputs"),
+				ForTile->GetOtherOutputs().Num() == 2
+					&& ForTile->GetOtherOutputs()[0].Id.Role
+						== EVerseVisualSocketRole::Execution
+					&& ForTile->GetOtherOutputs()[1].Id.Role
+						== EVerseVisualSocketRole::Execution);
+			const TArray<FVerseVisualConnection> Connections =
+				FVerseVisualTileBuilder::BuildConnections(ForGraph);
+			TestTrue(TEXT("For loop output begins the body sequence"),
+				Connections.ContainsByPredicate(
+					[ForTile](const FVerseVisualConnection& Connection)
+					{
+						return Connection.Source.Tile == ForTile->Id
+							&& Connection.Source.Socket.Role
+								== EVerseVisualSocketRole::Execution
+							&& Connection.Source.Socket.Index == 1;
+					}));
+		}
+	}
+
+	const FVerseVisualTile* ForMapFunction = VerseVisualTileTests::FindDefinition(
+		Snapshot, Tiles, UTF8TEXTVIEW("ControlForMap"));
+	if (TestNotNull(TEXT("Map for visual fixture exists"), ForMapFunction))
+	{
+		const TArray<FVerseVisualTile> ForMapGraph =
+			FVerseVisualTileBuilder::BuildFunctionGraph(*ForMapFunction, Snapshot);
+		const FVerseVisualTile* ForTile = ForMapGraph.FindByPredicate(
+			[](const FVerseVisualTile& Tile)
+			{
+				return Tile.ControlKind == EVerseControlKind::For;
+			});
+		const FVerseVisualTile* Iteration = ForTile != nullptr
+			? ForTile->Children.FindByPredicate(
+				[](const FVerseVisualTile& Child)
+				{
+					return Child.Kind == EVerseVisualTileKind::FailableBlock;
+				})
+			: nullptr;
+		TestTrue(TEXT("Map for exposes both key and value boundary sockets"),
+			Iteration != nullptr
+				&& Iteration->GetValueOutputs().FilterByPredicate(
+					[](const FVerseVisualSocket& Socket)
+					{
+						return Socket.Id.Role
+							== EVerseVisualSocketRole::BoundaryBinding;
+					}).Num() == 2);
+	}
+
 	const FVerseVisualTile* LocalFunction = VerseVisualTileTests::FindDefinition(
 		Snapshot, Tiles, UTF8TEXTVIEW("LocalDefinitions"));
 	if (TestNotNull(TEXT("Local-definition visual fixture exists"), LocalFunction))

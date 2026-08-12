@@ -204,6 +204,8 @@ struct FVerseVisualSocket
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
 	/** Compiler scopes in which this boundary binding may legally be consumed. */
 	TArray<const uLang::CScope*> LegalConsumerScopes;
+	/** Exact source interval in which the binding may be consumed, when constrained. */
+	FVerseTextRange LegalConsumerRange;
 	/** Keeps SemanticDataDefinition and LegalConsumerScopes alive. */
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 };
@@ -260,8 +262,10 @@ struct FVerseVisualExpressionDescriptor
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	EVerseControlKind ControlKind = EVerseControlKind::None;
+	bool bForGenerator = false;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
+	TArray<FVerseTextRange> AdditionalBindingNameRanges;
 	FVerseTextRange DeclaredTypeRange;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
@@ -340,6 +344,11 @@ struct FVerseVisualClauseDescriptor
 	FVerseTextRange EmptyBodyInsertionAnchor;
 	/** This clause must retain one source-safe failable expression. */
 	bool bRequiresFailablePlaceholder = false;
+	/** Source-safe expression restored when its required final item is deleted. */
+	FString RequiredFailablePlaceholderSource;
+	/** VST-owned control clause identity used by context-sensitive editing. */
+	EVerseControlKind OwningControlKind = EVerseControlKind::None;
+	EVerseControlRegionKind ControlRegionKind = EVerseControlRegionKind::Body;
 	/** This clause is the visually flattened sequential body of one sync arm. */
 	bool bSyncArm = false;
 	/** Entire direct expression or explicit block wrapper represented by the arm. */
@@ -393,6 +402,7 @@ struct FVerseVisualTile
 	TArray<FVerseVisualExpressionDescriptor::FGroupingLayer> GroupingLayers;
 	FName DefinitionKind;
 	FVerseTextRange NameRange;
+	TArray<FVerseTextRange> AdditionalBindingNameRanges;
 	FVerseTextRange TypeRange;
 	FName IntrinsicTypeName;
 	EVerseTypeResolutionProvenance TypeProvenance = EVerseTypeResolutionProvenance::Unresolved;
@@ -409,8 +419,13 @@ struct FVerseVisualTile
 	EVerseStatementFailureDisposition StatementFailure =
 		EVerseStatementFailureDisposition::None;
 	const uLang::CDataDefinition* SemanticDataDefinition = nullptr;
+	TArray<const uLang::CDataDefinition*> AdditionalSemanticDataDefinitions;
+	TArray<const uLang::CTypeBase*> AdditionalSemanticTypes;
+	TArray<FString> AdditionalSemanticTypeNames;
+	TArray<FString> AdditionalSemanticDefinitionNames;
 	const uLang::CFunction* SemanticFunction = nullptr;
 	TArray<const uLang::CScope*> LegalConsumerScopes;
+	FVerseTextRange LegalConsumerRange;
 	TSharedPtr<const FVerseSemanticSnapshot> SemanticSnapshot;
 	TArray<FVerseTextRange> SpecifierRanges;
 	TArray<FVerseTextRange> FunctionAccessSpecifierRanges;
@@ -450,6 +465,8 @@ struct FVerseVisualTile
 	bool bValueConsumed = false;
 	bool bProducesValue = false;
 	bool bImplicitReturnValue = false;
+	/** A definition in a for iteration clause whose initializer is the iterable. */
+	bool bForGenerator = false;
 	/** Transient editor state: replace this generated tile until the user adopts it. */
 	bool bIsProvisional = false;
 };

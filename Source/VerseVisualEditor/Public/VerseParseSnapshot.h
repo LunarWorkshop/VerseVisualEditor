@@ -220,8 +220,12 @@ struct VERSEVISUALEDITOR_API FVerseExpressionDescriptor
 	EVerseExpressionKind Kind = EVerseExpressionKind::Unsupported;
 	EVerseLiteralKind LiteralKind = EVerseLiteralKind::None;
 	EVerseControlKind ControlKind = EVerseControlKind::None;
+	/** True only for the official `Name : Iterable` VST form in a for iteration clause. */
+	bool bForGenerator = false;
 	FName DefinitionKind;
 	FVerseByteRange NameRange;
+	/** Additional names introduced by a multi-binding form such as `Key -> Value : Map`. */
+	TArray<FVerseByteRange> AdditionalBindingNameRanges;
 	FVerseByteRange DeclaredTypeRange;
 	FVerseExpressionType Type;
 	TArray<FVerseGroupingLayer> GroupingLayers;

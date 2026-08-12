@@ -181,8 +181,13 @@ namespace
 		Result.Kind = Expression.Kind;
 		Result.LiteralKind = Expression.LiteralKind;
 		Result.ControlKind = Expression.ControlKind;
+		Result.bForGenerator = Expression.bForGenerator;
 		Result.DefinitionKind = Expression.DefinitionKind;
 		Result.NameRange = MakeTextRange(Revision, Expression.NameRange);
+		for (const FVerseByteRange& NameRange : Expression.AdditionalBindingNameRanges)
+		{
+			Result.AdditionalBindingNameRanges.Add(MakeTextRange(Revision, NameRange));
+		}
 		Result.DeclaredTypeRange = MakeTextRange(Revision, Expression.DeclaredTypeRange);
 		Result.TypeRange = MakeTextRange(Revision, Expression.Type.SourceRange);
 		Result.IntrinsicTypeName = Expression.Type.IntrinsicName;
@@ -275,6 +280,8 @@ namespace
 		Result.ClosingPunctuationRange = Region.ClosingPunctuationRange;
 		Result.Syntax = Region.Syntax;
 		Result.EmptyBodyInsertionAnchor = Region.EmptyBodyInsertionAnchor;
+		Result.OwningControlKind = Expression.ControlKind;
+		Result.ControlRegionKind = Region.Kind;
 		for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
 		{
 			const int32 OperandIndex = Region.FirstOperandIndex + Offset;
@@ -390,7 +397,9 @@ namespace
 		Tile.ExpressionKind = Descriptor.Kind;
 		Tile.LiteralKind = Descriptor.LiteralKind;
 		Tile.ControlKind = Descriptor.ControlKind;
+		Tile.bForGenerator = Descriptor.bForGenerator;
 		Tile.DefinitionKind = Descriptor.DefinitionKind;
+		Tile.AdditionalBindingNameRanges = Descriptor.AdditionalBindingNameRanges;
 		Tile.VstNodeType = Descriptor.VstNodeType;
 		Tile.VstTag = Descriptor.VstTag;
 		Tile.Range = Descriptor.Range;
@@ -469,7 +478,8 @@ namespace
 				Snapshot,
 				Descriptor.Kind == EVerseExpressionKind::Control
 					&& (!bConditionOperand
-						|| Descriptor.ControlKind == EVerseControlKind::If),
+						|| Descriptor.ControlKind == EVerseControlKind::If
+						|| Descriptor.ControlKind == EVerseControlKind::For),
 				false,
 				true));
 		}
@@ -493,7 +503,8 @@ namespace
 			}
 		}
 		if (Descriptor.Kind == EVerseExpressionKind::Control
-				&& Descriptor.ControlKind == EVerseControlKind::If)
+				&& (Descriptor.ControlKind == EVerseControlKind::If
+					|| Descriptor.ControlKind == EVerseControlKind::For))
 		{
 			const FVerseVisualExpressionDescriptor::FControlRegion* ConditionRegion =
 				Descriptor.ControlRegions.FindByPredicate(
@@ -511,6 +522,7 @@ namespace
 				const int32 FirstConditionIndex = ConditionRegion->FirstOperandIndex;
 				FVerseVisualTile FailablePredicate;
 				FailablePredicate.Kind = EVerseVisualTileKind::FailableBlock;
+				FailablePredicate.ControlKind = Descriptor.ControlKind;
 				FailablePredicate.Range = ConditionRegion->Range;
 				FailablePredicate.FirstSourceLine =
 					Snapshot.GetDocument()->GetOriginalLineNumber(
@@ -526,6 +538,14 @@ namespace
 				FailablePredicate.BodyClause =
 					MakeVisualControlClauseDescriptor(Descriptor, *ConditionRegion);
 				FailablePredicate.BodyClause.bRequiresFailablePlaceholder = true;
+				FailablePredicate.BodyClause.RequiredFailablePlaceholderSource =
+					Descriptor.ControlKind == EVerseControlKind::For
+						? TEXT("Item : array{}")
+						: TEXT("true?");
+				// A for iteration clause is an ordered failable chain, but its value is
+				// discarded by the control expression. Definitions directly in that
+				// chain are generator bindings whose initializer is the iterable.
+				FailablePredicate.bProducesValue = false;
 				for (int32 Offset = 0; Offset < ConditionRegion->OperandCount; ++Offset)
 				{
 					FVerseVisualTile Child =
@@ -877,8 +897,11 @@ private:
 				EVerseVisualSocketRole::ClauseInsertion, 0};
 			AddOther(Tile, ClauseInsertion.Direction, ClauseInsertion.Role, ClauseInsertion.Index);
 			AddInsertionTarget(Tile, ClauseInsertion, Tile.BodyClause, 0);
-			AddOther(Tile, EVerseVisualSocketDirection::Output,
-				EVerseVisualSocketRole::FailureContext, 0);
+			if (Tile.ControlKind != EVerseControlKind::For)
+			{
+				AddOther(Tile, EVerseVisualSocketDirection::Output,
+					EVerseVisualSocketRole::FailureContext, 0);
+			}
 			if (Tile.bProducesValue)
 			{
 				FVerseVisualSocket& Result = AddValueOutput(
@@ -906,6 +929,7 @@ private:
 				Binding.SemanticDataDefinition = Child.SemanticDataDefinition;
 				Binding.SemanticName = Child.SemanticDefinitionName;
 				Binding.LegalConsumerScopes = Child.LegalConsumerScopes;
+				Binding.LegalConsumerRange = Child.LegalConsumerRange;
 				Binding.SemanticSnapshot = Child.SemanticSnapshot;
 				AddInsertionTarget(
 					Tile,
@@ -914,6 +938,45 @@ private:
 					Child.ClauseItemIndex == INDEX_NONE
 						? Tile.BodyClause.Items.Num()
 						: Child.ClauseItemIndex + 1);
+				for (int32 AdditionalIndex = 0;
+					AdditionalIndex < Child.AdditionalBindingNameRanges.Num();
+					++AdditionalIndex)
+				{
+					FVerseVisualSocket& AdditionalBinding = AddValueOutput(
+						Tile, {}, NAME_None,
+						EVerseVisualSocketRole::BoundaryBinding,
+						Child.AdditionalBindingNameRanges[AdditionalIndex]);
+					if (Child.AdditionalSemanticTypeNames.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalBinding.SemanticTypeName =
+							Child.AdditionalSemanticTypeNames[AdditionalIndex];
+					}
+					if (Child.AdditionalSemanticTypes.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalBinding.SemanticType =
+							Child.AdditionalSemanticTypes[AdditionalIndex];
+					}
+					if (Child.AdditionalSemanticDataDefinitions.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalBinding.SemanticDataDefinition =
+							Child.AdditionalSemanticDataDefinitions[AdditionalIndex];
+					}
+					if (Child.AdditionalSemanticDefinitionNames.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalBinding.SemanticName =
+							Child.AdditionalSemanticDefinitionNames[AdditionalIndex];
+					}
+					AdditionalBinding.LegalConsumerScopes = Child.LegalConsumerScopes;
+					AdditionalBinding.LegalConsumerRange = Child.LegalConsumerRange;
+					AdditionalBinding.SemanticSnapshot = Child.SemanticSnapshot;
+					AddInsertionTarget(
+						Tile,
+						AdditionalBinding.Id,
+						Tile.BodyClause,
+						Child.ClauseItemIndex == INDEX_NONE
+							? Tile.BodyClause.Items.Num()
+							: Child.ClauseItemIndex + 1);
+				}
 			}
                         return;
                 }
@@ -935,7 +998,9 @@ private:
 			AddOther(Tile, EVerseVisualSocketDirection::Input,
 				EVerseVisualSocketRole::Execution, 0);
 			const int32 OutputCount = Tile.ExpressionKind == EVerseExpressionKind::Control
-				&& Tile.ControlKind == EVerseControlKind::If ? 3 : 1;
+				? (Tile.ControlKind == EVerseControlKind::If ? 3
+					: Tile.ControlKind == EVerseControlKind::For ? 2 : 1)
+				: 1;
 			for (int32 Index = 0; Index < OutputCount; ++Index)
 			{
 				AddOther(Tile, EVerseVisualSocketDirection::Output,
@@ -1001,6 +1066,24 @@ private:
 							EVerseVisualSocketRole::Execution, 2},
 						MakeClause(*Body));
 				}
+			}
+		}
+		else if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::For)
+		{
+			const auto* Body = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (Body != nullptr)
+			{
+				AddInsertionTarget(
+					Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 1},
+					MakeClause(*Body),
+					0);
 			}
 		}
 
@@ -1073,13 +1156,17 @@ private:
 		{
 			const FVerseVisualTile& Initializer = Tile.Children[0];
 			FVerseVisualSocket& Input = AddValueInput(
-				Tile, Tile.TypeRange, Initializer.IntrinsicTypeName);
-			Input.SemanticTypeName = Tile.SemanticTypeName;
-			Input.SemanticType = Tile.SemanticType;
-			Input.SemanticSnapshot = Tile.SemanticSnapshot;
-			Input.AcceptedSemanticTypeName = Tile.SemanticTypeName;
-			Input.AcceptedSemanticType = Tile.SemanticType;
-			Input.AcceptedSemanticSnapshot = Tile.SemanticSnapshot;
+				Tile,
+				Tile.bForGenerator ? Initializer.TypeRange : Tile.TypeRange,
+				Initializer.IntrinsicTypeName);
+			const FVerseVisualTile& InputTypeSource = Tile.bForGenerator
+				? Initializer : Tile;
+			Input.SemanticTypeName = InputTypeSource.SemanticTypeName;
+			Input.SemanticType = InputTypeSource.SemanticType;
+			Input.SemanticSnapshot = InputTypeSource.SemanticSnapshot;
+			Input.AcceptedSemanticTypeName = InputTypeSource.SemanticTypeName;
+			Input.AcceptedSemanticType = InputTypeSource.SemanticType;
+			Input.AcceptedSemanticSnapshot = InputTypeSource.SemanticSnapshot;
 			if (Initializer.LiteralKind != EVerseLiteralKind::None)
 			{
 				Input.InlineLiteralRange = Initializer.Range;
@@ -1113,6 +1200,7 @@ private:
 			Output.SemanticDataDefinition = Tile.SemanticDataDefinition;
 			Output.SemanticName = Tile.SemanticDefinitionName;
 			Output.LegalConsumerScopes = Tile.LegalConsumerScopes;
+			Output.LegalConsumerRange = Tile.LegalConsumerRange;
 			Output.SemanticSnapshot = Tile.SemanticSnapshot;
 			if (Tile.StatementFailure != EVerseStatementFailureDisposition::None)
 			{
@@ -1130,6 +1218,50 @@ private:
 					Tile.ClauseItemIndex == INDEX_NONE
 						? Tile.EditableClause->Items.Num()
 						: Tile.ClauseItemIndex + 1);
+			}
+			if (Tile.Kind == EVerseVisualTileKind::Definition)
+			{
+				for (int32 AdditionalIndex = 0;
+					AdditionalIndex < Tile.AdditionalBindingNameRanges.Num();
+					++AdditionalIndex)
+				{
+					FVerseVisualSocket& AdditionalOutput = AddValueOutput(
+						Tile, {}, NAME_None, EVerseVisualSocketRole::BoundaryBinding,
+						Tile.AdditionalBindingNameRanges[AdditionalIndex]);
+					if (Tile.AdditionalSemanticTypeNames.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalOutput.SemanticTypeName =
+							Tile.AdditionalSemanticTypeNames[AdditionalIndex];
+					}
+					if (Tile.AdditionalSemanticTypes.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalOutput.SemanticType =
+							Tile.AdditionalSemanticTypes[AdditionalIndex];
+					}
+					if (Tile.AdditionalSemanticDataDefinitions.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalOutput.SemanticDataDefinition =
+							Tile.AdditionalSemanticDataDefinitions[AdditionalIndex];
+					}
+					if (Tile.AdditionalSemanticDefinitionNames.IsValidIndex(AdditionalIndex))
+					{
+						AdditionalOutput.SemanticName =
+							Tile.AdditionalSemanticDefinitionNames[AdditionalIndex];
+					}
+					AdditionalOutput.LegalConsumerScopes = Tile.LegalConsumerScopes;
+					AdditionalOutput.LegalConsumerRange = Tile.LegalConsumerRange;
+					AdditionalOutput.SemanticSnapshot = Tile.SemanticSnapshot;
+					if (Tile.EditableClause.IsSet())
+					{
+						AddInsertionTarget(
+							Tile,
+							AdditionalOutput.Id,
+							Tile.EditableClause.GetValue(),
+							Tile.ClauseItemIndex == INDEX_NONE
+								? Tile.EditableClause->Items.Num()
+								: Tile.ClauseItemIndex + 1);
+					}
+				}
 			}
 		}
 	}
@@ -1460,6 +1592,34 @@ namespace
 					&Tile,
 					{EVerseVisualSocketDirection::Output,
 						EVerseVisualSocketRole::Execution, OutputIndex},
+					ParentScope);
+			}
+		}
+		else if (Tile.ExpressionKind == EVerseExpressionKind::Control
+			&& Tile.ControlKind == EVerseControlKind::For)
+		{
+			const auto* Body = Tile.ControlRegions.FindByPredicate(
+				[](const auto& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+			if (Body != nullptr)
+			{
+				TArray<const FVerseVisualTile*> Sequence;
+				for (int32 Offset = 0; Offset < Body->OperandCount; ++Offset)
+				{
+					const int32 ChildIndex = Body->FirstOperandIndex + Offset;
+					if (Tile.Children.IsValidIndex(ChildIndex))
+					{
+						Sequence.Add(&Tile.Children[ChildIndex]);
+					}
+				}
+				AddSequentialConnections(
+					Connections,
+					Sequence,
+					&Tile,
+					{EVerseVisualSocketDirection::Output,
+						EVerseVisualSocketRole::Execution, 1},
 					ParentScope);
 			}
 		}

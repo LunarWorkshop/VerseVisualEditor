@@ -353,6 +353,21 @@ FString FVerseSyntaxEmitter::IfTemplate(const FVerseFormattingStyleProfile& Styl
 		+ Style.IndentationUnit + TEXT("block {}");
 }
 
+FString FVerseSyntaxEmitter::ForTemplate(
+	const FVerseFormattingStyleProfile& Style,
+	FStringView GeneratorName)
+{
+	const FString Newline = LineEnding(Style);
+	const FString Header = FString::Printf(
+		TEXT("for (%s : array{})"), *FString(GeneratorName));
+	if (Style.BodyDelimiter == EVerseClauseDelimiter::Braces)
+	{
+		return Header + TEXT(" {") + Newline + TEXT("}");
+	}
+	return Header + TEXT(":") + Newline
+		+ Style.IndentationUnit + TEXT("block {}");
+}
+
 FString FVerseSyntaxEmitter::SyncTemplate(const FVerseFormattingStyleProfile& Style)
 {
 	const FString Newline = LineEnding(Style);

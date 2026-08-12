@@ -688,10 +688,75 @@ bool FVerseFunctionRecognitionTest::RunTest(const FString& Parameters)
 	}
 	if (const FVerseExpressionDescriptor* For = FindOnlyExpression(UTF8TEXTVIEW("ControlFor")))
 	{
+		const FVerseExpressionControlRegion* Iteration =
+			For->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		const FVerseExpressionControlRegion* Body =
+			For->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
 		TestTrue(TEXT("For creates iterator and body regions from its macro clauses"),
 			For->Kind == EVerseExpressionKind::Control
 			&& For->ControlKind == EVerseControlKind::For
-			&& For->ControlRegions.Num() >= 2);
+			&& Iteration != nullptr && Iteration->OperandCount == 1
+			&& Body != nullptr && Body->OperandCount == 1);
+	}
+	if (const FVerseExpressionDescriptor* For =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlForMultiple")))
+	{
+		const FVerseExpressionControlRegion* Iteration =
+			For->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		TestTrue(TEXT("For preserves the ordered mixed generator/filter chain"),
+			Iteration != nullptr
+				&& Iteration->OperandCount == 4
+				&& Iteration->Items.Num() == 4
+				&& For->Operands.IsValidIndex(Iteration->FirstOperandIndex)
+				&& For->Operands[Iteration->FirstOperandIndex].Kind
+					== EVerseExpressionKind::Definition);
+	}
+	if (const FVerseExpressionDescriptor* For =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlForBraces")))
+	{
+		const FVerseExpressionControlRegion* Body =
+			For->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Body;
+				});
+		TestTrue(TEXT("Brace-form for retains its body punctuation"),
+			Body != nullptr && Body->Syntax.Delimiter == EVerseClauseDelimiter::Braces);
+	}
+	if (const FVerseExpressionDescriptor* For =
+		FindOnlyExpression(UTF8TEXTVIEW("ControlForMap")))
+	{
+		const FVerseExpressionControlRegion* Iteration =
+			For->ControlRegions.FindByPredicate(
+				[](const FVerseExpressionControlRegion& Region)
+				{
+					return Region.Kind == EVerseControlRegionKind::Condition;
+				});
+		const FVerseExpressionDescriptor* Generator = Iteration != nullptr
+			&& For->Operands.IsValidIndex(Iteration->FirstOperandIndex)
+			? &For->Operands[Iteration->FirstOperandIndex]
+			: nullptr;
+		TestTrue(TEXT("Map generators preserve their value and key bindings"),
+			Generator != nullptr
+				&& Generator->bForGenerator
+				&& Generator->Kind == EVerseExpressionKind::Definition
+				&& Generator->AdditionalBindingNameRanges.Num() == 1
+				&& Snapshot.GetDocument()->DecodeOriginalRange(Generator->NameRange)
+					== TEXT("Value")
+				&& Snapshot.GetDocument()->DecodeOriginalRange(
+					Generator->AdditionalBindingNameRanges[0]) == TEXT("Key"));
 	}
         if (const FVerseExpressionDescriptor* Loop = FindOnlyExpression(UTF8TEXTVIEW("ControlLoop")))
         {

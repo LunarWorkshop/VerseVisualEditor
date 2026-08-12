@@ -160,9 +160,22 @@ namespace
 		// a requested colon block back into braces (or vice versa).
 		CreationStyle.BodyDelimiter =
 			FVerseFormattingStyleResolver::ResolveDefaults().BodyDelimiter;
-		OutSource = Action.StructuralKind == EVerseStructuralExpressionKind::Sync
-				? FVerseSyntaxEmitter::SyncTemplate(CreationStyle)
-				: FVerseSyntaxEmitter::IfTemplate(CreationStyle);
+		switch (Action.StructuralKind)
+		{
+		case EVerseStructuralExpressionKind::For:
+			OutSource = FVerseSyntaxEmitter::ForTemplate(
+				CreationStyle,
+				Action.InputNames.IsEmpty()
+					? TEXTVIEW("Item")
+					: FStringView(Action.InputNames[0]));
+			break;
+		case EVerseStructuralExpressionKind::Sync:
+			OutSource = FVerseSyntaxEmitter::SyncTemplate(CreationStyle);
+			break;
+		default:
+			OutSource = FVerseSyntaxEmitter::IfTemplate(CreationStyle);
+			break;
+		}
 		return true;
 	}
 
@@ -499,10 +512,17 @@ bool FVerseClauseEditing::InsertExpression(
 			return true;
 		}
 	}
-	const EVerseSeparatorToken SeparatorToken = Clause.bRequiresFailablePlaceholder
-		? Style.FailureSeparatorToken : Style.StatementSeparatorToken;
-	const EVerseSeparatorLayout SeparatorLayout = Clause.bRequiresFailablePlaceholder
-		? Style.FailureSeparatorLayout : Style.StatementSeparatorLayout;
+	const bool bForIterationClause =
+		Clause.OwningControlKind == EVerseControlKind::For
+		&& Clause.ControlRegionKind == EVerseControlRegionKind::Condition;
+	const EVerseSeparatorToken SeparatorToken = bForIterationClause
+		? EVerseSeparatorToken::Comma
+		: Clause.bRequiresFailablePlaceholder
+			? Style.FailureSeparatorToken : Style.StatementSeparatorToken;
+	const EVerseSeparatorLayout SeparatorLayout = bForIterationClause
+		? EVerseSeparatorLayout::TokenAndSpace
+		: Clause.bRequiresFailablePlaceholder
+			? Style.FailureSeparatorLayout : Style.StatementSeparatorLayout;
 	int32 InsertionByte = Clause.EmptyBodyInsertionAnchor.IsSet()
 		? Clause.EmptyBodyInsertionAnchor.BeginByte
 		: Clause.InteriorRange.BeginByte;
@@ -847,7 +867,9 @@ bool FVerseClauseEditing::DeleteExpression(
 	{
 		if (Clause.bRequiresFailablePlaceholder)
 		{
-			return ReplaceFinalItemWithProvisional(TEXTVIEW("true?"));
+			const FString& Placeholder = Clause.RequiredFailablePlaceholderSource;
+			return ReplaceFinalItemWithProvisional(
+				Placeholder.IsEmpty() ? TEXTVIEW("true?") : FStringView(Placeholder));
 		}
 		if (Clause.Syntax.Delimiter == EVerseClauseDelimiter::Colon)
 		{
@@ -876,25 +898,24 @@ bool FVerseClauseEditing::DeleteExpression(
 	}
 	Edits.Add(MakeEdit(Session.GetRevision(), DeletedRange, FStringView()));
 
-	// Remove only a separator token. Trivia and VST-owned/ambiguous comments stay fixed.
+	// Remove only the exact parser-owned separator token. Trivia and
+	// VST-owned/ambiguous comments stay fixed. This handles both statement
+	// separators and comma-separated for iteration items without rediscovering
+	// punctuation from decoded text.
 	if (Clause.Items.Num() > 1
 		&& Clause.Syntax.Delimiter != EVerseClauseDelimiter::Colon
 		&& Clause.Syntax.Delimiter != EVerseClauseDelimiter::BareIndentation)
 	{
-		const bool bUseTrailing = ItemIndex + 1 < Clause.Items.Num();
-		const FVerseTextRange Trivia = bUseTrailing
-			? Clause.Items[ItemIndex].TrailingTriviaRange
-			: Clause.Items[ItemIndex].LeadingTriviaRange;
-		const FString TriviaText = Decode(Session, Trivia);
-		const int32 SeparatorCharacter = bUseTrailing
-			? TriviaText.Find(TEXT(";"))
-			: TriviaText.Find(TEXT(";"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		if (SeparatorCharacter != INDEX_NONE)
+		const int32 SeparatorOwnerIndex = ItemIndex + 1 < Clause.Items.Num()
+			? ItemIndex
+			: ItemIndex - 1;
+		const FVerseTextRange SeparatorRange =
+			Clause.Items[SeparatorOwnerIndex].Separator.TokenRange;
+		if (SeparatorRange.IsSet())
 		{
-			const FTCHARToUTF8 Prefix(*TriviaText.Left(SeparatorCharacter));
 			Edits.Add(MakeEdit(
 				Session.GetRevision(),
-				FVerseByteRange(Trivia.BeginByte + Prefix.Length(), 1),
+				SeparatorRange,
 				FStringView()));
 		}
 	}
