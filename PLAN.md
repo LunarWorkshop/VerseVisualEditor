@@ -892,7 +892,7 @@ This step owns the transition from single-selection to multi-selection state.
 
 This step makes the existing rename workflow safely reversible.
 
-### 3. Atomic multi-edit transactions
+### 3. Atomic multi-edit transactions (complete)
 
 - Generalize the single replacement operation into
   `FVerseEditTransaction`.

@@ -37,21 +37,41 @@ bool FVerseDocumentSession::Replace(
 	FUtf8StringView Replacement,
 	FText& OutError)
 {
-	const FVerseDocumentEdit Edit{Range, FUtf8String(Replacement)};
-	return ReplaceMany(MakeArrayView(&Edit, 1), OutError);
+	FVerseEditTransaction Transaction;
+	Transaction.Description = LOCTEXT("ReplaceSourceTransaction", "Edit Verse source");
+	Transaction.Edits.Add({Range, FUtf8String(Replacement)});
+	return ApplyTransaction(Transaction, OutError);
 }
 
 bool FVerseDocumentSession::ReplaceMany(
 	TConstArrayView<FVerseDocumentEdit> Edits,
 	FText& OutError)
 {
-	if (Edits.IsEmpty())
+	FVerseEditTransaction Transaction;
+	Transaction.Description = LOCTEXT("ReplaceManySourceTransaction", "Edit Verse source");
+	Transaction.Edits.Append(Edits);
+	return ApplyTransaction(Transaction, OutError);
+}
+
+bool FVerseDocumentSession::ApplyTransaction(
+	const FVerseEditTransaction& Transaction,
+	FText& OutError)
+{
+	if (Transaction.Edits.IsEmpty())
 	{
 		OutError = LOCTEXT("EmptyEditTransaction", "The edit transaction is empty.");
 		return false;
 	}
+	if (Transaction.BeforeSelection.IsSet()
+		&& Transaction.BeforeSelection->Revision != Revision)
+	{
+		OutError = LOCTEXT(
+			"StaleTransactionSelection",
+			"The transaction selection belongs to an obsolete document revision.");
+		return false;
+	}
 
-	TArray<FVerseDocumentEdit> Sorted(Edits);
+	TArray<FVerseDocumentEdit> Sorted(Transaction.Edits);
 	Sorted.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
 	{
 		return Left.Range.BeginByte > Right.Range.BeginByte;
@@ -73,7 +93,9 @@ bool FVerseDocumentSession::ReplaceMany(
 
 	const FVerseEditBuffer BeforeBuffer = EditBuffer;
 	const FVerseContentStateId BeforeContentStateId = ContentStateId;
-	const TOptional<FVerseTextRange> BeforeSelection = CurrentSelectionRange;
+	const TOptional<FVerseTextRange> BeforeSelection = Transaction.BeforeSelection.IsSet()
+		? Transaction.BeforeSelection
+		: CurrentSelectionRange;
 	FVerseEditBuffer Candidate = EditBuffer;
 	for (const FVerseDocumentEdit& Edit : Sorted)
 	{
@@ -83,7 +105,7 @@ bool FVerseDocumentSession::ReplaceMany(
 		}
 	}
 
-	TArray<FVerseDocumentEdit> Ascending(Edits);
+	TArray<FVerseDocumentEdit> Ascending(Transaction.Edits);
 	Ascending.Sort([](const FVerseDocumentEdit& Left, const FVerseDocumentEdit& Right)
 	{
 		return Left.Range.BeginByte < Right.Range.BeginByte;
@@ -108,14 +130,15 @@ bool FVerseDocumentSession::ReplaceMany(
 	Transition.CurrentRevision = Revision;
 	LastSourceTransition = MoveTemp(Transition);
 	const FVerseContentStateId NewContentStateId{++NextContentStateValue};
-	const TOptional<FVerseTextRange> AfterSelection = TransformSelectionForward(
-		BeforeSelection,
-		LastSourceTransition.GetValue());
+	const TOptional<FVerseTextRange> AfterSelection = Transaction.AfterSelection.IsSet()
+		? TOptional<FVerseTextRange>(FVerseTextRange(Revision, Transaction.AfterSelection.GetValue()))
+		: TransformSelectionForward(BeforeSelection, LastSourceTransition.GetValue());
 	if (HistoryCursor < History.Num())
 	{
 		History.RemoveAt(HistoryCursor, History.Num() - HistoryCursor);
 	}
 	History.Add({
+		Transaction.Description,
 		BeforeBuffer,
 		BeforeContentStateId,
 		BeforeSelection,
@@ -130,6 +153,16 @@ bool FVerseDocumentSession::ReplaceMany(
 	RebuildDerivedRepresentations();
 	OutError = FText::GetEmpty();
 	return true;
+}
+
+FText FVerseDocumentSession::GetUndoDescription() const
+{
+	return CanUndo() ? History[HistoryCursor - 1].Description : FText::GetEmpty();
+}
+
+FText FVerseDocumentSession::GetRedoDescription() const
+{
+	return CanRedo() ? History[HistoryCursor].Description : FText::GetEmpty();
 }
 
 bool FVerseDocumentSession::Undo(TOptional<FVerseTextRange>& OutRestoredSelection)

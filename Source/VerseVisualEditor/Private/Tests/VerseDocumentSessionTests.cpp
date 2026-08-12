@@ -583,6 +583,102 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDocumentSessionAtomicTransactionTest,
+	"VerseVisualEditor.Foundation.DocumentSession.AtomicTransaction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDocumentSessionAtomicTransactionTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		*this,
+		UTF8TEXTVIEW("Alpha := 1\nBeta := 2\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	FVerseEditTransaction Transaction;
+	Transaction.Description = FText::FromString(TEXT("Rename both definitions"));
+	Transaction.Edits = {
+		{FVerseTextRange(Session.GetRevision(), {0, 5}), FUtf8String(UTF8TEXT("First"))},
+		{FVerseTextRange(Session.GetRevision(), {11, 4}), FUtf8String(UTF8TEXT("Second"))}};
+	Transaction.BeforeSelection = FVerseTextRange(Session.GetRevision(), {0, 5});
+	Transaction.AfterSelection = FVerseByteRange{11, 6};
+
+	FText Error;
+	TestTrue(TEXT("A named multi-edit transaction commits"),
+		Session.ApplyTransaction(Transaction, Error));
+	TestEqual(TEXT("All replacements commit together"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("First := 1\nSecond := 2\n"));
+	TestEqual(TEXT("A transaction advances exactly one revision"),
+		Session.GetRevision().Value, uint64(1));
+	TestEqual(TEXT("The undo operation retains the transaction description"),
+		Session.GetUndoDescription().ToString(), FString(TEXT("Rename both definitions")));
+
+	TOptional<FVerseTextRange> RestoredSelection;
+	TestTrue(TEXT("One undo reverts the complete transaction"), Session.Undo(RestoredSelection));
+	TestEqual(TEXT("Undo restores both original ranges"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("Alpha := 1\nBeta := 2\n"));
+	TestFalse(TEXT("The complete transaction produced only one undo entry"), Session.CanUndo());
+	TestTrue(TEXT("Undo restores the explicit before selection"),
+		RestoredSelection.IsSet()
+			&& RestoredSelection->BeginByte == 0
+			&& RestoredSelection->NumBytes == 5);
+	TestEqual(TEXT("The redo operation retains the transaction description"),
+		Session.GetRedoDescription().ToString(), FString(TEXT("Rename both definitions")));
+
+	TestTrue(TEXT("One redo reapplies the complete transaction"), Session.Redo(RestoredSelection));
+	TestEqual(TEXT("Redo restores both replacements"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("First := 1\nSecond := 2\n"));
+	TestTrue(TEXT("Redo restores the explicit resulting selection"),
+		RestoredSelection.IsSet()
+			&& RestoredSelection->BeginByte == 11
+			&& RestoredSelection->NumBytes == 6);
+
+	const uint64 StableRevision = Session.GetRevision().Value;
+	const FUtf8String StableSource = Session.GetCurrentUtf8();
+	FVerseEditTransaction Stale;
+	Stale.Description = FText::FromString(TEXT("Stale edit"));
+	Stale.Edits.Add({FVerseTextRange(FVerseDocumentRevision{0}, {0, 1}), FUtf8String(UTF8TEXT("X"))});
+	TestFalse(TEXT("A transaction containing a stale edit is rejected"),
+		Session.ApplyTransaction(Stale, Error));
+	TestEqual(TEXT("Stale rejection does not change the revision"),
+		Session.GetRevision().Value, StableRevision);
+	TestEqual(TEXT("Stale rejection does not partially change source"),
+		View(Session.GetCurrentUtf8()), View(StableSource));
+
+	FVerseEditTransaction Overlap;
+	Overlap.Description = FText::FromString(TEXT("Overlapping edit"));
+	Overlap.Edits = {
+		{FVerseTextRange(Session.GetRevision(), {0, 4}), FUtf8String(UTF8TEXT("A"))},
+		{FVerseTextRange(Session.GetRevision(), {2, 4}), FUtf8String(UTF8TEXT("B"))}};
+	TestFalse(TEXT("Overlapping edits are rejected before commit"),
+		Session.ApplyTransaction(Overlap, Error));
+	TestEqual(TEXT("Overlap rejection leaves source unchanged"),
+		View(Session.GetCurrentUtf8()), View(StableSource));
+
+	const TSharedPtr<FVerseDocument> Utf8Document = MakeDocument(*this, UTF8TEXTVIEW("AÎ²Z"));
+	if (TestTrue(TEXT("Atomic UTF-8 fixture is valid"), Utf8Document.IsValid()))
+	{
+		FVerseDocumentSession Utf8Session(Utf8Document.ToSharedRef());
+		FVerseEditTransaction InvalidBoundary;
+		InvalidBoundary.Description = FText::FromString(TEXT("Invalid UTF-8 boundary"));
+		InvalidBoundary.Edits = {
+			{FVerseTextRange(Utf8Session.GetRevision(), {0, 1}), FUtf8String(UTF8TEXT("Q"))},
+			{FVerseTextRange(Utf8Session.GetRevision(), {2, 0}), FUtf8String(UTF8TEXT("X"))}};
+		TestFalse(TEXT("One invalid UTF-8 boundary rejects the complete transaction"),
+			Utf8Session.ApplyTransaction(InvalidBoundary, Error));
+		TestEqual(TEXT("A failed transaction applies none of its otherwise valid edits"),
+			View(Utf8Session.GetCurrentUtf8()), UTF8TEXTVIEW("AÎ²Z"));
+		TestEqual(TEXT("A failed transaction creates no history entry"),
+			Utf8Session.CanUndo(), false);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseDocumentSessionUndoRedoTest,
 	"VerseVisualEditor.Foundation.DocumentSession.UndoRedo",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

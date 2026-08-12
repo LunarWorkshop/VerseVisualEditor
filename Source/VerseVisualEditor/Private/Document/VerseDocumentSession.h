@@ -1,18 +1,30 @@
 #pragma once
 
 #include "Containers/Utf8String.h"
+#include "Internationalization/Text.h"
 #include "Templates/SharedPointer.h"
 #include "VerseDocumentRevision.h"
 #include "Document/VerseEditBuffer.h"
 #include "VerseParseSnapshot.h"
 #include "VisualModel/VerseVisualTile.h"
 
-class FText;
-
 struct FVerseDocumentEdit
 {
 	FVerseTextRange Range;
 	FUtf8String Replacement;
+};
+
+/** One user-visible source operation, committed atomically as one history entry. */
+struct FVerseEditTransaction
+{
+	/** Human-readable operation name used by undo and redo presentation. */
+	FText Description;
+	/** Localized replacements. Every range must belong to the current revision. */
+	TArray<FVerseDocumentEdit> Edits;
+	/** Optional selection snapshot to restore when this transaction is undone. */
+	TOptional<FVerseTextRange> BeforeSelection;
+	/** Optional byte range in the resulting document to restore when redone. */
+	TOptional<FVerseByteRange> AfterSelection;
 };
 
 struct FVerseDocumentTransitionEdit
@@ -39,8 +51,12 @@ public:
 	bool Replace(FVerseTextRange Range, FUtf8StringView Replacement, FText& OutError);
 	/** Applies non-overlapping current-revision edits atomically as one revision. */
 	bool ReplaceMany(TConstArrayView<FVerseDocumentEdit> Edits, FText& OutError);
+	/** Validates and commits a complete source transaction as one revision and undo step. */
+	bool ApplyTransaction(const FVerseEditTransaction& Transaction, FText& OutError);
 	bool CanUndo() const { return HistoryCursor > 0; }
 	bool CanRedo() const { return HistoryCursor < History.Num(); }
+	FText GetUndoDescription() const;
+	FText GetRedoDescription() const;
 	bool Undo(TOptional<FVerseTextRange>& OutRestoredSelection);
 	bool Redo(TOptional<FVerseTextRange>& OutRestoredSelection);
 	/** Keeps the optional UI selection attached to the current history state. */
@@ -68,6 +84,7 @@ public:
 private:
 	struct FHistoryEntry
 	{
+		FText Description;
 		FVerseEditBuffer BeforeBuffer;
 		FVerseContentStateId BeforeContentStateId;
 		TOptional<FVerseTextRange> BeforeSelection;
