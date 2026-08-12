@@ -57,6 +57,10 @@ public:
 	bool CanSaveAllFromMainFrame() const;
 	void RevertActiveDocument();
 	void CloseActiveDocument();
+	void UndoActiveDocument();
+	void RedoActiveDocument();
+	bool CanUndoActiveDocument() const;
+	bool CanRedoActiveDocument() const;
 	bool CanSaveActiveDocument() const;
 	bool HasActiveDocument() const;
 
@@ -120,6 +124,7 @@ private:
 	void RefreshActiveDocument(
 		bool bAnimateGraphChanges = true,
 		bool bRebuildDocumentChrome = true);
+	void ApplyHistorySelection(TOptional<FVerseTextRange> SelectionRange);
 	void HandleTileSelected(
 		const FVerseVisualTile& Tile,
 		TSharedPtr<FOpenVerseDocument> OpenDocument);

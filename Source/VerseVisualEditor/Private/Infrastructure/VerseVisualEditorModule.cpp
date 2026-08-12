@@ -3,6 +3,7 @@
 #include "Framework/Commands/Commands.h"
 #include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandList.h"
+#include "Framework/Commands/GenericCommands.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "Interfaces/IMainFrameModule.h"
@@ -193,6 +194,14 @@ TSharedRef<SDockTab> FVerseVisualEditorModule::SpawnVerseVisualEditorTab(const F
 		Commands.Close,
 		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CloseActiveDocument),
 		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::HasActiveDocument));
+	CommandList->MapAction(
+		FGenericCommands::Get().Undo,
+		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::UndoActiveDocument),
+		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanUndoActiveDocument));
+	CommandList->MapAction(
+		FGenericCommands::Get().Redo,
+		FExecuteAction::CreateSP(Editor, &SVerseVisualEditor::RedoActiveDocument),
+		FCanExecuteAction::CreateSP(Editor, &SVerseVisualEditor::CanRedoActiveDocument));
 
 	VerseEditorTabManager = FGlobalTabmanager::Get()->NewTabManager(DockTab);
 	VerseEditorTabManager->SetAllowWindowMenuBar(true);

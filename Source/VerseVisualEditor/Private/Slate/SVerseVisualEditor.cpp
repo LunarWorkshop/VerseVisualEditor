@@ -452,6 +452,16 @@ SVerseVisualEditor::~SVerseVisualEditor()
 
 FReply SVerseVisualEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::Z)
+	{
+		InKeyEvent.IsShiftDown() ? RedoActiveDocument() : UndoActiveDocument();
+		return FReply::Handled();
+	}
+	if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::Y)
+	{
+		RedoActiveDocument();
+		return FReply::Handled();
+	}
 	if (InKeyEvent.GetKey() == EKeys::Delete
 		&& ActiveDocument.IsValid()
 		&& ActiveDocument->SelectedTile.IsSet())

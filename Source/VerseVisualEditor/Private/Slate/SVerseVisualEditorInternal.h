@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Slate/SVerseVisualEditor.h"
+#include "Slate/VerseCanvasViewState.h"
 
 #include "Document/VerseDocumentSession.h"
 #include "Editing/VerseProvisionalState.h"

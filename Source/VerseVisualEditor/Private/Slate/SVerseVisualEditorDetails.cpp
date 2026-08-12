@@ -164,6 +164,7 @@ void SVerseVisualEditor::HandleTileSelected(
 	}
 
 	OpenDocument->SelectedTile = Tile;
+	OpenDocument->Session->SetCurrentSelectionRange(Tile.Range);
 	OpenDocument->PropertyValidationMessage = FText::GetEmpty();
 	OpenDocument->PendingRenameText.Reset();
 	OpenDocument->PendingSpecifierText.Reset();
@@ -598,6 +599,7 @@ void SVerseVisualEditor::HandleSyntaxControlSelected(
 	}
 
 	OpenDocument->SelectedTile.Reset();
+	OpenDocument->Session->SetCurrentSelectionRange({});
 	if (const FVerseVisualTile* Replacement = FindReplacementTile(
 		OpenDocument->Session->GetTiles(), Tile))
 	{

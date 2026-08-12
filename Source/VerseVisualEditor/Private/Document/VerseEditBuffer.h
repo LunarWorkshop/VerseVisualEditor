@@ -34,7 +34,7 @@ public:
 
 	int32 Len() const { return CurrentLength; }
 	const TArray<FVerseEditSpan>& GetSpans() const { return Spans; }
-	const FUtf8String& GetAddedText() const { return AddedText; }
+	const FUtf8String& GetAddedText() const { return *AddedText; }
 
 private:
 	bool IsCodePointBoundary(int32 CurrentOffset) const;
@@ -47,7 +47,8 @@ private:
 	static bool ValidateUtf8(FUtf8StringView Text, int32& OutInvalidByte);
 
 	TSharedRef<const FVerseDocument> OriginalDocument;
-	FUtf8String AddedText;
+	/** One append-only backing store shared by all history snapshots. */
+	TSharedRef<FUtf8String> AddedText;
 	TArray<FVerseEditSpan> Spans;
 	int32 CurrentLength = 0;
 };

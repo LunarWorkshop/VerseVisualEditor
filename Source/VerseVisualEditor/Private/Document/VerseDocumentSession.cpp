@@ -71,6 +71,9 @@ bool FVerseDocumentSession::ReplaceMany(
 		}
 	}
 
+	const FVerseEditBuffer BeforeBuffer = EditBuffer;
+	const FVerseContentStateId BeforeContentStateId = ContentStateId;
+	const TOptional<FVerseTextRange> BeforeSelection = CurrentSelectionRange;
 	FVerseEditBuffer Candidate = EditBuffer;
 	for (const FVerseDocumentEdit& Edit : Sorted)
 	{
@@ -101,15 +104,75 @@ bool FVerseDocumentSession::ReplaceMany(
 		AccumulatedDelta += Edit.Replacement.Len() - Edit.Range.NumBytes;
 	}
 
-	EditBuffer = MoveTemp(Candidate);
 	++Revision.Value;
 	Transition.CurrentRevision = Revision;
 	LastSourceTransition = MoveTemp(Transition);
-	++ContentStateId.Value;
+	const FVerseContentStateId NewContentStateId{++NextContentStateValue};
+	const TOptional<FVerseTextRange> AfterSelection = TransformSelectionForward(
+		BeforeSelection,
+		LastSourceTransition.GetValue());
+	if (HistoryCursor < History.Num())
+	{
+		History.RemoveAt(HistoryCursor, History.Num() - HistoryCursor);
+	}
+	History.Add({
+		BeforeBuffer,
+		BeforeContentStateId,
+		BeforeSelection,
+		Candidate,
+		NewContentStateId,
+		AfterSelection});
+	++HistoryCursor;
+	EditBuffer = MoveTemp(Candidate);
+	ContentStateId = NewContentStateId;
+	CurrentSelectionRange = AfterSelection;
 	MaterializedSource.Reset();
 	RebuildDerivedRepresentations();
 	OutError = FText::GetEmpty();
 	return true;
+}
+
+bool FVerseDocumentSession::Undo(TOptional<FVerseTextRange>& OutRestoredSelection)
+{
+	if (!CanUndo())
+	{
+		return false;
+	}
+	FHistoryEntry& Entry = History[HistoryCursor - 1];
+	Entry.AfterSelection = CurrentSelectionRange;
+	--HistoryCursor;
+	RestoreHistoryState(
+		Entry.BeforeBuffer,
+		Entry.BeforeContentStateId,
+		Entry.BeforeSelection,
+		OutRestoredSelection);
+	return true;
+}
+
+bool FVerseDocumentSession::Redo(TOptional<FVerseTextRange>& OutRestoredSelection)
+{
+	if (!CanRedo())
+	{
+		return false;
+	}
+	FHistoryEntry& Entry = History[HistoryCursor];
+	Entry.BeforeSelection = CurrentSelectionRange;
+	++HistoryCursor;
+	RestoreHistoryState(
+		Entry.AfterBuffer,
+		Entry.AfterContentStateId,
+		Entry.AfterSelection,
+		OutRestoredSelection);
+	return true;
+}
+
+void FVerseDocumentSession::SetCurrentSelectionRange(TOptional<FVerseTextRange> SelectionRange)
+{
+	if (SelectionRange.IsSet() && SelectionRange->Revision != Revision)
+	{
+		SelectionRange.Reset();
+	}
+	CurrentSelectionRange = SelectionRange;
 }
 
 void FVerseDocumentSession::Reload(TSharedRef<const FVerseDocument> InDocument)
@@ -117,13 +180,76 @@ void FVerseDocumentSession::Reload(TSharedRef<const FVerseDocument> InDocument)
 	OriginalDocument = MoveTemp(InDocument);
 	EditBuffer = FVerseEditBuffer(OriginalDocument);
 	++Revision.Value;
-	++ContentStateId.Value;
+	ContentStateId.Value = ++NextContentStateValue;
 	SavedContentStateId = ContentStateId;
+	History.Reset();
+	HistoryCursor = 0;
+	CurrentSelectionRange.Reset();
 	MaterializedSource.Reset();
 	CurrentSourceDocument = OriginalDocument;
 	ParseSnapshot.Emplace(FVerseParseSnapshotBuilder::Build(CurrentSourceDocument.ToSharedRef()));
 	Tiles = FVerseVisualTileBuilder::Build(ParseSnapshot.GetValue(), Revision);
 	LastSourceTransition.Reset();
+}
+
+TOptional<FVerseTextRange> FVerseDocumentSession::RebaseSelection(
+	const TOptional<FVerseTextRange>& Selection,
+	FVerseDocumentRevision NewRevision)
+{
+	return Selection.IsSet()
+		? TOptional<FVerseTextRange>(FVerseTextRange(NewRevision, *Selection))
+		: TOptional<FVerseTextRange>();
+}
+
+TOptional<FVerseTextRange> FVerseDocumentSession::TransformSelectionForward(
+	const TOptional<FVerseTextRange>& Selection,
+	const FVerseDocumentSourceTransition& Transition) const
+{
+	if (!Selection.IsSet() || Selection->Revision != Transition.PreviousRevision)
+	{
+		return {};
+	}
+	int32 Begin = Selection->BeginByte;
+	int32 End = Selection->EndByte();
+	for (const FVerseDocumentTransitionEdit& Edit : Transition.Edits)
+	{
+		const int32 Delta = Edit.CurrentRange.NumBytes - Edit.PreviousRange.NumBytes;
+		if (Edit.PreviousRange.EndByte() <= Begin)
+		{
+			Begin += Delta;
+			End += Delta;
+		}
+		else if (Edit.PreviousRange.BeginByte >= End)
+		{
+			continue;
+		}
+		else if (Edit.PreviousRange.BeginByte >= Begin
+				&& Edit.PreviousRange.EndByte() <= End)
+		{
+			End += Delta;
+		}
+		else
+		{
+			return {};
+		}
+	}
+	return FVerseTextRange(Transition.CurrentRevision, {Begin, End - Begin});
+}
+
+void FVerseDocumentSession::RestoreHistoryState(
+	const FVerseEditBuffer& Buffer,
+	FVerseContentStateId StateId,
+	const TOptional<FVerseTextRange>& Selection,
+	TOptional<FVerseTextRange>& OutRestoredSelection)
+{
+	EditBuffer = Buffer;
+	ContentStateId = StateId;
+	++Revision.Value;
+	CurrentSelectionRange = RebaseSelection(Selection, Revision);
+	OutRestoredSelection = CurrentSelectionRange;
+	MaterializedSource.Reset();
+	LastSourceTransition.Reset();
+	RebuildDerivedRepresentations();
 }
 
 bool FVerseDocumentSession::SaveToFile(const FString& FilePath, FText& OutError)

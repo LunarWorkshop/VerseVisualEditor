@@ -583,6 +583,96 @@ bool FVerseOrderedClauseEditingTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseDocumentSessionUndoRedoTest,
+	"VerseVisualEditor.Foundation.DocumentSession.UndoRedo",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseDocumentSessionUndoRedoTest::RunTest(const FString& Parameters)
+{
+	using namespace VerseDocumentSessionTests;
+	const TSharedPtr<FVerseDocument> Document = MakeDocument(
+		*this,
+		UTF8TEXTVIEW("Alpha := class {}\n"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	FVerseDocumentSession Session(Document.ToSharedRef());
+	const FVerseVisualTile* InitialTile = Session.GetTiles().FindByPredicate(
+		[](const FVerseVisualTile& Tile)
+		{
+			return Tile.DefinitionKind == VerseSyntaxKind::Class;
+		});
+	if (!TestNotNull(TEXT("Initial class tile exists"), InitialTile))
+	{
+		return false;
+	}
+	Session.SetCurrentSelectionRange(InitialTile->Range);
+
+	FText Error;
+	TestTrue(TEXT("First rename succeeds"), Session.Replace(
+		FVerseTextRange(Session.GetRevision(), {0, 5}),
+		UTF8TEXTVIEW("Beta"),
+		Error));
+	const FString SavePath = FPaths::CreateTempFilename(
+		*FPaths::ProjectSavedDir(),
+		TEXT("VerseUndoRedo-"),
+		TEXT(".verse"));
+	TestTrue(TEXT("Edited content can establish a saved state"), Session.SaveToFile(SavePath, Error));
+	TestFalse(TEXT("Saving marks the current content state clean"), Session.IsDirty());
+	const FVerseContentStateId SavedState = Session.GetSavedContentStateId();
+
+	Session.SetCurrentSelectionRange(Session.GetTiles()[0].Range);
+	TestTrue(TEXT("Second rename succeeds"), Session.Replace(
+		FVerseTextRange(Session.GetRevision(), {0, 4}),
+		UTF8TEXTVIEW("Gamma"),
+		Error));
+	TestTrue(TEXT("A new edit is undoable"), Session.CanUndo());
+	TestFalse(TEXT("A new edit has no redo tail"), Session.CanRedo());
+	TestTrue(TEXT("Moving away from the saved content state is dirty"), Session.IsDirty());
+
+	TOptional<FVerseTextRange> RestoredSelection;
+	const uint64 BeforeUndoRevision = Session.GetRevision().Value;
+	TestTrue(TEXT("Undo succeeds"), Session.Undo(RestoredSelection));
+	TestEqual(TEXT("Undo restores the exact prior source"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("Beta := class {}\n"));
+	TestEqual(TEXT("Undo allocates a new monotonically increasing revision"),
+		Session.GetRevision().Value, BeforeUndoRevision + 1);
+	TestEqual(TEXT("Undo restores the saved content-state identity"),
+		Session.GetContentStateId().Value, SavedState.Value);
+	TestFalse(TEXT("Undoing back to the saved state is clean"), Session.IsDirty());
+	TestTrue(TEXT("Undo restores a selected range"), RestoredSelection.IsSet());
+	if (RestoredSelection.IsSet())
+	{
+		TestEqual(TEXT("Restored selection uses the new revision"),
+			RestoredSelection->Revision.Value, Session.GetRevision().Value);
+		TestTrue(TEXT("Restored selection resolves to a rebuilt tile"),
+			Session.GetTiles().ContainsByPredicate([&RestoredSelection](const FVerseVisualTile& Tile)
+			{
+				return Tile.Range == RestoredSelection.GetValue();
+			}));
+	}
+
+	const uint64 BeforeRedoRevision = Session.GetRevision().Value;
+	TestTrue(TEXT("Redo succeeds"), Session.Redo(RestoredSelection));
+	TestEqual(TEXT("Redo restores the exact later source"),
+		View(Session.GetCurrentUtf8()), UTF8TEXTVIEW("Gamma := class {}\n"));
+	TestEqual(TEXT("Redo also allocates a new revision"),
+		Session.GetRevision().Value, BeforeRedoRevision + 1);
+	TestTrue(TEXT("Redoing away from the saved state is dirty"), Session.IsDirty());
+
+	TestTrue(TEXT("Undo before divergent editing succeeds"), Session.Undo(RestoredSelection));
+	TestTrue(TEXT("Divergent edit succeeds"), Session.Replace(
+		FVerseTextRange(Session.GetRevision(), {0, 4}),
+		UTF8TEXTVIEW("Delta"),
+		Error));
+	TestFalse(TEXT("A divergent edit discards the redo tail"), Session.CanRedo());
+	IFileManager::Get().Delete(*SavePath, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FVerseControlBranchDeletionTest,
 	"VerseVisualEditor.Prototype.Functions.ControlBranchDeletion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

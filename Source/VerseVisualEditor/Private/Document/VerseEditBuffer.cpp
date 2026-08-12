@@ -14,6 +14,7 @@ namespace
 
 FVerseEditBuffer::FVerseEditBuffer(TSharedRef<const FVerseDocument> InOriginalDocument)
 	: OriginalDocument(MoveTemp(InOriginalDocument))
+	, AddedText(MakeShared<FUtf8String>())
 	, CurrentLength(OriginalDocument->GetOriginalUtf8View().Len())
 {
 	if (CurrentLength > 0)
@@ -57,8 +58,10 @@ bool FVerseEditBuffer::Replace(
 	AppendCurrentSlice(NewSpans, 0, CurrentRange.BeginByte);
 	if (!Replacement.IsEmpty())
 	{
-		const int32 AddedBegin = AddedText.Len();
-		AddedText.Append(Replacement);
+		// All history snapshots share this append-only backing store. Old spans
+		// remain immutable because they retain their original byte extents.
+		const int32 AddedBegin = AddedText->Len();
+		AddedText->Append(Replacement);
 		AppendCoalesced(
 			NewSpans,
 			{EVerseEditSpanSource::Added, AddedBegin, Replacement.Len()});
@@ -114,7 +117,7 @@ FUtf8StringView FVerseEditBuffer::GetBackingView(const FVerseEditSpan& Span) con
 {
 	const FUtf8StringView Backing = Span.Source == EVerseEditSpanSource::Original
 		? OriginalDocument->GetOriginalUtf8View()
-		: FUtf8StringView(*AddedText, AddedText.Len());
+		: FUtf8StringView(**AddedText, AddedText->Len());
 	return Backing.Mid(Span.BeginByte, Span.NumBytes);
 }
 

@@ -39,6 +39,12 @@ public:
 	bool Replace(FVerseTextRange Range, FUtf8StringView Replacement, FText& OutError);
 	/** Applies non-overlapping current-revision edits atomically as one revision. */
 	bool ReplaceMany(TConstArrayView<FVerseDocumentEdit> Edits, FText& OutError);
+	bool CanUndo() const { return HistoryCursor > 0; }
+	bool CanRedo() const { return HistoryCursor < History.Num(); }
+	bool Undo(TOptional<FVerseTextRange>& OutRestoredSelection);
+	bool Redo(TOptional<FVerseTextRange>& OutRestoredSelection);
+	/** Keeps the optional UI selection attached to the current history state. */
+	void SetCurrentSelectionRange(TOptional<FVerseTextRange> SelectionRange);
 	void Reload(TSharedRef<const FVerseDocument> InDocument);
 	bool SaveToFile(const FString& FilePath, FText& OutError);
 	TArray<uint8> BuildCurrentFileBytes() const;
@@ -60,6 +66,27 @@ public:
 	}
 
 private:
+	struct FHistoryEntry
+	{
+		FVerseEditBuffer BeforeBuffer;
+		FVerseContentStateId BeforeContentStateId;
+		TOptional<FVerseTextRange> BeforeSelection;
+		FVerseEditBuffer AfterBuffer;
+		FVerseContentStateId AfterContentStateId;
+		TOptional<FVerseTextRange> AfterSelection;
+	};
+
+	static TOptional<FVerseTextRange> RebaseSelection(
+		const TOptional<FVerseTextRange>& Selection,
+		FVerseDocumentRevision Revision);
+	TOptional<FVerseTextRange> TransformSelectionForward(
+		const TOptional<FVerseTextRange>& Selection,
+		const FVerseDocumentSourceTransition& Transition) const;
+	void RestoreHistoryState(
+		const FVerseEditBuffer& Buffer,
+		FVerseContentStateId StateId,
+		const TOptional<FVerseTextRange>& Selection,
+		TOptional<FVerseTextRange>& OutRestoredSelection);
 	void RebuildDerivedRepresentations();
 
 	TSharedRef<const FVerseDocument> OriginalDocument;
@@ -67,6 +94,10 @@ private:
 	FVerseDocumentRevision Revision;
 	FVerseContentStateId ContentStateId;
 	FVerseContentStateId SavedContentStateId;
+	uint64 NextContentStateValue = 0;
+	TArray<FHistoryEntry> History;
+	int32 HistoryCursor = 0;
+	TOptional<FVerseTextRange> CurrentSelectionRange;
 	mutable TOptional<FUtf8String> MaterializedSource;
 	mutable uint32 MaterializationCount = 0;
 	TSharedPtr<const FVerseDocument> CurrentSourceDocument;
