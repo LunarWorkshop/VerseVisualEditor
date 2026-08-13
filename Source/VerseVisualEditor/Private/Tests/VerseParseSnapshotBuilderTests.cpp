@@ -59,6 +59,8 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestFalse(TEXT("Raw region has no header range"), Region.HeaderRange.IsSet());
 				Test.TestFalse(TEXT("Raw region has no body range"), Region.BodyRange.IsSet());
 				Test.TestTrue(TEXT("Raw region has no comment kind"), Region.CommentKind == EVerseCommentKind::None);
+				Test.TestEqual(TEXT("Raw region has no comment attachment"), Region.CommentAttachment, EVerseCommentAttachment::None);
+				Test.TestFalse(TEXT("Raw region has no comment owner"), Region.CommentOwnerRange.IsSet());
 			}
 			else if (Region.Kind == EVerseSourceRegionKind::Comment)
 			{
@@ -69,6 +71,11 @@ namespace VerseParseSnapshotBuilderTests
 				Test.TestFalse(TEXT("Comment region has no header range"), Region.HeaderRange.IsSet());
 				Test.TestEqual(TEXT("Comment body is its complete source"), Region.BodyRange, Region.Range);
 				Test.TestTrue(TEXT("Comment region retains its parser comment kind"), Region.CommentKind != EVerseCommentKind::None);
+				Test.TestTrue(TEXT("Comment region retains its parser attachment"), Region.CommentAttachment != EVerseCommentAttachment::None);
+				Test.TestEqual(
+					TEXT("Only attached comments have an owner range"),
+					Region.CommentOwnerRange.IsSet(),
+					Region.CommentAttachment != EVerseCommentAttachment::Unattached);
 			}
 			else
 			{
@@ -122,6 +129,41 @@ namespace VerseParseSnapshotBuilderTests
 			if (const FVerseSourceRegion* Nested = FindTypedRegion(Snapshot, Region.Children, Name))
 			{
 				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
+	const FVerseSourceRegion* FindCommentRegion(
+		const FVerseParseSnapshot& Snapshot,
+		TConstArrayView<FVerseSourceRegion> Regions,
+		FUtf8StringView Text)
+	{
+		for (const FVerseSourceRegion& Region : Regions)
+		{
+			if (Region.Kind == EVerseSourceRegionKind::Comment
+				&& Snapshot.GetSourceView(Region) == Text)
+			{
+				return &Region;
+			}
+			if (const FVerseSourceRegion* Nested = FindCommentRegion(Snapshot, Region.Children, Text))
+			{
+				return Nested;
+			}
+		}
+		return nullptr;
+	}
+
+	const FVerseCommentDescriptor* FindItemComment(
+		const FVerseParseSnapshot& Snapshot,
+		TConstArrayView<FVerseCommentDescriptor> Comments,
+		FUtf8StringView Text)
+	{
+		for (const FVerseCommentDescriptor& Comment : Comments)
+		{
+			if (Snapshot.GetSourceView(Comment.Range) == Text)
+			{
+				return &Comment;
 			}
 		}
 		return nullptr;
@@ -336,6 +378,96 @@ bool FVerseInvalidNestedBodyRetentionTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Invalid nested source remains byte-for-byte recoverable"),
 		Snapshot.GetDocument()->GetOriginalUtf8View() == Document->GetOriginalUtf8View());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FVerseCommentOwnershipTest,
+	"VerseVisualEditor.Foundation.NestedBodies.CommentOwnership",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVerseCommentOwnershipTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<FVerseDocument> Document = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this,
+		TEXT("comment_ownership.verse"));
+	if (!Document.IsValid())
+	{
+		return false;
+	}
+
+	const FVerseParseSnapshot Snapshot = FVerseParseSnapshotBuilder::Build(Document.ToSharedRef());
+	VerseParseSnapshotBuilderTests::TestCompleteCoverage(*this, Snapshot);
+	const FVerseSourceRegion* Function = VerseParseSnapshotBuilderTests::FindTypedRegion(
+		Snapshot,
+		Snapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("CommentOwnership"));
+	if (!TestNotNull(TEXT("Comment ownership fixture function is recognized"), Function)
+		|| !TestTrue(TEXT("Function retains its ordered expressions"), Function->BodyClause.Items.Num() >= 2))
+	{
+		return false;
+	}
+
+	const FVerseClauseItemDescriptor& First = Function->BodyClause.Items[0];
+	const FVerseCommentDescriptor* Prefix = VerseParseSnapshotBuilderTests::FindItemComment(
+		Snapshot, First.Comments, UTF8TEXTVIEW("# prefix first"));
+	const FVerseCommentDescriptor* Postfix = VerseParseSnapshotBuilderTests::FindItemComment(
+		Snapshot, First.Comments, UTF8TEXTVIEW("# postfix first"));
+	if (TestNotNull(TEXT("Prefix comment is associated with its clause item"), Prefix))
+	{
+		TestEqual(TEXT("Prefix ownership comes from the VST"), Prefix->Attachment, EVerseCommentAttachment::Prefix);
+	}
+	if (TestNotNull(TEXT("Postfix comment is associated with its clause item"), Postfix))
+	{
+		TestEqual(TEXT("Postfix ownership comes from the VST"), Postfix->Attachment, EVerseCommentAttachment::Postfix);
+	}
+
+	const FVerseExpressionDescriptor& IfExpression = Function->BodyClause.Items[1].Expression;
+	const FVerseExpressionControlRegion* Body = IfExpression.ControlRegions.FindByPredicate(
+		[](const FVerseExpressionControlRegion& Region)
+		{
+			return Region.Kind == EVerseControlRegionKind::Body;
+		});
+	if (TestNotNull(TEXT("Nested if body is represented"), Body)
+		&& TestTrue(TEXT("Nested if body retains its first item"), !Body->Items.IsEmpty()))
+	{
+		const FVerseExpressionControlItem& Nested = Body->Items[0];
+		const FVerseCommentDescriptor* NestedPrefix = VerseParseSnapshotBuilderTests::FindItemComment(
+			Snapshot, Nested.Comments, UTF8TEXTVIEW("# prefix nested"));
+		const FVerseCommentDescriptor* Inline = VerseParseSnapshotBuilderTests::FindItemComment(
+			Snapshot, Nested.Comments, UTF8TEXTVIEW("<# inline nested #>"));
+		if (TestNotNull(TEXT("Nested prefix comment remains owned by the nested item"), NestedPrefix))
+		{
+			TestEqual(TEXT("Nested prefix remains a prefix"), NestedPrefix->Attachment, EVerseCommentAttachment::Prefix);
+		}
+		if (TestNotNull(TEXT("Descendant comment is associated with the containing item"), Inline))
+		{
+			TestEqual(TEXT("Descendant comment is classified inline"), Inline->Attachment, EVerseCommentAttachment::Inline);
+		}
+	}
+
+	TSharedPtr<FVerseDocument> CommentOnlyDocument = VerseParseSnapshotBuilderTests::LoadFixture(
+		*this,
+		TEXT("comment_only.verse"));
+	if (!CommentOnlyDocument.IsValid())
+	{
+		return false;
+	}
+	const FVerseParseSnapshot CommentOnlySnapshot = FVerseParseSnapshotBuilder::Build(
+		CommentOnlyDocument.ToSharedRef());
+	VerseParseSnapshotBuilderTests::TestCompleteCoverage(*this, CommentOnlySnapshot);
+	const FVerseSourceRegion* Unattached = VerseParseSnapshotBuilderTests::FindCommentRegion(
+		CommentOnlySnapshot,
+		CommentOnlySnapshot.GetSourceRegions(),
+		UTF8TEXTVIEW("# unattached comment-only source"));
+	if (TestNotNull(TEXT("Standalone empty-clause comment remains partitioned"), Unattached))
+	{
+		TestEqual(
+			TEXT("Standalone comment is not guessed onto another expression"),
+			Unattached->CommentAttachment,
+			EVerseCommentAttachment::Unattached);
+		TestFalse(TEXT("Unattached comment has no invented owner range"), Unattached->CommentOwnerRange.IsSet());
+	}
 	return true;
 }
 

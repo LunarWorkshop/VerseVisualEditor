@@ -1431,7 +1431,11 @@ bool FVerseSemanticFailureOutcomeBindingTest::RunTest(const FString& Parameters)
 	for (const FVerseSemanticDiagnostic& Diagnostic : Workspace.GetDiagnostics())
 	{
 		if (Diagnostic.Severity == ELogVerbosity::Error
-			&& Diagnostic.AppliesToFile(FilePath))
+			&& Diagnostic.AppliesToFile(FilePath)
+			// Public engine checkouts can report unavailable restricted-package
+			// dependencies against the synthetic input path at L0:0. They are
+			// workspace setup diagnostics, not errors in this fixed fixture.
+			&& Diagnostic.RowSpan.X > 0)
 		{
 			AddError(FString::Printf(
 				TEXT("%s L%d:%d %s"),

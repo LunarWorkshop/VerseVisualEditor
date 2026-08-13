@@ -179,6 +179,107 @@ namespace VerseParseSnapshotBuilder
 		}
 	}
 
+	void AddCommentDescriptor(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		EVerseCommentAttachment Attachment,
+		TSet<const Verse::Vst::Node*>& VisitedComments,
+		TArray<FVerseCommentDescriptor>& OutComments)
+	{
+		if (VisitedComments.Contains(&Node))
+		{
+			return;
+		}
+		VisitedComments.Add(&Node);
+
+		const Verse::Vst::Comment* Comment = Node.AsNullable<Verse::Vst::Comment>();
+		if (Comment == nullptr)
+		{
+			return;
+		}
+		const FVerseByteRange Range = SourceIndex.ToRange(Comment->Whence());
+		if (!Range.IsSet() || Range.NumBytes <= 0)
+		{
+			return;
+		}
+
+		FVerseCommentDescriptor& Descriptor = OutComments.AddDefaulted_GetRef();
+		Descriptor.Range = Range;
+		Descriptor.Kind = ToCommentKind(Comment->_Type);
+		Descriptor.Attachment = Attachment;
+	}
+
+	void CollectItemCommentDescriptors(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		bool bAtItemBoundary,
+		TSet<const Verse::Vst::Node*>& VisitedComments,
+		TArray<FVerseCommentDescriptor>& OutComments)
+	{
+		// The parser has already decided ownership. Comments on the ordered
+		// expression itself are prefix/postfix; comments owned by a descendant
+		// are inline with respect to the ordered item. A direct comment child of
+		// a clause is deliberately not claimed by either neighboring item.
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPrefixComments())
+		{
+			AddCommentDescriptor(
+				*Comment,
+				SourceIndex,
+				bAtItemBoundary ? EVerseCommentAttachment::Prefix : EVerseCommentAttachment::Inline,
+				VisitedComments,
+				OutComments);
+		}
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPostfixComments())
+		{
+			AddCommentDescriptor(
+				*Comment,
+				SourceIndex,
+				bAtItemBoundary ? EVerseCommentAttachment::Postfix : EVerseCommentAttachment::Inline,
+				VisitedComments,
+				OutComments);
+		}
+
+		if (Node.GetAux())
+		{
+			CollectItemCommentDescriptors(
+				*Node.GetAux(), SourceIndex, false, VisitedComments, OutComments);
+		}
+
+		int32 NonCommentChildCount = 0;
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			NonCommentChildCount += Child->IsA<Verse::Vst::Comment>() ? 0 : 1;
+		}
+		const bool bTransparentSingleClause = bAtItemBoundary
+			&& Node.IsA<Verse::Vst::Clause>()
+			&& NonCommentChildCount == 1;
+		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
+		{
+			if (!Child->IsA<Verse::Vst::Comment>())
+			{
+				CollectItemCommentDescriptors(
+					*Child,
+					SourceIndex,
+					bTransparentSingleClause,
+					VisitedComments,
+					OutComments);
+			}
+		}
+	}
+
+	void CollectItemCommentDescriptors(
+		const Verse::Vst::Node& Node,
+		const FSourceIndex& SourceIndex,
+		TArray<FVerseCommentDescriptor>& OutComments)
+	{
+		TSet<const Verse::Vst::Node*> VisitedComments;
+		CollectItemCommentDescriptors(Node, SourceIndex, true, VisitedComments, OutComments);
+		OutComments.Sort([](const FVerseCommentDescriptor& Left, const FVerseCommentDescriptor& Right)
+		{
+			return Left.Range.BeginByte < Right.Range.BeginByte;
+		});
+	}
+
 	bool TryMakeTypedRegion(
 		const Verse::Vst::Node& Node,
 		const FSourceIndex& SourceIndex,
@@ -1051,16 +1152,19 @@ namespace VerseParseSnapshotBuilder
 							Operand.Operands.Add(BuildWrappedExpressionDescriptor(
 								*Generator->GetRhs(), SourceIndex, Parameters));
 						}
+						}
+						Result.Operands.Add(MoveTemp(Operand));
+						FVerseExpressionControlItem& ParsedItem = Region.Items.AddDefaulted_GetRef();
+						CollectItemCommentDescriptors(*Child, SourceIndex, ParsedItem.Comments);
 					}
-					Result.Operands.Add(MoveTemp(Operand));
 				}
-			}
-			Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;
+				Region.OperandCount = Result.Operands.Num() - Region.FirstOperandIndex;
 			for (int32 Offset = 0; Offset < Region.OperandCount; ++Offset)
 			{
 				const int32 OperandIndex = Region.FirstOperandIndex + Offset;
 				const FVerseByteRange ExpressionRange = Result.Operands[OperandIndex].Range;
-				FVerseExpressionControlItem& Item = Region.Items.AddDefaulted_GetRef();
+					check(Region.Items.IsValidIndex(Offset));
+					FVerseExpressionControlItem& Item = Region.Items[Offset];
 				Item.ExpressionRange = ExpressionRange;
 				const int32 LeadingBegin = Offset == 0
 					? Region.InteriorRange.BeginByte
@@ -1569,6 +1673,7 @@ namespace VerseParseSnapshotBuilder
 				*Expression,
 				SourceIndex,
 				OutRegion.FunctionParameters);
+			CollectItemCommentDescriptors(*Expression, SourceIndex, Item.Comments);
 		}
 
 		TArray<FVerseClauseItemDescriptor>& Items = OutRegion.BodyClause.Items;
@@ -1652,7 +1757,9 @@ namespace VerseParseSnapshotBuilder
 		const Verse::Vst::Node& Node,
 		const FSourceIndex& SourceIndex,
 		TSet<const Verse::Vst::Node*>& VisitedNodes,
-		TArray<FVerseSourceRegion>& OutRegions)
+		TArray<FVerseSourceRegion>& OutRegions,
+		EVerseCommentAttachment DirectAttachment = EVerseCommentAttachment::Unattached,
+		FVerseByteRange DirectOwnerRange = {})
 	{
 		if (VisitedNodes.Contains(&Node))
 		{
@@ -1670,25 +1777,55 @@ namespace VerseParseSnapshotBuilder
 				Region.Kind = EVerseSourceRegionKind::Comment;
 				Region.BodyRange = Range;
 				Region.CommentKind = ToCommentKind(Comment->_Type);
+				Region.CommentAttachment = DirectAttachment;
+				Region.CommentOwnerRange = DirectAttachment == EVerseCommentAttachment::Unattached
+					? FVerseByteRange()
+					: DirectOwnerRange;
 			}
 			return;
 		}
 
+		const FVerseByteRange OwnerRange = SourceIndex.ToRange(Node.Whence());
+
 		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPrefixComments())
 		{
-			CollectCommentRegions(*Comment, SourceIndex, VisitedNodes, OutRegions);
+			CollectCommentRegions(
+				*Comment,
+				SourceIndex,
+				VisitedNodes,
+				OutRegions,
+				EVerseCommentAttachment::Prefix,
+				OwnerRange);
 		}
 		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Comment : Node.GetPostfixComments())
 		{
-			CollectCommentRegions(*Comment, SourceIndex, VisitedNodes, OutRegions);
+			CollectCommentRegions(
+				*Comment,
+				SourceIndex,
+				VisitedNodes,
+				OutRegions,
+				EVerseCommentAttachment::Postfix,
+				OwnerRange);
 		}
 		if (Node.GetAux())
 		{
-			CollectCommentRegions(*Node.GetAux(), SourceIndex, VisitedNodes, OutRegions);
+			CollectCommentRegions(
+				*Node.GetAux(),
+				SourceIndex,
+				VisitedNodes,
+				OutRegions,
+				EVerseCommentAttachment::Inline,
+				OwnerRange);
 		}
 		for (const Verse::Vst::TNodeRef<Verse::Vst::Node>& Child : Node.GetChildren())
 		{
-			CollectCommentRegions(*Child, SourceIndex, VisitedNodes, OutRegions);
+			CollectCommentRegions(
+				*Child,
+				SourceIndex,
+				VisitedNodes,
+				OutRegions,
+				EVerseCommentAttachment::Unattached,
+				{});
 		}
 	}
 

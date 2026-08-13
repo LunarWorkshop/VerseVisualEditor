@@ -252,6 +252,13 @@ struct FVerseVisualSeparatorDescriptor
 	bool bIsEndOfClause = false;
 };
 
+struct FVerseVisualCommentDescriptor
+{
+	FVerseTextRange Range;
+	EVerseCommentKind Kind = EVerseCommentKind::None;
+	EVerseCommentAttachment Attachment = EVerseCommentAttachment::None;
+};
+
 struct FVerseVisualExpressionDescriptor
 {
 	FVerseTextRange Range;
@@ -292,6 +299,7 @@ struct FVerseVisualExpressionDescriptor
 			FVerseTextRange ExpressionRange;
 			FVerseTextRange LeadingTriviaRange;
 			FVerseTextRange TrailingTriviaRange;
+			TArray<FVerseVisualCommentDescriptor> Comments;
 			FVerseVisualSeparatorDescriptor Separator;
 		};
 
@@ -330,6 +338,7 @@ struct FVerseVisualClauseItemDescriptor
 	FVerseVisualExpressionDescriptor Expression;
 	FVerseTextRange LeadingTriviaRange;
 	FVerseTextRange TrailingTriviaRange;
+	TArray<FVerseVisualCommentDescriptor> Comments;
 	FVerseVisualSeparatorDescriptor Separator;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;

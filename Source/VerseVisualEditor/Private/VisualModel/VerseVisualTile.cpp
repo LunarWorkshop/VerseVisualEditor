@@ -168,6 +168,21 @@ namespace
 		return Result;
 	}
 
+	void AppendVisualComments(
+		TConstArrayView<FVerseCommentDescriptor> Comments,
+		FVerseDocumentRevision Revision,
+		TArray<FVerseVisualCommentDescriptor>& OutComments)
+	{
+		OutComments.Reserve(OutComments.Num() + Comments.Num());
+		for (const FVerseCommentDescriptor& Comment : Comments)
+		{
+			FVerseVisualCommentDescriptor& VisualComment = OutComments.AddDefaulted_GetRef();
+			VisualComment.Range = MakeTextRange(Revision, Comment.Range);
+			VisualComment.Kind = Comment.Kind;
+			VisualComment.Attachment = Comment.Attachment;
+		}
+	}
+
 	FVerseVisualExpressionDescriptor MakeVisualExpressionDescriptor(
 		const FVerseExpressionDescriptor& Expression,
 		FVerseDocumentRevision Revision)
@@ -234,6 +249,7 @@ namespace
 					MakeTextRange(Revision, Item.LeadingTriviaRange);
 				VisualItem.TrailingTriviaRange =
 					MakeTextRange(Revision, Item.TrailingTriviaRange);
+				AppendVisualComments(Item.Comments, Revision, VisualItem.Comments);
 				VisualItem.Separator = MakeVisualSeparator(Item.Separator, Revision);
 			}
 		}
@@ -263,6 +279,7 @@ namespace
 			VisualItem.Expression = MakeVisualExpressionDescriptor(Item.Expression, Revision);
 			VisualItem.LeadingTriviaRange = MakeTextRange(Revision, Item.LeadingTriviaRange);
 			VisualItem.TrailingTriviaRange = MakeTextRange(Revision, Item.TrailingTriviaRange);
+			AppendVisualComments(Item.Comments, Revision, VisualItem.Comments);
 			VisualItem.Separator = MakeVisualSeparator(Item.Separator, Revision);
 			VisualItem.ExtraBlankLineCount = Item.ExtraBlankLineCount;
 			VisualItem.bIsFinalValuePosition = Item.bIsFinalValuePosition;
@@ -296,6 +313,7 @@ namespace
 			{
 				Item.LeadingTriviaRange = Region.Items[Offset].LeadingTriviaRange;
 				Item.TrailingTriviaRange = Region.Items[Offset].TrailingTriviaRange;
+				Item.Comments = Region.Items[Offset].Comments;
 				Item.Separator = Region.Items[Offset].Separator;
 			}
 		}

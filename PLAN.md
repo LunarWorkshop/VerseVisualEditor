@@ -959,10 +959,23 @@ introduced immediately beforehand.
 
 ### 6. Comments
 
-- Support for adding/removing/changing/etc comments. Needs a plan, which may be complicated because of inline comments.
-- Preserve VST comment attachment and comment type while partitioning nested
-  bodies. Inline, prefix, and postfix comments must become children or raw gaps
-  of the appropriate clause without scanning body text for comment syntax.
+#### 6.1. VST comment ownership and source partitioning (complete)
+
+- Preserve the official VST's prefix, postfix, inline, and unattached comment
+  relationships in the parse snapshot and visual clause model.
+- Associate owned comments with ordered function and control-clause items.
+- Keep direct standalone clause comments independently partitioned rather than
+  guessing that either neighboring expression owns them.
+- Preserve exact comment kinds and UTF-8 ranges without scanning source text for
+  comment syntax.
+- Cover nested prefix, postfix, inline, and comment-only source with fixed
+  fixtures.
+
+#### 6.2. Comment editing
+
+- Support adding, removing, changing, and repositioning comments. This still
+  needs a dedicated interaction and source-editing plan, particularly for inline
+  comments.
 
 ### 7. Enum contents
 

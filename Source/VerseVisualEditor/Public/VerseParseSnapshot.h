@@ -37,6 +37,24 @@ enum class EVerseClauseDelimiter : uint8
 	Dot,
 };
 
+/** Parser-owned relationship between a comment and its surrounding VST node. */
+enum class EVerseCommentAttachment : uint8
+{
+	None,
+	Prefix,
+	Postfix,
+	Inline,
+	Unattached,
+};
+
+/** Source-exact comment attached to an ordered expression by the official VST. */
+struct VERSEVISUALEDITOR_API FVerseCommentDescriptor
+{
+	FVerseByteRange Range;
+	EVerseCommentKind Kind = EVerseCommentKind::None;
+	EVerseCommentAttachment Attachment = EVerseCommentAttachment::None;
+};
+
 enum class EVerseClauseKeyword : uint8
 {
 	None,
@@ -148,6 +166,7 @@ struct VERSEVISUALEDITOR_API FVerseExpressionControlItem
 	FVerseByteRange ExpressionRange;
 	FVerseByteRange LeadingTriviaRange;
 	FVerseByteRange TrailingTriviaRange;
+	TArray<FVerseCommentDescriptor> Comments;
 	FVerseSeparatorDescriptor Separator;
 };
 
@@ -239,6 +258,7 @@ struct VERSEVISUALEDITOR_API FVerseClauseItemDescriptor
 	FVerseExpressionDescriptor Expression;
 	FVerseByteRange LeadingTriviaRange;
 	FVerseByteRange TrailingTriviaRange;
+	TArray<FVerseCommentDescriptor> Comments;
 	FVerseSeparatorDescriptor Separator;
 	int32 ExtraBlankLineCount = 0;
 	bool bIsFinalValuePosition = false;
@@ -292,6 +312,9 @@ struct VERSEVISUALEDITOR_API FVerseSourceRegion
 	/** Complete ordered coverage of BodyRange, recursively derived from VST clause children. */
 	TArray<FVerseSourceRegion> Children;
 	EVerseCommentKind CommentKind = EVerseCommentKind::None;
+	EVerseCommentAttachment CommentAttachment = EVerseCommentAttachment::None;
+	/** VST node that owns this comment. Unset for unattached comments. */
+	FVerseByteRange CommentOwnerRange;
 };
 
 /**
