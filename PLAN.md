@@ -56,7 +56,18 @@ encodings will be added after UTF-8 round-trip preservation is reliable.
 - Modules: complete; module tiles render VST-derived nested definitions and raw
   gaps recursively, display append specifiers, and retain independent source
   ranges at every nesting level.
-- Subsequent visual editing steps: pending.
+- Failable `if` predicates: complete; reusable ordered failure contexts,
+  failure-aware sockets and wires, scoped predicate bindings, and localized
+  predicate editing are implemented.
+- Failable `for` filters and generators: complete; ordered generator/filter
+  contexts, generator creation and editing, map bindings, declaration-order
+  visibility, and body-scoped boundary outputs are implemented.
+- Undo and redo: complete; append-only shared source snapshots, selection
+  restoration, saved-state identity, redo-tail truncation, and standard editor
+  commands are implemented.
+- Atomic multi-edit transactions: complete; named, revision-checked localized
+  edits validate and commit atomically as one revision and one history entry.
+- Remaining prototype work begins with failable `<decides>` function bodies.
 
 ## Architecture
 
@@ -216,7 +227,7 @@ prompts are deferred to Step 5.2, when local edits and saving first exist.
 - Save the tabs that are open and their scroll status (don't care about cursor since that won't be a hting later) and open them when the editor starts again
 - open the tree to the file that was just opened whenever the file is opened, including when you open for the first time and files are auto opened
 
-### 2. Global scope view
+### 2. Global scope view (complete)
 
 #### 2.1 Revision-neutral parse snapshot (complete)
 
@@ -292,7 +303,7 @@ This step delivers the first read-only visual representation of Verse source.
 
 Do not add edit transactions or selection-history snapshots until Step 5.
 
-### 5. Global-scope modifications
+### 5. Global-scope modifications (complete)
 
 #### 5.1 Editable source and revision pipeline (complete)
 
@@ -440,7 +451,7 @@ This step delivers the first complete edit-and-save workflow.
   label. The source range remains authoritative for future localized editing;
   tiles do not keep serialized source copies.
 
-### 11. Expression search and compiler-driven semantics
+### 11. Expression search and compiler-driven semantics (complete)
 
 #### 11.1 Revision-specific semantic workspace (complete)
 
@@ -621,7 +632,7 @@ This step delivers the first complete edit-and-save workflow.
 - Preserve and expose supported formatting variations.
 - Add whitespace properties for choosing among supported body styles.
 
-### 16. Failable `if` predicates
+### 16. Failable `if` predicates (complete)
 
 Implement the reusable failure-context foundation through `if` first. Each
 substep must leave a visible, usable result and must be completed in order.
@@ -752,11 +763,11 @@ inside the True body.
 This slice makes the `if` predicate block directly editable with the same
 workflow used elsewhere in the function graph.
 
-### 17. Failable `for` filters and generators
+### 17. Failable `for` filters and generators (complete)
 
 Implement `for` as the next prototype owner after the `if` foundation.
 
-#### 17.1. Render the ordered `for` failure context
+#### 17.1. Render the ordered `for` failure context (complete)
 
 - Derive the `for` filter list, exact ranges, separators, punctuation,
   insertion points, and body range directly from the VST.
@@ -772,7 +783,7 @@ Implement `for` as the next prototype owner after the `if` foundation.
 
 This slice gives existing `for` expressions their final predicate layout.
 
-#### 17.2. Create and edit generators
+#### 17.2. Create and edit generators (complete)
 
 - Offer generator creation through the ordinary context menu and tile workflow;
   do not introduce a dedicated generator dialog.
@@ -791,7 +802,7 @@ This slice gives existing `for` expressions their final predicate layout.
 
 This slice lets a user visibly create a valid generator without typing Verse.
 
-#### 17.3. Expose generator and filter bindings
+#### 17.3. Expose generator and filter bindings (complete)
 
 - Record generator and predicate bindings with compiler identity, type,
   declaration range, and precise validity interval.
@@ -874,7 +885,7 @@ This step owns the transition from single-selection to multi-selection state.
 ##### Further work
 - UI options to compile the open file or all files immediately
 
-### 2. Undo and redo
+### 2. Undo and redo (complete)
 
 - Add linear command history using lightweight before and after span snapshots
   that share the original and added UTF-8 buffers.
@@ -1017,7 +1028,7 @@ introduced immediately beforehand.
   gaps from the interface VST body while retaining the parent interior range
   for empty-body insertion and trivia preservation.
 
-### 12. Literal expressions (completed)
+### 12. Literal expressions (complete)
 
 - Add literal entries for each supported primitive type.
 - Provide type-appropriate inline and property-panel editors.
