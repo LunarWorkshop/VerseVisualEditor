@@ -7,6 +7,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -81,6 +82,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FVerseEditorTabSpawnerTest::RunTest(const FString& Parameters)
 {
+	UToolMenu* VerseMenu = UToolMenus::Get()->FindMenu(TEXT("LevelEditor.MainMenu.Verse"));
+	FToolMenuSection* VerseTools = VerseMenu != nullptr
+		? VerseMenu->FindSection(TEXT("Tools"))
+		: nullptr;
+	TestTrue(
+		TEXT("Verse Visual Editor entry extends the existing Verse menu"),
+		VerseTools != nullptr && VerseTools->FindEntry(TEXT("VerseVisualEditor")) != nullptr);
+
 	if (!TestTrue(
 		TEXT("Verse Visual Editor nomad tab is registered"),
 		FGlobalTabmanager::Get()->HasTabSpawner(TEXT("VerseVisualEditor"))))

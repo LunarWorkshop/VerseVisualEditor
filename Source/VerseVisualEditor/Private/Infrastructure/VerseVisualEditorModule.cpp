@@ -24,6 +24,7 @@
 namespace VerseVisualEditorModule
 {
 	const FName MainTabId(TEXT("VerseVisualEditor"));
+	const FName LevelEditorVerseMenuName(TEXT("LevelEditor.MainMenu.Verse"));
 	const FName MainMenuName(TEXT("VerseVisualEditor.MainMenu"));
 	const FName FileMenuName(TEXT("VerseVisualEditor.MainMenu.File"));
 }
@@ -68,6 +69,7 @@ void FVerseVisualEditorModule::StartupModule()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		VerseVisualEditorModule::MainTabId,
 		FOnSpawnTab::CreateRaw(this, &FVerseVisualEditorModule::SpawnVerseVisualEditorTab))
+		.SetAutoGenerateMenuEntry(false)
 		.SetDisplayName(LOCTEXT("MainTabTitle", "Verse Visual Editor"))
 		.SetTooltipText(LOCTEXT("MainTabTooltip", "Open the Verse Visual Editor."))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory())
@@ -107,6 +109,20 @@ void FVerseVisualEditorModule::RegisterMenus()
 {
 	FToolMenuOwnerScoped OwnerScoped(this);
 	UToolMenus* ToolMenus = UToolMenus::Get();
+	UToolMenu* VerseMenu = ToolMenus->ExtendMenu(VerseVisualEditorModule::LevelEditorVerseMenuName);
+	FToolMenuSection& VerseToolsSection = VerseMenu->FindOrAddSection(
+		TEXT("Tools"),
+		LOCTEXT("VerseToolsSection", "Tools"));
+	VerseToolsSection.AddMenuEntry(
+		VerseVisualEditorModule::MainTabId,
+		LOCTEXT("OpenVerseVisualEditor", "Verse Visual Editor"),
+		LOCTEXT("OpenVerseVisualEditorTooltip", "Open the Verse Visual Editor."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
+		FUIAction(FExecuteAction::CreateLambda([]
+		{
+			FGlobalTabmanager::Get()->TryInvokeTab(FTabId(VerseVisualEditorModule::MainTabId));
+		})));
+
 	ToolMenus->RegisterMenu(
 		VerseVisualEditorModule::MainMenuName,
 		TEXT("MainFrame.MainMenu"),
